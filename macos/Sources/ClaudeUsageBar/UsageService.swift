@@ -13,6 +13,7 @@ class UsageService: ObservableObject {
 
     var historyService: UsageHistoryService?
     var notificationService: NotificationService?
+    var snapshotStore: UsageSnapshotStore?
 
     private var timer: Timer?
     private let session: URLSession
@@ -230,6 +231,7 @@ class UsageService: ObservableObject {
 
     func signOut() {
         deleteCredentials()
+        snapshotStore?.remove(provider: "claude")
         isAuthenticated = false
         usage = nil
         lastUpdated = nil
@@ -290,6 +292,10 @@ class UsageService: ObservableObject {
             lastUpdated = Date()
             historyService?.recordDataPoint(pct5h: pct5h, pct7d: pct7d)
             notificationService?.checkAndNotify(pct5h: pct5h, pct7d: pct7d, pctExtra: pctExtra)
+            snapshotStore?.update(
+                provider: "claude",
+                metrics: UsageSnapshotStore.claudeMetrics(for: reconciled)
+            )
             if currentInterval != baseInterval {
                 currentInterval = baseInterval
                 scheduleTimer()
@@ -574,6 +580,7 @@ class UsageService: ObservableObject {
 
     private func expireSession() {
         deleteCredentials()
+        snapshotStore?.remove(provider: "claude")
         isAuthenticated = false
         usage = nil
         lastUpdated = nil
