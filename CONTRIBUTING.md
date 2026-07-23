@@ -47,7 +47,9 @@ Sources/ClaudeUsageBar/
 
 ## Publishing releases
 
-Releases are tag-driven. Pushing a `v*` tag triggers the GitHub Actions workflow that:
+Merging a PR into `main` runs Build first. When Build succeeds, Version bump creates the next `v*` tag and starts Release (via `workflow_dispatch`, because tag pushes from `GITHUB_TOKEN` do not trigger other workflows). Gemini classifies the bump as major/minor/patch from recent commits (override with `[major]`, `[minor]`, or `[patch]` in the merge commit subject). Add a `skip-release` label to a PR to skip tagging.
+
+The release workflow then:
 
 - builds the release app bundle once
 - produces both a ZIP (for Sparkle) and a DMG (for manual drag-to-Applications installs)
@@ -61,6 +63,7 @@ One-time repository setup:
 
 1. Enable GitHub Pages with source `GitHub Actions`
 2. Add the `SPARKLE_PRIVATE_KEY` repository secret
+3. Add the `GEMINI_API_KEY` repository secret (used by the version-bump workflow)
 
 Local source builds intentionally leave `SUFeedURL` unset, so Sparkle stays disabled unless your packaging flow injects a feed URL. This prevents forks and dev builds from auto-updating to upstream releases.
 
