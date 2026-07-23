@@ -8,10 +8,10 @@ Keep Claude, OpenAI/Codex, and Cursor subscription usage visible from one small 
 
 Now it's just a glimpse away — always sitting at the top of your screen.
 
-<p align="center">
-  <img src="macos/Resources/usage-demo--claude.png" width="384" alt="Agent Usage Bar demo">
-  <img src="macos/Resources/usage-demo--codex.png" width="384" alt="Agent Usage Bar demo">
-  <img src="macos/Resources/usage-demo--cursor.png" width="384" alt="Agent Usage Bar demo">
+<p style="display: flex; flex-direction: row; gap: 10px; align-items: flex-start;">
+  <img src="macos/Resources/usage-demo--claude.png" width="384" alt="Agent Usage Bar demo" style="width: 100%; height: auto; display: block;">
+  <img src="macos/Resources/usage-demo--codex.png" width="384" alt="Agent Usage Bar demo" style="width: 100%; height: auto; display: block;">
+  <img src="macos/Resources/usage-demo--cursor.png" width="384" alt="Agent Usage Bar demo" style="width: 100%; height: auto; display: block;">
 </p>
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
