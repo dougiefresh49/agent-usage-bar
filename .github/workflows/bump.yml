@@ -1,13 +1,15 @@
 name: Version bump
 
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - main
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
+  actions: write
+  pull-requests: read
 
 concurrency:
   group: version-bump-main
@@ -17,18 +19,46 @@ jobs:
   bump:
     name: Create version tag
     if: >
-      github.event.pull_request.merged == true &&
-      !contains(github.event.pull_request.labels.*.name, 'skip-release')
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           fetch-tags: true
 
+      - name: Ensure tip of main
+        id: tip
+        run: |
+          git fetch origin main --tags
+          MAIN_SHA="$(git rev-parse origin/main)"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [ "$HEAD_SHA" != "$MAIN_SHA" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Build SHA ${HEAD_SHA} is not tip of main (${MAIN_SHA}); skipping."
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Check skip-release label
+        id: pr
+        if: steps.tip.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_LABELS="$(gh pr list --search "${{ github.event.workflow_run.head_sha }}" --state merged --json labels --jq '.[0].labels[].name // empty' 2>/dev/null || true)"
+          if echo "$PR_LABELS" | grep -qx 'skip-release'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Merged PR has skip-release label; skipping."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Skip empty release window
         id: guard
+        if: steps.tip.outputs.skip != 'true' && steps.pr.outputs.skip != 'true'
         run: |
           LAST_TAG="$(git tag --list 'v*' --sort=-v:refname | head -n 1 || true)"
           if [ -z "$LAST_TAG" ]; then
@@ -48,14 +78,21 @@ jobs:
 
       - name: Resolve bump type
         id: resolve
-        if: steps.guard.outputs.skip != 'true'
+        if: >
+          steps.tip.outputs.skip != 'true' &&
+          steps.pr.outputs.skip != 'true' &&
+          steps.guard.outputs.skip != 'true'
         run: bash scripts/resolve-bump.sh
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
-      - name: Create and push version tag
-        if: steps.guard.outputs.skip != 'true'
+      - name: Create tag and dispatch release
+        if: >
+          steps.tip.outputs.skip != 'true' &&
+          steps.pr.outputs.skip != 'true' &&
+          steps.guard.outputs.skip != 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           NEW_VERSION: ${{ steps.resolve.outputs.new_version }}
           BUMP_TYPE: ${{ steps.resolve.outputs.bump_type }}
           CURRENT_VERSION: ${{ steps.resolve.outputs.current_version }}
@@ -75,4 +112,8 @@ jobs:
           git tag -a "$NEW_VERSION" -m "Release ${NEW_VERSION} (${BUMP_TYPE} from ${CURRENT_VERSION})"
           git push origin "refs/tags/${NEW_VERSION}"
 
-          echo "Created and pushed ${NEW_VERSION} (${BUMP_TYPE} bump from ${CURRENT_VERSION})"
+          # Tag pushes made with GITHUB_TOKEN do not trigger other workflows.
+          # Explicitly dispatch Release on the new tag instead.
+          gh workflow run release.yml --ref "$NEW_VERSION"
+
+          echo "Created ${NEW_VERSION} (${BUMP_TYPE} from ${CURRENT_VERSION}) and dispatched Release"

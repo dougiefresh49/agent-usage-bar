@@ -47,9 +47,9 @@ Sources/ClaudeUsageBar/
 
 ## Publishing releases
 
-Merging a PR into `main` automatically creates the next `v*` tag. Gemini classifies the bump as major/minor/patch from recent commits (override with `[major]`, `[minor]`, or `[patch]` in the merge commit subject). Add a `skip-release` label to a PR to skip tagging.
+Merging a PR into `main` runs Build first. When Build succeeds, Version bump creates the next `v*` tag and starts Release (via `workflow_dispatch`, because tag pushes from `GITHUB_TOKEN` do not trigger other workflows). Gemini classifies the bump as major/minor/patch from recent commits (override with `[major]`, `[minor]`, or `[patch]` in the merge commit subject). Add a `skip-release` label to a PR to skip tagging.
 
-Pushing a `v*` tag triggers the GitHub Actions release workflow that:
+The release workflow then:
 
 - builds the release app bundle once
 - produces both a ZIP (for Sparkle) and a DMG (for manual drag-to-Applications installs)
