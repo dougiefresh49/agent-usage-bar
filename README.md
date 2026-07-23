@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="macos/Resources/icon.png" width="128" alt="Agent Usage Bar icon">
+  <img src="macos/Resources/icon.png" width="128" alt="Agent Usage Bar Orbit Meter app icon">
 </p>
 
 # Agent Usage Bar
@@ -7,6 +7,8 @@
 Keep Claude, OpenAI/Codex, Cursor, and ElevenLabs subscription usage visible from one small macOS menu-bar app.
 
 Now it's just a glimpse away — always sitting at the top of your screen.
+
+The Orbit Meter app icon mirrors the paired usage windows shown in the popover.
 
 <p align="center">
   <img src="macos/Resources/usage-demo--claude.png" width="32%" align="top" alt="Claude usage demo">
