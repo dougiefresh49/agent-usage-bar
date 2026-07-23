@@ -65,6 +65,16 @@ struct UsageResponse: Codable {
             $0.scope?.model?.displayName?.isEmpty == false
         }
     }
+
+    /// Utilization for the Claude Fable model-scoped limit, when present.
+    var fableUtilization: Double? {
+        scopedModelLimits.first { limit in
+            let name = limit.scope?.model?.displayName ?? ""
+            let id = limit.scope?.model?.id ?? ""
+            return name.localizedCaseInsensitiveContains("fable")
+                || id.localizedCaseInsensitiveContains("fable")
+        }?.percent
+    }
 }
 
 struct ClaudeUsageLimit: Codable, Equatable, Identifiable {

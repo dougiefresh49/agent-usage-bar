@@ -26,6 +26,7 @@ final class ConnectedUsageModelTests: XCTestCase {
         XCTAssertEqual(usage.scopedModelLimits.count, 1)
         XCTAssertEqual(usage.scopedModelLimits.first?.scope?.model?.displayName, "Fable")
         XCTAssertEqual(usage.scopedModelLimits.first?.percent, 28)
+        XCTAssertEqual(usage.fableUtilization, 28)
     }
 
     func testDecodesCursorUsageAndCalculatesOnDemandSpend() throws {

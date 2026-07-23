@@ -25,6 +25,7 @@ final class ConnectedUsageService: ObservableObject {
     private let credentialsStore: ConnectedServiceCredentialsStore
     private let environment: [String: String]
     var snapshotStore: UsageSnapshotStore?
+    var notificationService: NotificationService?
     private var timer: Timer?
     private var pollingMinutes: Int
 
@@ -157,6 +158,11 @@ final class ConnectedUsageService: ObservableObject {
                 provider: "cursor",
                 metrics: UsageSnapshotStore.cursorMetrics(for: decoded)
             )
+            notificationService?.checkCursor(
+                apiPercent: decoded.planUsage?.apiPercentUsed,
+                autoPercent: decoded.planUsage?.autoPercentUsed,
+                creditPercent: decoded.spendLimitUsage?.utilization
+            )
         } catch {
             cursorError = error.localizedDescription
         }
@@ -196,6 +202,21 @@ final class ConnectedUsageService: ObservableObject {
                 openAIError = error.localizedDescription
             }
         }
+
+        if openAIUsage != nil || openAIResetCredits != nil {
+            notifyOpenAIUsage()
+        }
+    }
+
+    private func notifyOpenAIUsage() {
+        let resetCreditsRemaining = openAIResetCredits?.availableCount
+            ?? openAIResetCredits.map { $0.credits.filter(\.isAvailable).count }
+            ?? openAIUsage?.rateLimitResetCredits?.applicableAvailableCount
+            ?? openAIUsage?.rateLimitResetCredits?.availableCount
+        notificationService?.checkOpenAI(
+            weeklyPercent: openAIUsage?.rateLimit?.primaryWindow?.usedPercent,
+            resetCreditsRemaining: resetCreditsRemaining
+        )
     }
 
     func fetchElevenLabsUsage() async {
