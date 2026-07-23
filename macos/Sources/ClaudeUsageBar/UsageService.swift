@@ -291,7 +291,11 @@ class UsageService: ObservableObject {
             lastError = nil
             lastUpdated = Date()
             historyService?.recordDataPoint(pct5h: pct5h, pct7d: pct7d)
-            notificationService?.checkAndNotify(pct5h: pct5h, pct7d: pct7d, pctExtra: pctExtra)
+            notificationService?.checkClaude(
+                sessionPercent: (usage?.fiveHour?.utilization ?? 0),
+                sevenDayPercent: (usage?.sevenDay?.utilization ?? 0),
+                fablePercent: usage?.fableUtilization
+            )
             snapshotStore?.update(
                 provider: "claude",
                 metrics: UsageSnapshotStore.claudeMetrics(for: reconciled)

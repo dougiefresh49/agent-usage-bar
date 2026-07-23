@@ -46,6 +46,7 @@ struct AgentUsageBarApp: App {
                     historyService.loadHistory()
                     service.historyService = historyService
                     service.notificationService = notificationService
+                    connectedService.notificationService = notificationService
 
                     let store = snapshotStore ?? UsageSnapshotStore()
                     snapshotStore = store

@@ -1121,19 +1121,19 @@ private struct SetupView: View {
                 .foregroundStyle(.secondary)
 
             SetupThresholdSlider(
-                label: "5-hour window",
-                value: notificationService.threshold5h,
-                onChange: { notificationService.setThreshold5h($0) }
+                label: "Session usage",
+                value: notificationService.claudeSessionThreshold,
+                onChange: { notificationService.setClaudeSessionThreshold($0) }
             )
             SetupThresholdSlider(
-                label: "7-day window",
-                value: notificationService.threshold7d,
-                onChange: { notificationService.setThreshold7d($0) }
+                label: "Seven-day usage",
+                value: notificationService.claudeSevenDayThreshold,
+                onChange: { notificationService.setClaudeSevenDayThreshold($0) }
             )
             SetupThresholdSlider(
-                label: "Extra usage",
-                value: notificationService.thresholdExtra,
-                onChange: { notificationService.setThresholdExtra($0) }
+                label: "Fable usage",
+                value: notificationService.claudeFableThreshold,
+                onChange: { notificationService.setClaudeFableThreshold($0) }
             )
         }
 

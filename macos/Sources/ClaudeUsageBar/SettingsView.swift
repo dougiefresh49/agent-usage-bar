@@ -1,10 +1,17 @@
 import SwiftUI
 import ServiceManagement
 
+private enum SettingsTab: Hashable {
+    case general
+    case connections
+    case notifications
+}
+
 struct SettingsWindowContent: View {
     @ObservedObject var service: UsageService
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var connectedService: ConnectedUsageService
+    @State private var selectedTab: SettingsTab = .general
     @State private var openAIToken = ""
     @State private var cursorToken = ""
     @State private var elevenLabsAPIKey = ""
@@ -23,6 +30,28 @@ struct SettingsWindowContent: View {
     private var usageTextSizeRaw = UsagePresentationDefaults.textSize.rawValue
 
     var body: some View {
+        TabView(selection: $selectedTab) {
+            generalTab
+                .tabItem { Label("General", systemImage: "gearshape") }
+                .tag(SettingsTab.general)
+
+            connectionsTab
+                .tabItem { Label("Connections", systemImage: "link") }
+                .tag(SettingsTab.connections)
+
+            notificationsTab
+                .tabItem { Label("Notifications", systemImage: "bell") }
+                .tag(SettingsTab.notifications)
+        }
+        .frame(width: 520, height: 560)
+        .onAppear {
+            focusSettingsWindow()
+        }
+    }
+
+    // MARK: - General
+
+    private var generalTab: some View {
         Form {
             Section("General") {
                 LaunchAtLoginToggle()
@@ -97,31 +126,24 @@ struct SettingsWindowContent: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Notifications") {
-                ThresholdSlider(
-                    label: "5-hour window",
-                    value: notificationService.threshold5h,
-                    onChange: { notificationService.setThreshold5h($0) }
-                )
-                ThresholdSlider(
-                    label: "7-day window",
-                    value: notificationService.threshold7d,
-                    onChange: { notificationService.setThreshold7d($0) }
-                )
-                ThresholdSlider(
-                    label: "Extra usage",
-                    value: notificationService.thresholdExtra,
-                    onChange: { notificationService.setThresholdExtra($0) }
-                )
+            Section("About") {
+                LabeledContent("Version", value: appVersionString)
             }
+        }
+        .formStyle(.grouped)
+    }
 
+    // MARK: - Connections
+
+    private var connectionsTab: some View {
+        Form {
             Section("OpenAI / Codex") {
                 Text("Use the bearer token from the Authorization header of a ChatGPT usage request. OpenAI API keys do not expose ChatGPT subscription limits.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                SecureField(
-                    connectedService.isOpenAIConfigured
+                CredentialSecureField(
+                    title: connectedService.isOpenAIConfigured
                         ? "Session token configured"
                         : "Bearer session token",
                     text: $openAIToken
@@ -146,8 +168,8 @@ struct SettingsWindowContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                SecureField(
-                    connectedService.isCursorConfigured
+                CredentialSecureField(
+                    title: connectedService.isCursorConfigured
                         ? "Session token configured"
                         : "WorkosCursorSessionToken",
                     text: $cursorToken
@@ -172,8 +194,8 @@ struct SettingsWindowContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                SecureField(
-                    connectedService.isElevenLabsConfigured
+                CredentialSecureField(
+                    title: connectedService.isElevenLabsConfigured
                         ? "API key configured"
                         : "ElevenLabs API key",
                     text: $elevenLabsAPIKey
@@ -197,12 +219,6 @@ struct SettingsWindowContent: View {
                 }
             }
 
-            if let credentialMessage {
-                Text(credentialMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
             if service.isAuthenticated {
                 Section("Anthropic Account") {
                     if let email = service.accountEmail {
@@ -213,14 +229,75 @@ struct SettingsWindowContent: View {
                     }
                 }
             }
+
+            if let credentialMessage {
+                Section {
+                    Text(credentialMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 480)
-        .fixedSize(horizontal: false, vertical: true)
-        .onAppear {
-            focusSettingsWindow()
-        }
     }
+
+    // MARK: - Notifications
+
+    private var notificationsTab: some View {
+        Form {
+            Section("Claude") {
+                ThresholdSlider(
+                    label: "Session usage",
+                    value: notificationService.claudeSessionThreshold,
+                    onChange: { notificationService.setClaudeSessionThreshold($0) }
+                )
+                ThresholdSlider(
+                    label: "Seven-day usage",
+                    value: notificationService.claudeSevenDayThreshold,
+                    onChange: { notificationService.setClaudeSevenDayThreshold($0) }
+                )
+                ThresholdSlider(
+                    label: "Fable usage",
+                    value: notificationService.claudeFableThreshold,
+                    onChange: { notificationService.setClaudeFableThreshold($0) }
+                )
+            }
+
+            Section("Codex") {
+                ThresholdSlider(
+                    label: "Weekly usage limits",
+                    value: notificationService.openAIWeeklyThreshold,
+                    onChange: { notificationService.setOpenAIWeeklyThreshold($0) }
+                )
+                CountThresholdSlider(
+                    label: "Reset credits",
+                    value: notificationService.openAIResetCreditsThreshold,
+                    onChange: { notificationService.setOpenAIResetCreditsThreshold($0) }
+                )
+            }
+
+            Section("Cursor") {
+                ThresholdSlider(
+                    label: "API usage",
+                    value: notificationService.cursorAPIThreshold,
+                    onChange: { notificationService.setCursorAPIThreshold($0) }
+                )
+                ThresholdSlider(
+                    label: "Auto usage",
+                    value: notificationService.cursorAutoThreshold,
+                    onChange: { notificationService.setCursorAutoThreshold($0) }
+                )
+                ThresholdSlider(
+                    label: "Credit",
+                    value: notificationService.cursorCreditThreshold,
+                    onChange: { notificationService.setCursorCreditThreshold($0) }
+                )
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - Actions
 
     private func saveOpenAIToken() {
         do {
@@ -253,6 +330,17 @@ struct SettingsWindowContent: View {
         } catch {
             credentialMessage = "Could not save ElevenLabs API key: \(error.localizedDescription)"
         }
+    }
+
+    // MARK: - Appearance bindings
+
+    private var appVersionString: String {
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String
+        if let build, !build.isEmpty, build != short {
+            return "\(short) (\(build))"
+        }
+        return short
     }
 
     private var selectedMenuBarProvider: UsageProvider {
@@ -447,6 +535,27 @@ func launchAtLoginInstallDirectories(fileManager: FileManager = .default) -> [UR
     ]
 }
 
+/// Bordered secure field so credential inputs stay visible in grouped Form sections.
+private struct CredentialSecureField: View {
+    let title: String
+    @Binding var text: String
+
+    var body: some View {
+        SecureField(title, text: $text)
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color(nsColor: .textBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.28), lineWidth: 1)
+            )
+    }
+}
+
 private struct ThresholdSlider: View {
     let label: String
     let value: Int
@@ -465,6 +574,32 @@ private struct ThresholdSlider: View {
         } label: {
             Text(label)
             Text(value > 0 ? "\(value)%" : "Off")
+                .foregroundStyle(.secondary)
+        }
+        .alignmentGuide(.firstTextBaseline) { d in
+            d[VerticalAlignment.center]
+        }
+    }
+}
+
+private struct CountThresholdSlider: View {
+    let label: String
+    let value: Int
+    let onChange: (Int) -> Void
+
+    var body: some View {
+        LabeledContent {
+            Slider(
+                value: Binding(
+                    get: { Double(value) },
+                    set: { onChange(Int($0)) }
+                ),
+                in: 0...10,
+                step: 1
+            )
+        } label: {
+            Text(label)
+            Text(value > 0 ? "≤ \(value)" : "Off")
                 .foregroundStyle(.secondary)
         }
         .alignmentGuide(.firstTextBaseline) { d in
