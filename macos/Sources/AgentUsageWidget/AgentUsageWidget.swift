@@ -358,6 +358,23 @@ private struct WidgetHeader: View {
     }
 }
 
+private struct ProviderSideLabel: View {
+    let provider: WidgetProvider
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: provider.systemImage)
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(provider.name)
+                .font(.system(size: 8, weight: .semibold))
+                .minimumScaleFactor(0.65)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
 private struct MetricBar: View {
     let metric: WidgetUsageMetric
     var compact = false
@@ -678,43 +695,54 @@ private struct PreferredProviderDetailsView: View {
                 NoProviderData()
             } else {
                 GeometryReader { proxy in
-                    HStack(spacing: 8) {
-                        Group {
-                            if entry.snapshot.detailStyle == .orbit {
-                                HStack(spacing: 8) {
-                                    OrbitGraphic(
-                                        metrics: topMetrics,
-                                        diameter: min(proxy.size.height * 0.93, 138),
-                                        lineWidth: 7
-                                    )
+                    if entry.snapshot.detailStyle == .orbit {
+                        HStack(spacing: 5) {
+                            ProviderSideLabel(provider: provider)
+                                .frame(width: 36)
 
-                                    OrbitLegend(
-                                        metrics: topMetrics,
-                                        compact: true,
-                                        horizontal: false
-                                    )
+                            OrbitGraphic(
+                                metrics: topMetrics,
+                                diameter: min(proxy.size.height * 0.91, 138),
+                                lineWidth: 7
+                            )
+
+                            OrbitLegend(
+                                metrics: topMetrics,
+                                compact: false,
+                                horizontal: false
+                            )
+                            .frame(width: 60)
+
+                            VStack(spacing: 7) {
+                                ForEach(remaining.prefix(2)) { metric in
+                                    AdditionalMetricCard(metric: metric)
                                 }
-                            } else {
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            Group {
                                 DetailVisualization(
                                     style: entry.snapshot.detailStyle,
                                     metrics: topMetrics
                                 )
                             }
-                        }
-                        .frame(width: proxy.size.width * 0.69)
-                        .frame(maxHeight: .infinity, alignment: .center)
+                            .frame(width: proxy.size.width * 0.69)
+                            .frame(maxHeight: .infinity, alignment: .center)
 
-                        VStack(spacing: 7) {
-                            ForEach(remaining.prefix(2)) { metric in
-                                AdditionalMetricCard(metric: metric)
+                            VStack(spacing: 7) {
+                                ForEach(remaining.prefix(2)) { metric in
+                                    AdditionalMetricCard(metric: metric)
+                                }
                             }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
             }
         }
-        .widgetSurface(padding: 8)
+        .widgetSurface(padding: 6)
         .accessibilityLabel("\(provider.name) details")
         .accessibilityElement(children: .contain)
     }
