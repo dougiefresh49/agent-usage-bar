@@ -1,0 +1,78 @@
+name: Version bump
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: version-bump-main
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Create version tag
+    if: >
+      github.event.pull_request.merged == true &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-release')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Skip empty release window
+        id: guard
+        run: |
+          LAST_TAG="$(git tag --list 'v*' --sort=-v:refname | head -n 1 || true)"
+          if [ -z "$LAST_TAG" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "No existing version tags; continuing."
+            exit 0
+          fi
+
+          COMMITS="$(git log "${LAST_TAG}..HEAD" --oneline | wc -l | tr -d ' ')"
+          if [ "$COMMITS" = "0" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No commits since ${LAST_TAG}; skipping tag."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Found ${COMMITS} commit(s) since ${LAST_TAG}."
+          fi
+
+      - name: Resolve bump type
+        id: resolve
+        if: steps.guard.outputs.skip != 'true'
+        run: bash scripts/resolve-bump.sh
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Create and push version tag
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          NEW_VERSION: ${{ steps.resolve.outputs.new_version }}
+          BUMP_TYPE: ${{ steps.resolve.outputs.bump_type }}
+          CURRENT_VERSION: ${{ steps.resolve.outputs.current_version }}
+        run: |
+          if [ -z "${NEW_VERSION:-}" ]; then
+            echo "::error::resolve-bump.sh did not produce new_version"
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/${NEW_VERSION}" >/dev/null; then
+            echo "::error::Tag ${NEW_VERSION} already exists"
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEW_VERSION" -m "Release ${NEW_VERSION} (${BUMP_TYPE} from ${CURRENT_VERSION})"
+          git push origin "refs/tags/${NEW_VERSION}"
+
+          echo "Created and pushed ${NEW_VERSION} (${BUMP_TYPE} bump from ${CURRENT_VERSION})"
