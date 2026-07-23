@@ -3,6 +3,9 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Allow Version bump (and manual runs) to start Release. Tag pushes made with
+  # GITHUB_TOKEN do not trigger workflow runs, so bump dispatches this explicitly.
+  workflow_dispatch:
 
 concurrency:
   group: release-${{ github.ref }}
