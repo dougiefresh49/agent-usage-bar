@@ -36,18 +36,42 @@ A tiny macOS menu bar app that shows your AI subscription usage at a glance. Cli
 
 ### Download
 
-1. Download `AgentUsageBar.dmg` from the [latest release](https://github.com/Blimp-Labs/claude-usage-bar/releases/latest)
+1. Download `AgentUsageBar.dmg` from the [latest release](https://github.com/dougiefresh49/agent-usage-bar/releases/latest)
 2. Open the disk image and drag `AgentUsageBar.app` into `Applications`
 3. Launch the app from `/Applications`
-4. macOS may require right-click → **Open** on first launch
+
+#### "Apple could not verify…" (Gatekeeper)
+
+Release builds are ad-hoc signed, not notarized, so macOS 15+ blocks apps
+downloaded through a browser with a "Move to Trash / Done" dialog. Two ways
+around it, no Settings trip required:
+
+- **Strip the quarantine flag** after a browser download:
+
+  ```sh
+  xattr -dr com.apple.quarantine /Applications/AgentUsageBar.app
+  ```
+
+- **Or download via the CLI instead** — `gh`/`curl` never apply the quarantine
+  flag, so the dialog never appears:
+
+  ```sh
+  gh release download --repo dougiefresh49/agent-usage-bar \
+    --pattern AgentUsageBar.zip -O /tmp/AgentUsageBar.zip --clobber
+  ditto -xk /tmp/AgentUsageBar.zip /Applications/
+  ```
+
+Gatekeeper only checks the quarantine attribute browsers set on download;
+apps built locally or updated in-place by Sparkle never have it, so this is a
+first-install-only concern.
 
 ### Build from source
 
 Requires Xcode 15+ / Swift 5.9+ and macOS 14 (Sonoma) or later.
 
 ```sh
-git clone https://github.com/Blimp-Labs/claude-usage-bar.git
-cd claude-usage-bar
+git clone https://github.com/dougiefresh49/agent-usage-bar.git
+cd agent-usage-bar
 make app            # build .app bundle
 make dmg            # build drag-to-Applications disk image
 make install        # copy to /Applications
@@ -151,22 +175,32 @@ One-time repo setup:
 
 1. Enable GitHub Pages and set the source to `GitHub Actions`.
 2. Add a repository Actions secret named `SPARKLE_PRIVATE_KEY`.
+3. Set the repository Actions variable `ENABLE_SPARKLE_UPDATES` to `true`
+   (`gh variable set ENABLE_SPARKLE_UPDATES --body true`). When unset, releases
+   still publish but skip the appcast, and the app ships without update checks.
 
 Local source builds intentionally ship with Sparkle disabled unless `SU_FEED_URL` is injected during packaging. This prevents forks and local builds from auto-updating to upstream binaries.
 
 Manual installs should prefer the DMG. The ZIP remains the source of truth for Sparkle updates and appcast generation.
 
+Generate a signing key pair (first time only) with
+`macos/.build/artifacts/sparkle/Sparkle/bin/generate_keys --account agent-usage-bar`
+— it stores the private key in your login Keychain and prints the public key,
+which must match `SUPublicEDKey` in `macos/Resources/Info.plist`.
+
 You can export the current Sparkle private key from your local Keychain with:
 
 ```sh
-macos/.build/artifacts/sparkle/Sparkle/bin/generate_keys --account claude-usage-bar -x /tmp/claude-usage-bar.sparkle.key
-gh secret set SPARKLE_PRIVATE_KEY < /tmp/claude-usage-bar.sparkle.key
+macos/.build/artifacts/sparkle/Sparkle/bin/generate_keys --account agent-usage-bar -x /tmp/sparkle.key
+gh secret set SPARKLE_PRIVATE_KEY < /tmp/sparkle.key
+rm /tmp/sparkle.key
 ```
 
-The appcast feed URL used by release builds is:
+The appcast feed URL is derived from the repository, so for this repo release
+builds use:
 
 ```text
-https://blimp-labs.github.io/claude-usage-bar/appcast.xml
+https://dougiefresh49.github.io/agent-usage-bar/appcast.xml
 ```
 
 ### Project structure
