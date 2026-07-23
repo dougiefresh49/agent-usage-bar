@@ -7,6 +7,8 @@ struct PopoverView: View {
     @ObservedObject var appUpdater: AppUpdater
     @ObservedObject var connectedService: ConnectedUsageService
     @AppStorage("setupComplete") private var setupComplete = false
+    @AppStorage(UsagePresentationDefaults.detailStyleKey)
+    private var detailStyleRaw = UsagePresentationDefaults.detailStyle.rawValue
     @State private var selectedProvider: UsageProvider = .claude
     @State private var detailContentHeight: CGFloat = 0
 
@@ -47,9 +49,17 @@ struct PopoverView: View {
                         case .claude:
                             claudeView
                         case .openAI:
-                            OpenAIUsageView(service: connectedService)
+                            OpenAIUsageView(
+                                service: connectedService,
+                                style: detailStyle,
+                                metrics: presentationMetrics(for: .openAI)
+                            )
                         case .cursor:
-                            CursorUsageView(service: connectedService)
+                            CursorUsageView(
+                                service: connectedService,
+                                style: detailStyle,
+                                metrics: presentationMetrics(for: .cursor)
+                            )
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -82,21 +92,20 @@ struct PopoverView: View {
         ProviderHeader(name: "Claude", systemImage: "sparkles")
 
         if service.isAuthenticated {
-            UsageBucketRow(label: "5-Hour Window", bucket: service.usage?.fiveHour)
-            UsageBucketRow(label: "7-Day Window", bucket: service.usage?.sevenDay)
+            let metrics = presentationMetrics(for: .claude)
+            let summaryMetrics = UsagePresentationMetrics.detailPair(
+                for: .claude,
+                available: metrics
+            )
+            DetailUsageVisualization(
+                style: detailStyle,
+                metrics: summaryMetrics
+            )
 
-            if let opus = service.usage?.sevenDayOpus, opus.utilization != nil {
-                UsageBucketRow(label: "Opus (7 day)", bucket: opus)
-            }
-            if let sonnet = service.usage?.sevenDaySonnet, sonnet.utilization != nil {
-                UsageBucketRow(label: "Sonnet (7 day)", bucket: sonnet)
-            }
-            ForEach(service.usage?.scopedModelLimits ?? []) { limit in
-                UsageValueRow(
-                    label: scopedLimitLabel(limit),
-                    percent: limit.percent,
-                    resetDate: limit.resetsAtDate
-                )
+            ForEach(remainingMetrics(metrics, excluding: summaryMetrics)) { metric in
+                if metric.id != UsagePresentationMetrics.claudeExtraID {
+                    UsageMetricRow(metric: metric)
+                }
             }
 
             if let extra = service.usage?.extraUsage,
@@ -191,18 +200,27 @@ struct PopoverView: View {
         .max()
     }
 
-    private func scopedLimitLabel(_ limit: ClaudeUsageLimit) -> String {
-        let model = limit.scope?.model?.displayName ?? "Model"
-        switch limit.group {
-        case "weekly":
-            return "\(model) (7 day)"
-        case "session":
-            return "\(model) (session)"
-        case let group?:
-            return "\(model) (\(group.replacingOccurrences(of: "_", with: " ")))"
-        case nil:
-            return model
-        }
+    private var detailStyle: DetailVisualizationStyle {
+        DetailVisualizationStyle(rawValue: detailStyleRaw)
+            ?? UsagePresentationDefaults.detailStyle
+    }
+
+    private func presentationMetrics(
+        for provider: UsageProvider
+    ) -> [UsagePresentationMetric] {
+        UsagePresentationMetrics.metrics(
+            for: provider,
+            claude: service,
+            connectedService: connectedService
+        )
+    }
+
+    private func remainingMetrics(
+        _ metrics: [UsagePresentationMetric],
+        excluding summary: [UsagePresentationMetric]
+    ) -> [UsagePresentationMetric] {
+        let summaryIDs = Set(summary.map(\.id))
+        return metrics.filter { !summaryIDs.contains($0.id) }
     }
 
     private var settingsButton: some View {
@@ -221,39 +239,10 @@ private struct DetailContentHeightKey: PreferenceKey {
     }
 }
 
-private enum UsageProvider: String, CaseIterable, Identifiable {
-    case claude
-    case openAI
-    case cursor
-
-    var id: Self { self }
-
-    var shortName: String {
-        switch self {
-        case .claude: return "Claude"
-        case .openAI: return "Codex"
-        case .cursor: return "Cursor"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .claude: return "sparkles"
-        case .openAI: return "circle.hexagongrid"
-        case .cursor: return "cursorarrow.rays"
-        }
-    }
-}
-
-private struct ProviderSummaryMetric {
-    let label: String
-    let percent: Double?
-}
-
 private struct ProviderSummary {
     let provider: UsageProvider
     let isConfigured: Bool
-    let metrics: [ProviderSummaryMetric]
+    let metrics: [UsagePresentationMetric]
     let error: String?
 }
 
@@ -263,7 +252,13 @@ private struct ProviderOverview: View {
     @Binding var selectedProvider: UsageProvider
 
     var body: some View {
-        HStack(spacing: 7) {
+        LazyVGrid(
+            columns: Array(
+                repeating: GridItem(.flexible(minimum: 0), spacing: 7),
+                count: 3
+            ),
+            spacing: 7
+        ) {
             ForEach(summaries, id: \.provider) { summary in
                 ProviderSummaryCard(
                     summary: summary,
@@ -282,48 +277,36 @@ private struct ProviderOverview: View {
             ProviderSummary(
                 provider: .claude,
                 isConfigured: service.isAuthenticated,
-                metrics: [
-                    ProviderSummaryMetric(label: "5h", percent: service.usage?.fiveHour?.utilization),
-                    ProviderSummaryMetric(label: "7d", percent: service.usage?.sevenDay?.utilization)
-                ],
+                metrics: summaryMetrics(for: .claude),
                 error: service.lastError
             ),
             ProviderSummary(
                 provider: .openAI,
                 isConfigured: connectedService.isOpenAIConfigured,
-                metrics: openAIMetrics,
+                metrics: summaryMetrics(for: .openAI),
                 error: connectedService.openAIError
             ),
             ProviderSummary(
                 provider: .cursor,
                 isConfigured: connectedService.isCursorConfigured,
-                metrics: [
-                    ProviderSummaryMetric(
-                        label: "Models",
-                        percent: connectedService.cursorUsage?.planUsage?.autoPercentUsed
-                    ),
-                    ProviderSummaryMetric(
-                        label: "API",
-                        percent: connectedService.cursorUsage?.planUsage?.apiPercentUsed
-                    )
-                ],
+                metrics: summaryMetrics(for: .cursor),
                 error: connectedService.cursorError
             )
         ]
     }
 
-    private var openAIMetrics: [ProviderSummaryMetric] {
-        let rateLimit = connectedService.openAIUsage?.rateLimit
-        return [
-            ProviderSummaryMetric(
-                label: compactWindowLabel(rateLimit?.primaryWindow, fallback: "Primary"),
-                percent: rateLimit?.primaryWindow?.usedPercent
-            ),
-            ProviderSummaryMetric(
-                label: compactWindowLabel(rateLimit?.secondaryWindow, fallback: "Secondary"),
-                percent: rateLimit?.secondaryWindow?.usedPercent
-            )
-        ]
+    private func summaryMetrics(
+        for provider: UsageProvider
+    ) -> [UsagePresentationMetric] {
+        let available = UsagePresentationMetrics.metrics(
+            for: provider,
+            claude: service,
+            connectedService: connectedService
+        )
+        return UsagePresentationMetrics.detailPair(
+            for: provider,
+            available: available
+        )
     }
 }
 
@@ -334,7 +317,7 @@ private struct ProviderSummaryCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 5) {
                     Image(systemName: summary.provider.systemImage)
                         .font(.caption)
@@ -347,20 +330,18 @@ private struct ProviderSummaryCard: View {
 
                 if !summary.isConfigured {
                     statusLabel("Connect", color: .secondary)
-                } else if summary.metrics.allSatisfy({ $0.percent == nil }) {
+                } else if summary.metrics.allSatisfy({ !$0.hasDisplayValue }) {
                     if summary.error != nil {
                         statusLabel("Check account", color: .red)
                     } else {
                         statusLabel("Loading…", color: .secondary)
                     }
                 } else {
-                    ForEach(Array(summary.metrics.prefix(2).enumerated()), id: \.offset) { _, metric in
-                        SummaryMetricRow(metric: metric)
-                    }
+                    CompactMetricCapsule(metrics: summary.metrics)
                 }
             }
-            .padding(9)
-            .frame(maxWidth: .infinity, minHeight: 91, maxHeight: 91, alignment: .topLeading)
+            .padding(8)
+            .frame(maxWidth: .infinity, minHeight: 68, maxHeight: 68, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(isSelected ? Color.accentColor.opacity(0.11) : Color.primary.opacity(0.045))
@@ -375,7 +356,7 @@ private struct ProviderSummaryCard: View {
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(summary.provider.shortName) usage details")
+        .accessibilityLabel(summaryAccessibilityLabel)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -389,45 +370,351 @@ private struct ProviderSummaryCard: View {
                 .foregroundStyle(color)
                 .lineLimit(1)
         }
-        .frame(height: 46, alignment: .center)
+        .frame(height: 27, alignment: .center)
+    }
+
+    private var summaryAccessibilityLabel: String {
+        let values = summary.metrics
+            .map { "\($0.label) \($0.accessibilityValue)" }
+            .joined(separator: ", ")
+        return values.isEmpty
+            ? "\(summary.provider.shortName) usage details"
+            : "\(summary.provider.shortName), \(values)"
     }
 }
 
-private struct SummaryMetricRow: View {
-    let metric: ProviderSummaryMetric
+private struct CompactMetricCapsule: View {
+    let metrics: [UsagePresentationMetric]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(normalizedMetrics.enumerated()), id: \.offset) { index, metric in
+                CompactMetricCell(metric: metric)
+                if index == 0 {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.12))
+                        .frame(width: 1, height: 22)
+                }
+            }
+        }
+        .frame(height: 28)
+        .background(Color.primary.opacity(0.055), in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.primary.opacity(0.10), lineWidth: 1)
+        )
+        .clipShape(Capsule())
+    }
+
+    private var normalizedMetrics: [UsagePresentationMetric?] {
+        let values = Array(metrics.prefix(2)).map(Optional.some)
+        return values + Array(repeating: nil, count: max(0, 2 - values.count))
+    }
+}
+
+private struct CompactMetricCell: View {
+    let metric: UsagePresentationMetric?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 3) {
+            Text(compactText)
+            .font(.caption2)
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity, alignment: .center)
+
+            if let progress = metric?.normalizedProgress {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.primary.opacity(0.10))
+                        Capsule()
+                            .fill(colorForPct(progress))
+                            .frame(width: proxy.size.width * progress)
+                    }
+                }
+                .frame(height: 3)
+            } else {
+                Capsule()
+                    .stroke(
+                        Color.primary.opacity(0.16),
+                        style: StrokeStyle(lineWidth: 1, dash: [2, 2])
+                    )
+                    .frame(height: 3)
+            }
+        }
+        .padding(.horizontal, 5)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var compactText: String {
+        guard let metric else { return "—" }
+        return "\(metric.shortLabel) \(metric.valueText)"
+    }
+}
+
+private struct DetailUsageVisualization: View {
+    let style: DetailVisualizationStyle
+    let metrics: [UsagePresentationMetric]
+
+    @ViewBuilder
+    var body: some View {
+        switch style {
+        case .bars:
+            ForEach(metrics) { metric in
+                UsageMetricRow(metric: metric)
+            }
+        case .capsule:
+            DetailMetricCapsule(metrics: metrics)
+        case .orbit:
+            UsageOrbitView(metrics: metrics)
+        }
+    }
+}
+
+private struct UsageMetricRow: View {
+    let metric: UsagePresentationMetric
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
                 Text(metric.label)
-                    .lineLimit(1)
-                Spacer(minLength: 2)
-                Text(percentText)
+                    .font(.subheadline)
+                Spacer()
+                Text(metric.valueText)
+                    .font(.subheadline)
                     .monospacedDigit()
             }
-            .font(.caption2)
-            .foregroundStyle(metric.percent == nil ? .secondary : .primary)
 
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.primary.opacity(0.10))
-                    Capsule()
-                        .fill(colorForPct(normalizedPercent))
-                        .frame(width: proxy.size.width * normalizedPercent)
+            if let progress = metric.normalizedProgress {
+                ProgressView(value: progress, total: 1)
+                    .tint(colorForPct(progress))
+            }
+
+            if let resetDate = metric.resetDate {
+                Text("Resets \(resetDate, style: .relative)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else if metric.count != nil {
+                Text("Available")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(metric.accessibilityValue)
+    }
+}
+
+private struct DetailMetricCapsule: View {
+    let metrics: [UsagePresentationMetric]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(normalizedMetrics.enumerated()), id: \.offset) { index, metric in
+                DetailMetricCapsuleCell(metric: metric)
+                if index == 0 {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.14))
+                        .frame(width: 1, height: 34)
                 }
             }
-            .frame(height: 3)
         }
+        .frame(height: 48)
+        .background(Color.primary.opacity(0.045), in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+        )
+        .clipShape(Capsule())
         .accessibilityElement(children: .combine)
     }
 
-    private var normalizedPercent: Double {
-        min(max((metric.percent ?? 0) / 100, 0), 1)
+    private var normalizedMetrics: [UsagePresentationMetric?] {
+        let values = Array(metrics.prefix(2)).map(Optional.some)
+        return values + Array(repeating: nil, count: max(0, 2 - values.count))
+    }
+}
+
+private struct DetailMetricCapsuleCell: View {
+    let metric: UsagePresentationMetric?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 4) {
+                Text(metric?.label ?? "Unavailable")
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text(metric?.valueText ?? "—")
+                    .monospacedDigit()
+            }
+            .font(.caption)
+
+            if let progress = metric?.normalizedProgress {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.primary.opacity(0.10))
+                        Capsule()
+                            .fill(colorForPct(progress))
+                            .frame(width: proxy.size.width * progress)
+                    }
+                }
+                .frame(height: 4)
+            } else {
+                Capsule()
+                    .stroke(
+                        Color.primary.opacity(0.18),
+                        style: StrokeStyle(lineWidth: 1, dash: [3, 2])
+                    )
+                    .frame(height: 4)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct UsageOrbitView: View {
+    let metrics: [UsagePresentationMetric]
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            HStack(spacing: 16) {
+                orbit(now: context.date)
+                legend
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 2)
+        }
     }
 
-    private var percentText: String {
-        metric.percent.map { "\(Int(round($0)))%" } ?? "—"
+    private func orbit(now: Date) -> some View {
+        let percentages = percentageMetrics
+        let countdownMetric = percentages.first
+        let countdown = UsagePresentationMetrics.countdownProgress(
+            resetDate: countdownMetric?.resetDate,
+            interval: countdownMetric?.resetInterval,
+            now: now
+        ) ?? 0
+        let time = UsagePresentationMetrics.compactRemainingTime(
+            until: countdownMetric?.resetDate,
+            now: now
+        ) ?? "—"
+
+        return ZStack {
+            if percentages.count > 1 {
+                orbitRing(
+                    metric: percentages[1],
+                    color: .orange,
+                    diameter: 112
+                )
+                orbitRing(
+                    metric: percentages[0],
+                    color: .blue,
+                    diameter: 84
+                )
+            } else if let metric = percentages.first {
+                orbitRing(
+                    metric: metric,
+                    color: .blue,
+                    diameter: 106
+                )
+            }
+
+            ZStack {
+                Circle()
+                    .fill(Color.primary.opacity(0.08))
+
+                GeometryReader { proxy in
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        Rectangle()
+                            .fill(Color.accentColor)
+                            .frame(height: proxy.size.height * countdown)
+                    }
+                }
+                .clipShape(Circle())
+
+                Text(time)
+                    .font(.caption.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.primary)
+            }
+            .frame(width: 58, height: 58)
+        }
+        .frame(width: 120, height: 120)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(orbitAccessibilityLabel(time: time, countdown: countdown))
+    }
+
+    private func orbitRing(
+        metric: UsagePresentationMetric,
+        color: Color,
+        diameter: CGFloat
+    ) -> some View {
+        ZStack {
+            Circle()
+                .stroke(Color.primary.opacity(0.10), lineWidth: 8)
+            Circle()
+                .trim(from: 0, to: metric.normalizedProgress ?? 0)
+                .stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: diameter, height: diameter)
+    }
+
+    private var legend: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            ForEach(Array(metrics.prefix(2).enumerated()), id: \.element.id) { index, metric in
+                HStack(spacing: 7) {
+                    legendMark(for: metric, index: index)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(metric.label)
+                            .font(.caption)
+                            .lineLimit(1)
+                        Text(metric.isCount
+                            ? "\(metric.valueText) available"
+                            : metric.valueText)
+                            .font(.caption.weight(.medium))
+                            .monospacedDigit()
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func legendMark(
+        for metric: UsagePresentationMetric,
+        index: Int
+    ) -> some View {
+        if metric.isCount {
+            Image(systemName: "arrow.counterclockwise.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 10)
+        } else {
+            Circle()
+                .fill(index == 0 ? Color.blue : Color.orange)
+                .frame(width: 8, height: 8)
+        }
+    }
+
+    private var percentageMetrics: [UsagePresentationMetric] {
+        metrics.filter { $0.normalizedProgress != nil }
+    }
+
+    private func orbitAccessibilityLabel(
+        time: String,
+        countdown: Double
+    ) -> String {
+        let values = metrics
+            .map { "\($0.label) \($0.accessibilityValue)" }
+            .joined(separator: ", ")
+        return "\(values), \(Int(round(countdown * 100))) percent of reset time remaining, \(time)"
     }
 }
 
@@ -450,6 +737,8 @@ private struct ProviderHeader: View {
 
 private struct OpenAIUsageView: View {
     @ObservedObject var service: ConnectedUsageService
+    let style: DetailVisualizationStyle
+    let metrics: [UsagePresentationMetric]
 
     var body: some View {
         ProviderHeader(name: "OpenAI / Codex", systemImage: "circle.hexagongrid")
@@ -457,18 +746,19 @@ private struct OpenAIUsageView: View {
         if !service.isOpenAIConfigured {
             configurePrompt("Add a ChatGPT session token in Settings.")
         } else if let usage = service.openAIUsage {
-            UsageValueRow(
-                label: windowLabel(usage.rateLimit?.primaryWindow, fallback: "Primary Window"),
-                percent: usage.rateLimit?.primaryWindow?.usedPercent,
-                resetDate: usage.rateLimit?.primaryWindow?.resetDate
+            let summaryMetrics = UsagePresentationMetrics.detailPair(
+                for: .openAI,
+                available: metrics
+            )
+            let summaryIDs = Set(summaryMetrics.map(\.id))
+
+            DetailUsageVisualization(
+                style: style,
+                metrics: summaryMetrics
             )
 
-            if let secondary = usage.rateLimit?.secondaryWindow {
-                UsageValueRow(
-                    label: windowLabel(secondary, fallback: "Secondary Window"),
-                    percent: secondary.usedPercent,
-                    resetDate: secondary.resetDate
-                )
+            ForEach(metrics.filter { !summaryIDs.contains($0.id) }) { metric in
+                UsageMetricRow(metric: metric)
             }
 
             ForEach(usage.additionalRateLimits ?? []) { additional in
@@ -514,31 +804,12 @@ private struct OpenAIUsageView: View {
             errorLabel(error)
         }
     }
-
-    private func windowLabel(_ window: OpenAIUsageWindow?, fallback: String) -> String {
-        guard let seconds = window?.limitWindowSeconds else { return fallback }
-        let hours = Int(seconds / 3_600)
-        if hours > 0, hours % 24 == 0 {
-            return "\(hours / 24)-Day Window"
-        }
-        return "\(hours)-Hour Window"
-    }
-}
-
-private func compactWindowLabel(_ window: OpenAIUsageWindow?, fallback: String) -> String {
-    guard let seconds = window?.limitWindowSeconds else { return fallback }
-    let hours = Int(seconds / 3_600)
-    if hours > 0, hours % 24 == 0 {
-        return "\(hours / 24)d"
-    }
-    if hours > 0 {
-        return "\(hours)h"
-    }
-    return fallback
 }
 
 private struct CursorUsageView: View {
     @ObservedObject var service: ConnectedUsageService
+    let style: DetailVisualizationStyle
+    let metrics: [UsagePresentationMetric]
 
     var body: some View {
         ProviderHeader(name: "Cursor", systemImage: "cursorarrow.rays")
@@ -546,16 +817,20 @@ private struct CursorUsageView: View {
         if !service.isCursorConfigured {
             configurePrompt("Add a Cursor session token in Settings.")
         } else if let usage = service.cursorUsage {
-            UsageValueRow(
-                label: "First-Party Models",
-                percent: usage.planUsage?.autoPercentUsed,
-                resetDate: usage.billingCycleEndDate
+            let summaryMetrics = UsagePresentationMetrics.detailPair(
+                for: .cursor,
+                available: metrics
             )
-            UsageValueRow(
-                label: "API",
-                percent: usage.planUsage?.apiPercentUsed,
-                resetDate: usage.billingCycleEndDate
+            let summaryIDs = Set(summaryMetrics.map(\.id))
+
+            DetailUsageVisualization(
+                style: style,
+                metrics: summaryMetrics
             )
+
+            ForEach(metrics.filter { !summaryIDs.contains($0.id) }) { metric in
+                UsageMetricRow(metric: metric)
+            }
 
             if let spend = usage.spendLimitUsage,
                let used = spend.spent,
@@ -775,36 +1050,6 @@ private struct CodeEntryView: View {
     private func submit() {
         let value = code
         Task { await service.submitOAuthCode(value) }
-    }
-}
-
-private struct UsageBucketRow: View {
-    let label: String
-    let bucket: UsageBucket?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label)
-                    .font(.subheadline)
-                Spacer()
-                Text(percentageText)
-                    .font(.subheadline)
-                    .monospacedDigit()
-            }
-            ProgressView(value: (bucket?.utilization ?? 0) / 100.0, total: 1.0)
-                .tint(colorForPct((bucket?.utilization ?? 0) / 100.0))
-            if let resetDate = bucket?.resetsAtDate {
-                Text("Resets \(resetDate, style: .relative)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var percentageText: String {
-        guard let pct = bucket?.utilization else { return "—" }
-        return "\(Int(round(pct)))%"
     }
 }
 
