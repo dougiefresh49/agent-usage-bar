@@ -9,6 +9,14 @@ struct AgentUsageBarApp: App {
     @StateObject private var connectedService = ConnectedUsageService()
     @State private var snapshotStore: UsageSnapshotStore?
     @State private var refreshListener: RefreshRequestListener?
+    @AppStorage(UsagePresentationDefaults.menuBarProviderKey)
+    private var menuBarProviderRaw = UsagePresentationDefaults.menuBarProvider.rawValue
+    @AppStorage(UsagePresentationDefaults.menuBarStyleKey)
+    private var menuBarStyleRaw = UsagePresentationDefaults.menuBarStyle.rawValue
+    @AppStorage(UsagePresentationDefaults.menuBarPrimaryMetricKey)
+    private var menuBarPrimaryMetricID = UsagePresentationMetrics.claudeFiveHourID
+    @AppStorage(UsagePresentationDefaults.menuBarSecondaryMetricKey)
+    private var menuBarSecondaryMetricID = UsagePresentationMetrics.claudeSevenDayID
 
     var body: some Scene {
         MenuBarExtra {
@@ -21,6 +29,7 @@ struct AgentUsageBarApp: App {
             )
         } label: {
             Image(nsImage: menuBarIcon)
+                .accessibilityLabel(menuBarAccessibilityLabel)
                 .task {
                     // Auto-mark existing users as setup-complete
                     if service.isAuthenticated && !UserDefaults.standard.bool(forKey: "setupComplete") {
@@ -66,15 +75,52 @@ struct AgentUsageBarApp: App {
     }
 
     private var menuBarIcon: NSImage {
-        if service.isAuthenticated {
-            return renderIcon(pct5h: service.pct5h, pct7d: service.pct7d)
+        renderMenuBarIcon(
+            provider: menuBarProvider,
+            metrics: menuBarMetrics,
+            style: menuBarStyle,
+            isConfigured: isMenuBarProviderConfigured
+        )
+    }
+
+    private var menuBarProvider: UsageProvider {
+        UsageProvider(rawValue: menuBarProviderRaw)
+            ?? UsagePresentationDefaults.menuBarProvider
+    }
+
+    private var menuBarStyle: MenuBarVisualizationStyle {
+        MenuBarVisualizationStyle(rawValue: menuBarStyleRaw)
+            ?? UsagePresentationDefaults.menuBarStyle
+    }
+
+    private var menuBarMetrics: [UsagePresentationMetric] {
+        let available = UsagePresentationMetrics.metrics(
+            for: menuBarProvider,
+            claude: service,
+            connectedService: connectedService
+        )
+        return UsagePresentationMetrics.resolvedPair(
+            provider: menuBarProvider,
+            primaryID: menuBarPrimaryMetricID,
+            secondaryID: menuBarSecondaryMetricID,
+            available: available
+        )
+    }
+
+    private var isMenuBarProviderConfigured: Bool {
+        switch menuBarProvider {
+        case .claude: return service.isAuthenticated
+        case .openAI: return connectedService.isOpenAIConfigured
+        case .cursor: return connectedService.isCursorConfigured
         }
-        if connectedService.hasAnyConfiguredService {
-            return renderIcon(
-                pct5h: connectedService.iconPrimaryUtilization,
-                pct7d: connectedService.iconSecondaryUtilization
-            )
-        }
-        return renderUnauthenticatedIcon()
+    }
+
+    private var menuBarAccessibilityLabel: String {
+        let values = menuBarMetrics
+            .map { "\($0.label) \($0.accessibilityValue)" }
+            .joined(separator: ", ")
+        return values.isEmpty
+            ? "\(menuBarProvider.settingsName) usage unavailable"
+            : "\(menuBarProvider.settingsName), \(values)"
     }
 }

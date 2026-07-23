@@ -8,6 +8,18 @@ struct SettingsWindowContent: View {
     @State private var openAIToken = ""
     @State private var cursorToken = ""
     @State private var credentialMessage: String?
+    @AppStorage(UsagePresentationDefaults.menuBarProviderKey)
+    private var menuBarProviderRaw = UsagePresentationDefaults.menuBarProvider.rawValue
+    @AppStorage(UsagePresentationDefaults.menuBarStyleKey)
+    private var menuBarStyleRaw = UsagePresentationDefaults.menuBarStyle.rawValue
+    @AppStorage(UsagePresentationDefaults.menuBarPrimaryMetricKey)
+    private var menuBarPrimaryMetricID = UsagePresentationMetrics.claudeFiveHourID
+    @AppStorage(UsagePresentationDefaults.menuBarSecondaryMetricKey)
+    private var menuBarSecondaryMetricID = UsagePresentationMetrics.claudeSevenDayID
+    @AppStorage(UsagePresentationDefaults.detailStyleKey)
+    private var detailStyleRaw = UsagePresentationDefaults.detailStyle.rawValue
+    @AppStorage(UsagePresentationDefaults.textSizeKey)
+    private var usageTextSizeRaw = UsagePresentationDefaults.textSize.rawValue
 
     var body: some View {
         Form {
@@ -26,6 +38,58 @@ struct SettingsWindowContent: View {
                             .tag(mins)
                     }
                 }
+            }
+
+            Section("Appearance") {
+                Picker("Menu Bar Provider", selection: menuBarProviderBinding) {
+                    ForEach(UsageProvider.allCases) { provider in
+                        Text(provider.settingsName)
+                            .tag(provider.rawValue)
+                    }
+                }
+
+                Picker("Menu Bar Style", selection: $menuBarStyleRaw) {
+                    ForEach(MenuBarVisualizationStyle.allCases) { style in
+                        Text(style.displayName)
+                            .tag(style.rawValue)
+                    }
+                }
+
+                Picker("Primary Stat", selection: primaryMetricBinding) {
+                    ForEach(menuBarMetricOptions) { metric in
+                        Text(metric.label)
+                            .tag(metric.id)
+                    }
+                }
+
+                Picker("Secondary Stat", selection: secondaryMetricBinding) {
+                    ForEach(menuBarMetricOptions.filter { $0.id != primaryMetricBinding.wrappedValue }) { metric in
+                        Text(metric.label)
+                            .tag(metric.id)
+                    }
+                }
+
+                Picker("Provider Details", selection: $detailStyleRaw) {
+                    ForEach(DetailVisualizationStyle.allCases) { style in
+                        Text(style.displayName)
+                            .tag(style.rawValue)
+                    }
+                }
+
+                Picker("Usage Text Size", selection: $usageTextSizeRaw) {
+                    ForEach(UsageTextSize.allCases) { size in
+                        Text(size.displayName)
+                            .tag(size.rawValue)
+                    }
+                }
+
+                Text("Text size applies to the overview and provider details. Large uses two overview columns for readability.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("Orbit is used only in provider details; the menu bar stays readable with bars or a split capsule.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Notifications") {
@@ -143,6 +207,83 @@ struct SettingsWindowContent: View {
         } catch {
             credentialMessage = "Could not save Cursor token: \(error.localizedDescription)"
         }
+    }
+
+    private var selectedMenuBarProvider: UsageProvider {
+        UsageProvider(rawValue: menuBarProviderRaw)
+            ?? UsagePresentationDefaults.menuBarProvider
+    }
+
+    private var menuBarMetricOptions: [UsagePresentationMetric] {
+        UsagePresentationMetrics.metrics(
+            for: selectedMenuBarProvider,
+            claude: service,
+            connectedService: connectedService
+        )
+    }
+
+    private var menuBarProviderBinding: Binding<String> {
+        Binding(
+            get: { selectedMenuBarProvider.rawValue },
+            set: { rawValue in
+                guard let provider = UsageProvider(rawValue: rawValue) else { return }
+                menuBarProviderRaw = provider.rawValue
+                let metrics = UsagePresentationMetrics.metrics(
+                    for: provider,
+                    claude: service,
+                    connectedService: connectedService
+                )
+                let defaults = UsagePresentationMetrics.defaults(
+                    for: provider,
+                    available: metrics
+                )
+                menuBarPrimaryMetricID = defaults.primary
+                menuBarSecondaryMetricID = defaults.secondary
+            }
+        )
+    }
+
+    private var primaryMetricBinding: Binding<String> {
+        Binding(
+            get: {
+                resolvedMetricID(
+                    stored: menuBarPrimaryMetricID,
+                    fallback: UsagePresentationMetrics.defaults(
+                        for: selectedMenuBarProvider,
+                        available: menuBarMetricOptions
+                    ).primary
+                )
+            },
+            set: { newValue in
+                menuBarPrimaryMetricID = newValue
+                if menuBarSecondaryMetricID == newValue {
+                    menuBarSecondaryMetricID = menuBarMetricOptions
+                        .first(where: { $0.id != newValue })?.id ?? newValue
+                }
+            }
+        )
+    }
+
+    private var secondaryMetricBinding: Binding<String> {
+        Binding(
+            get: {
+                let defaults = UsagePresentationMetrics.defaults(
+                    for: selectedMenuBarProvider,
+                    available: menuBarMetricOptions
+                )
+                let fallback = defaults.secondary == primaryMetricBinding.wrappedValue
+                    ? menuBarMetricOptions.first(where: { $0.id != primaryMetricBinding.wrappedValue })?.id ?? defaults.secondary
+                    : defaults.secondary
+                return resolvedMetricID(stored: menuBarSecondaryMetricID, fallback: fallback)
+            },
+            set: { menuBarSecondaryMetricID = $0 }
+        )
+    }
+
+    private func resolvedMetricID(stored: String, fallback: String) -> String {
+        menuBarMetricOptions.contains(where: { $0.id == stored })
+            ? stored
+            : fallback
     }
 }
 

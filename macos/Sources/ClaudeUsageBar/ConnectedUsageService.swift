@@ -27,14 +27,6 @@ final class ConnectedUsageService: ObservableObject {
         isCursorConfigured || isOpenAIConfigured
     }
 
-    var iconPrimaryUtilization: Double {
-        (openAIUsage?.rateLimit?.primaryWindow?.usedPercent ?? 0) / 100
-    }
-
-    var iconSecondaryUtilization: Double {
-        (cursorUsage?.planUsage?.totalPercentUsed ?? 0) / 100
-    }
-
     init(
         session: URLSession = .shared,
         cursorEndpoint: URL = URL(string: "https://cursor.com/api/dashboard/get-current-period-usage")!,
