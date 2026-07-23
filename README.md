@@ -9,7 +9,9 @@ Keep Claude, OpenAI/Codex, and Cursor subscription usage visible from one small 
 Now it's just a glimpse away — always sitting at the top of your screen.
 
 <p align="center">
-  <img src="macos/Resources/demo.png" width="400" alt="Agent Usage Bar demo">
+  <img src="macos/Resources/usage-demo--claude.png" width="384" alt="Agent Usage Bar demo">
+  <img src="macos/Resources/usage-demo--codex.png" width="384" alt="Agent Usage Bar demo">
+  <img src="macos/Resources/usage-demo--cursor.png" width="384" alt="Agent Usage Bar demo">
 </p>
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
@@ -101,6 +103,7 @@ permissions. For development, `OPENAI_SESSION_TOKEN` and `CURSOR_SESSION_TOKEN`
 environment variables are also supported.
 
 Click the icon anytime to see:
+
 - 5-hour and 7-day usage with progress bars and reset timers
 - Per-model breakdown (Opus / Sonnet) when available
 - Extra usage credits and limits
@@ -110,11 +113,11 @@ Click the icon anytime to see:
 
 All data is stored locally in `~/.config/claude-usage-bar/`:
 
-| File | Purpose |
-|------|---------|
-| `credentials.json` | Claude OAuth credentials (permissions: `0600`) |
+| File                       | Purpose                                                |
+| -------------------------- | ------------------------------------------------------ |
+| `credentials.json`         | Claude OAuth credentials (permissions: `0600`)         |
 | `service-credentials.json` | OpenAI and Cursor session tokens (permissions: `0600`) |
-| `history.json` | Usage history for the chart (30-day retention) |
+| `history.json`             | Usage history for the chart (30-day retention)         |
 
 History is buffered in memory and flushed to disk every 5 minutes and on app quit.
 Usage requests go directly to Anthropic, OpenAI, and Cursor; no credentials or usage
