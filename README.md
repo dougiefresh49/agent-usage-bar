@@ -16,6 +16,12 @@ The Orbit Meter app icon mirrors the paired usage windows shown in the popover.
   <img src="macos/Resources/usage-demo--cursor.png" width="32%" align="top" alt="Cursor usage demo">
 </p>
 
+## MacOS Widgets
+
+<p align="center">
+  <img src="docs/images/desktop-widgets-preview.png" width="100%" alt="Agent Usage Bar macOS desktop widget layouts">
+</p>
+
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
 ![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
 ![License](https://img.shields.io/badge/license-BSD--2--Clause-green)
