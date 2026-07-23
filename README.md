@@ -4,7 +4,7 @@
 
 # Agent Usage Bar
 
-Keep Claude, OpenAI/Codex, and Cursor subscription usage visible from one small macOS menu-bar app.
+Keep Claude, OpenAI/Codex, Cursor, and ElevenLabs subscription usage visible from one small macOS menu-bar app.
 
 Now it's just a glimpse away — always sitting at the top of your screen.
 
@@ -28,12 +28,13 @@ A tiny macOS menu bar app that shows your AI subscription usage at a glance. Cli
 - Claude 5-hour, 7-day, extra usage, and dynamic per-model limits such as Fable
 - OpenAI/Codex usage windows, reset timers, and available reset-credit announcements
 - Cursor first-party/API usage plus on-demand spend and billing-cycle reset
+- ElevenLabs credit balance, plan details, and next billing reset
 - Extra usage tracking with USD currency display
 - Usage history chart — see how your usage evolves over time (1h / 6h / 1d / 7d / 30d)
 - Hover over the chart to see exact values at any point
 - Configurable polling interval (5m / 15m / 30m / 1h)
 - Built-in update checks via Sparkle
-- Claude OAuth via browser; local session-token configuration for OpenAI and Cursor
+- Claude OAuth via browser; local credential configuration for OpenAI, Cursor, and ElevenLabs
 - Minimal dependencies — SwiftUI, Swift Charts, Foundation, and Sparkle for updates
 
 ## Install
@@ -89,7 +90,7 @@ make install        # copy to /Applications
 4. The icon updates automatically (default: every 30 minutes)
 5. Release builds show **Check for Updates…** in the popover so you can pull newer versions without re-downloading manually
 
-### Connect OpenAI and Cursor
+### Connect OpenAI, Cursor, and ElevenLabs
 
 Open **Settings…** from the popover:
 
@@ -97,12 +98,13 @@ Open **Settings…** from the popover:
   ChatGPT `backend-api/wham/usage` request.
 - **Cursor:** paste the `WorkosCursorSessionToken` cookie value from `cursor.com`.
   A copied Cookie header or cURL request also works.
+- **ElevenLabs:** paste an API key that can access the user subscription endpoint.
 
 These private dashboard endpoints use browser sessions. An OpenAI platform API key
 and a Cursor API key do not expose the subscription limits shown on their account
 dashboards. Tokens are saved only to the local credentials file with `0600`
-permissions. For development, `OPENAI_SESSION_TOKEN` and `CURSOR_SESSION_TOKEN`
-environment variables are also supported.
+permissions. For development, `OPENAI_SESSION_TOKEN`, `CURSOR_SESSION_TOKEN`, and
+`ELEVENLABS_API_KEY` environment variables are also supported.
 
 Click the icon anytime to see:
 
@@ -118,12 +120,12 @@ All data is stored locally in `~/.config/claude-usage-bar/`:
 | File                       | Purpose                                                |
 | -------------------------- | ------------------------------------------------------ |
 | `credentials.json`         | Claude OAuth credentials (permissions: `0600`)         |
-| `service-credentials.json` | OpenAI and Cursor session tokens (permissions: `0600`) |
+| `service-credentials.json` | OpenAI, Cursor, and ElevenLabs credentials (`0600`)    |
 | `history.json`             | Usage history for the chart (30-day retention)         |
 
 History is buffered in memory and flushed to disk every 5 minutes and on app quit.
-Usage requests go directly to Anthropic, OpenAI, and Cursor; no credentials or usage
-data are sent anywhere else.
+Usage requests go directly to Anthropic, OpenAI, Cursor, and ElevenLabs; no
+credentials or usage data are sent anywhere else.
 
 ## Agent skill
 

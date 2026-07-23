@@ -63,6 +63,12 @@ struct PopoverView: View {
                                 style: detailStyle,
                                 metrics: presentationMetrics(for: .cursor)
                             )
+                        case .elevenLabs:
+                            ElevenLabsUsageView(
+                                service: connectedService,
+                                style: detailStyle,
+                                metrics: presentationMetrics(for: .elevenLabs)
+                            )
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -90,6 +96,11 @@ struct PopoverView: View {
         .frame(maxHeight: 720)
         .environment(\.usageTextSize, usageTextSize)
         .dynamicTypeSize(usageTextSize.dynamicTypeSize)
+        .onChange(of: connectedService.isElevenLabsConfigured) { _, isConfigured in
+            if !isConfigured && selectedProvider == .elevenLabs {
+                selectedProvider = .claude
+            }
+        }
     }
 
     @ViewBuilder
@@ -199,7 +210,8 @@ struct PopoverView: View {
         [
             service.lastUpdated,
             connectedService.openAILastUpdated,
-            connectedService.cursorLastUpdated
+            connectedService.cursorLastUpdated,
+            connectedService.elevenLabsLastUpdated
         ]
         .compactMap { $0 }
         .max()
@@ -266,7 +278,7 @@ private struct ProviderOverview: View {
         LazyVGrid(
             columns: Array(
                 repeating: GridItem(.flexible(minimum: 0), spacing: 7),
-                count: textSize.overviewColumnCount
+                count: overviewColumnCount
             ),
             spacing: 7
         ) {
@@ -284,7 +296,7 @@ private struct ProviderOverview: View {
     }
 
     private var summaries: [ProviderSummary] {
-        [
+        var values = [
             ProviderSummary(
                 provider: .claude,
                 isConfigured: service.isAuthenticated,
@@ -304,6 +316,24 @@ private struct ProviderOverview: View {
                 error: connectedService.cursorError
             )
         ]
+        if connectedService.isElevenLabsConfigured {
+            values.append(
+                ProviderSummary(
+                    provider: .elevenLabs,
+                    isConfigured: true,
+                    metrics: summaryMetrics(for: .elevenLabs),
+                    error: connectedService.elevenLabsError
+                )
+            )
+        }
+        return values
+    }
+
+    private var overviewColumnCount: Int {
+        if textSize == .large || summaries.count == 4 {
+            return 2
+        }
+        return textSize.overviewColumnCount
     }
 
     private func summaryMetrics(
@@ -868,6 +898,138 @@ private struct CursorUsageView: View {
         if let error = service.cursorError, service.cursorUsage != nil {
             errorLabel(error)
         }
+    }
+}
+
+private struct ElevenLabsUsageView: View {
+    @ObservedObject var service: ConnectedUsageService
+    let style: DetailVisualizationStyle
+    let metrics: [UsagePresentationMetric]
+
+    var body: some View {
+        ProviderHeader(name: "ElevenLabs", systemImage: "waveform")
+
+        if !service.isElevenLabsConfigured {
+            configurePrompt("Add an ElevenLabs API key in Settings.")
+        } else if let usage = service.elevenLabsUsage {
+            let summaryMetrics = UsagePresentationMetrics.detailPair(
+                for: .elevenLabs,
+                available: metrics
+            )
+
+            DetailUsageVisualization(
+                style: style,
+                metrics: summaryMetrics
+            )
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    Text("Subscription")
+                        .usageFont(.legendEmphasized)
+                    Spacer()
+                    if let status = usage.status {
+                        Text(displayName(status))
+                            .usageFont(.supporting)
+                            .foregroundStyle(
+                                status.lowercased() == "active" ? .green : .secondary
+                            )
+                    }
+                }
+
+                Divider()
+
+                elevenLabsValueRow(
+                    "Plan",
+                    value: usage.tier.map(displayName) ?? "—"
+                )
+                elevenLabsValueRow(
+                    "Total credits",
+                    value: formattedCredits(usage.characterLimit)
+                )
+                elevenLabsValueRow(
+                    "Credits used",
+                    value: formattedCredits(usage.characterCount)
+                )
+                elevenLabsValueRow(
+                    "Credits remaining",
+                    value: formattedCredits(usage.creditsRemaining)
+                )
+
+                if let billingPeriod = usage.billingPeriod {
+                    elevenLabsValueRow(
+                        "Billing cycle",
+                        value: displayName(
+                            billingPeriod.replacingOccurrences(
+                                of: "_period",
+                                with: ""
+                            )
+                        )
+                    )
+                }
+
+                if let used = usage.voiceSlotsUsed, let limit = usage.voiceLimit {
+                    elevenLabsValueRow(
+                        "Voice slots",
+                        value: "\(used.formatted()) of \(limit.formatted())"
+                    )
+                }
+
+                if let used = usage.professionalVoiceSlotsUsedInWorkspace,
+                   let limit = usage.professionalVoiceLimit {
+                    elevenLabsValueRow(
+                        "Professional voices",
+                        value: "\(used.formatted()) of \(limit.formatted())"
+                    )
+                }
+
+                if let resetDate = usage.nextResetDate {
+                    elevenLabsValueRow(
+                        "Next reset",
+                        value: resetDate.formatted(
+                            date: .abbreviated,
+                            time: .shortened
+                        )
+                    )
+                }
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.primary.opacity(0.09), lineWidth: 1)
+            )
+        } else {
+            loadingOrError(service.elevenLabsError)
+        }
+
+        if let error = service.elevenLabsError, service.elevenLabsUsage != nil {
+            errorLabel(error)
+        }
+    }
+
+    private func elevenLabsValueRow(_ label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .usageFont(.supporting)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .usageFont(.legendEmphasized)
+                .monospacedDigit()
+        }
+    }
+
+    private func formattedCredits(_ value: Int?) -> String {
+        value?.formatted(.number.grouping(.automatic)) ?? "—"
+    }
+
+    private func displayName(_ rawValue: String) -> String {
+        rawValue
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
     }
 }
 

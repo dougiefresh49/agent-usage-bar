@@ -198,6 +198,48 @@ struct OpenAIResetCredit: Codable, Equatable, Identifiable {
     }
 }
 
+struct ElevenLabsSubscriptionResponse: Codable, Equatable {
+    let tier: String?
+    let characterCount: Int?
+    let characterLimit: Int?
+    let nextCharacterCountResetUnix: Double?
+    let status: String?
+    let billingPeriod: String?
+    let characterRefreshPeriod: String?
+    let voiceSlotsUsed: Int?
+    let voiceLimit: Int?
+    let professionalVoiceSlotsUsedInWorkspace: Int?
+    let professionalVoiceLimit: Int?
+
+    var creditsRemaining: Int? {
+        guard let characterCount, let characterLimit else { return nil }
+        return max(0, characterLimit - characterCount)
+    }
+
+    var utilization: Double? {
+        guard let characterCount, let characterLimit, characterLimit > 0 else { return nil }
+        return Double(characterCount) / Double(characterLimit) * 100
+    }
+
+    var nextResetDate: Date? {
+        nextCharacterCountResetUnix.map(Date.init(timeIntervalSince1970:))
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case tier
+        case characterCount = "character_count"
+        case characterLimit = "character_limit"
+        case nextCharacterCountResetUnix = "next_character_count_reset_unix"
+        case status
+        case billingPeriod = "billing_period"
+        case characterRefreshPeriod = "character_refresh_period"
+        case voiceSlotsUsed = "voice_slots_used"
+        case voiceLimit = "voice_limit"
+        case professionalVoiceSlotsUsedInWorkspace = "professional_voice_slots_used_in_workspace"
+        case professionalVoiceLimit = "professional_voice_limit"
+    }
+}
+
 enum UsageMoney {
     static func minorUnits(_ value: Double) -> String {
         ExtraUsage.formatUSD(value / 100)

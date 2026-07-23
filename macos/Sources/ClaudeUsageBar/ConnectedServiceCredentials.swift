@@ -3,9 +3,12 @@ import Foundation
 struct ConnectedServiceCredentials: Codable, Equatable {
     var openAISessionToken: String?
     var cursorSessionToken: String?
+    var elevenLabsAPIKey: String?
 
     var isEmpty: Bool {
-        openAISessionToken?.isEmpty != false && cursorSessionToken?.isEmpty != false
+        openAISessionToken?.isEmpty != false
+            && cursorSessionToken?.isEmpty != false
+            && elevenLabsAPIKey?.isEmpty != false
     }
 }
 
@@ -78,6 +81,27 @@ enum ConnectedTokenNormalizer {
             pattern: #"(?i)WorkosCursorSessionToken=([^;'"\\\s]+)"#
         ) {
             return token
+        }
+
+        return trimmed
+    }
+
+    static func elevenLabs(_ input: String) -> String? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let key = firstMatch(
+            in: trimmed,
+            pattern: #"(?i)xi-api-key:\s*([^'"\s\\]+)"#
+        ) {
+            return key
+        }
+
+        if let key = firstMatch(
+            in: trimmed,
+            pattern: #"(?i)ELEVENLABS_API_KEY\s*=\s*['"]?([^'"\s\\]+)"#
+        ) {
+            return key
         }
 
         return trimmed

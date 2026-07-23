@@ -112,6 +112,7 @@ struct AgentUsageBarApp: App {
         case .claude: return service.isAuthenticated
         case .openAI: return connectedService.isOpenAIConfigured
         case .cursor: return connectedService.isCursorConfigured
+        case .elevenLabs: return connectedService.isElevenLabsConfigured
         }
     }
 

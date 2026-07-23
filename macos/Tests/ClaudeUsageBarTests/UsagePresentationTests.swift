@@ -123,6 +123,30 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertEqual(pair.map(\.id), [primary.id, secondary.id])
     }
 
+    func testElevenLabsDetailPairUsesCreditsAndFormattedRemainingBalance() {
+        let used = percentageMetric(
+            id: UsagePresentationMetrics.elevenLabsCreditsID,
+            label: "Credits Used",
+            value: 41
+        )
+        let remaining = UsagePresentationMetric(
+            id: UsagePresentationMetrics.elevenLabsRemainingID,
+            label: "Credits Remaining",
+            shortLabel: "Left",
+            kind: .count(159602),
+            resetDate: nil,
+            resetInterval: nil
+        )
+
+        let pair = UsagePresentationMetrics.detailPair(
+            for: .elevenLabs,
+            available: [used, remaining]
+        )
+
+        XCTAssertEqual(pair.map(\.id), [used.id, remaining.id])
+        XCTAssertEqual(remaining.valueText, 159602.formatted(.number.grouping(.automatic)))
+    }
+
     func testMenuBarStylesProduceCompactTemplateImages() {
         let metrics = [
             percentageMetric(

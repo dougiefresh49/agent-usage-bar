@@ -7,6 +7,7 @@ struct SettingsWindowContent: View {
     @ObservedObject var connectedService: ConnectedUsageService
     @State private var openAIToken = ""
     @State private var cursorToken = ""
+    @State private var elevenLabsAPIKey = ""
     @State private var credentialMessage: String?
     @AppStorage(UsagePresentationDefaults.menuBarProviderKey)
     private var menuBarProviderRaw = UsagePresentationDefaults.menuBarProvider.rawValue
@@ -162,6 +163,36 @@ struct SettingsWindowContent: View {
                 }
             }
 
+            Section("ElevenLabs") {
+                Text("Add an ElevenLabs API key that can access the user subscription endpoint. The key is sent only to api.elevenlabs.io and saved locally.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                SecureField(
+                    connectedService.isElevenLabsConfigured
+                        ? "API key configured"
+                        : "ElevenLabs API key",
+                    text: $elevenLabsAPIKey
+                )
+
+                HStack {
+                    Button("Save API Key") {
+                        saveElevenLabsAPIKey()
+                    }
+                    .disabled(
+                        elevenLabsAPIKey
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .isEmpty
+                    )
+
+                    if connectedService.isElevenLabsConfigured {
+                        Button("Clear", role: .destructive) {
+                            connectedService.clearElevenLabsAPIKey()
+                        }
+                    }
+                }
+            }
+
             if let credentialMessage {
                 Text(credentialMessage)
                     .font(.caption)
@@ -206,6 +237,17 @@ struct SettingsWindowContent: View {
             Task { await connectedService.fetchCursorUsage() }
         } catch {
             credentialMessage = "Could not save Cursor token: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveElevenLabsAPIKey() {
+        do {
+            try connectedService.saveElevenLabsAPIKey(elevenLabsAPIKey)
+            elevenLabsAPIKey = ""
+            credentialMessage = "ElevenLabs API key saved locally."
+            Task { await connectedService.fetchElevenLabsUsage() }
+        } catch {
+            credentialMessage = "Could not save ElevenLabs API key: \(error.localizedDescription)"
         }
     }
 

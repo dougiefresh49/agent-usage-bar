@@ -4,6 +4,7 @@ enum UsageProvider: String, CaseIterable, Identifiable {
     case claude
     case openAI
     case cursor
+    case elevenLabs
 
     var id: Self { self }
 
@@ -12,6 +13,7 @@ enum UsageProvider: String, CaseIterable, Identifiable {
         case .claude: return "Claude"
         case .openAI: return "Codex"
         case .cursor: return "Cursor"
+        case .elevenLabs: return "ElevenLabs"
         }
     }
 
@@ -20,6 +22,7 @@ enum UsageProvider: String, CaseIterable, Identifiable {
         case .claude: return "Claude"
         case .openAI: return "OpenAI / Codex"
         case .cursor: return "Cursor"
+        case .elevenLabs: return "ElevenLabs"
         }
     }
 
@@ -28,6 +31,7 @@ enum UsageProvider: String, CaseIterable, Identifiable {
         case .claude: return "sparkles"
         case .openAI: return "circle.hexagongrid"
         case .cursor: return "cursorarrow.rays"
+        case .elevenLabs: return "waveform"
         }
     }
 }
@@ -143,7 +147,7 @@ struct UsagePresentationMetric: Identifiable, Equatable {
         case .percentage(nil), .count(nil):
             return "—"
         case .count(let count?):
-            return "\(count)"
+            return count.formatted(.number.grouping(.automatic))
         }
     }
 
@@ -172,6 +176,8 @@ enum UsagePresentationMetrics {
     static let cursorModelsID = "cursor.models"
     static let cursorAPIID = "cursor.api"
     static let cursorTotalID = "cursor.total"
+    static let elevenLabsCreditsID = "elevenlabs.credits"
+    static let elevenLabsRemainingID = "elevenlabs.remaining"
 
     static func metrics(
         for provider: UsageProvider,
@@ -188,6 +194,8 @@ enum UsagePresentationMetrics {
             )
         case .cursor:
             return cursorMetrics(connectedService.cursorUsage)
+        case .elevenLabs:
+            return elevenLabsMetrics(connectedService.elevenLabsUsage)
         }
     }
 
@@ -203,6 +211,8 @@ enum UsagePresentationMetrics {
             preferred = [openAIPrimaryID, openAIResetCreditsID, openAISecondaryID]
         case .cursor:
             preferred = [cursorModelsID, cursorAPIID, cursorTotalID]
+        case .elevenLabs:
+            preferred = [elevenLabsCreditsID, elevenLabsRemainingID]
         }
 
         let availableIDs = Set(metrics.map(\.id))
@@ -256,6 +266,11 @@ enum UsagePresentationMetrics {
             return compactPair(
                 primary: metrics.first(where: { $0.id == cursorModelsID }),
                 secondary: metrics.first(where: { $0.id == cursorAPIID })
+            )
+        case .elevenLabs:
+            return compactPair(
+                primary: metrics.first(where: { $0.id == elevenLabsCreditsID }),
+                secondary: metrics.first(where: { $0.id == elevenLabsRemainingID })
             )
         }
     }
@@ -451,6 +466,39 @@ enum UsagePresentationMetrics {
                 resetInterval: interval
             )
         ]
+    }
+
+    private static func elevenLabsMetrics(
+        _ usage: ElevenLabsSubscriptionResponse?
+    ) -> [UsagePresentationMetric] {
+        [
+            percentageMetric(
+                id: elevenLabsCreditsID,
+                label: "Credits Used",
+                shortLabel: "Used",
+                percent: usage?.utilization,
+                resetDate: usage?.nextResetDate,
+                resetInterval: billingInterval(for: usage?.characterRefreshPeriod)
+            ),
+            UsagePresentationMetric(
+                id: elevenLabsRemainingID,
+                label: "Credits Remaining",
+                shortLabel: "Left",
+                kind: .count(usage?.creditsRemaining),
+                resetDate: nil,
+                resetInterval: nil
+            )
+        ]
+    }
+
+    private static func billingInterval(for period: String?) -> TimeInterval? {
+        switch period {
+        case "daily_period": return 24 * 60 * 60
+        case "weekly_period": return 7 * 24 * 60 * 60
+        case "monthly_period": return 30 * 24 * 60 * 60
+        case "annual_period", "yearly_period": return 365 * 24 * 60 * 60
+        default: return nil
+        }
     }
 
     private static func percentageMetric(
