@@ -18,6 +18,8 @@ struct SettingsWindowContent: View {
     private var menuBarSecondaryMetricID = UsagePresentationMetrics.claudeSevenDayID
     @AppStorage(UsagePresentationDefaults.detailStyleKey)
     private var detailStyleRaw = UsagePresentationDefaults.detailStyle.rawValue
+    @AppStorage(UsagePresentationDefaults.textSizeKey)
+    private var usageTextSizeRaw = UsagePresentationDefaults.textSize.rawValue
 
     var body: some View {
         Form {
@@ -73,6 +75,17 @@ struct SettingsWindowContent: View {
                             .tag(style.rawValue)
                     }
                 }
+
+                Picker("Usage Text Size", selection: $usageTextSizeRaw) {
+                    ForEach(UsageTextSize.allCases) { size in
+                        Text(size.displayName)
+                            .tag(size.rawValue)
+                    }
+                }
+
+                Text("Text size applies to the overview and provider details. Large uses two overview columns for readability.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Text("Orbit is used only in provider details; the menu bar stays readable with bars or a split capsule.")
                     .font(.caption)

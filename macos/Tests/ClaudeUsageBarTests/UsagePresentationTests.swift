@@ -3,6 +3,13 @@ import XCTest
 
 @MainActor
 final class UsagePresentationTests: XCTestCase {
+    func testUsageTextSizeDefaultsToComfortableAndLargeUsesTwoColumns() {
+        XCTAssertEqual(UsagePresentationDefaults.textSize, .comfortable)
+        XCTAssertEqual(UsageTextSize.compact.overviewColumnCount, 3)
+        XCTAssertEqual(UsageTextSize.comfortable.overviewColumnCount, 3)
+        XCTAssertEqual(UsageTextSize.large.overviewColumnCount, 2)
+    }
+
     func testCountdownProgressMapsFiveHourSessionToExpectedDrainLevels() throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
         let interval: TimeInterval = 5 * 60 * 60

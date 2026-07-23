@@ -62,16 +62,38 @@ enum DetailVisualizationStyle: String, CaseIterable, Identifiable {
     }
 }
 
+enum UsageTextSize: String, CaseIterable, Identifiable {
+    case compact
+    case comfortable
+    case large
+
+    var id: Self { self }
+
+    var displayName: String {
+        switch self {
+        case .compact: return "Compact"
+        case .comfortable: return "Comfortable"
+        case .large: return "Large"
+        }
+    }
+
+    var overviewColumnCount: Int {
+        self == .large ? 2 : 3
+    }
+}
+
 enum UsagePresentationDefaults {
     static let menuBarProviderKey = "menuBarProvider"
     static let menuBarStyleKey = "menuBarVisualizationStyle"
     static let menuBarPrimaryMetricKey = "menuBarPrimaryMetric"
     static let menuBarSecondaryMetricKey = "menuBarSecondaryMetric"
     static let detailStyleKey = "detailVisualizationStyle"
+    static let textSizeKey = "usageTextSize"
 
     static let menuBarProvider = UsageProvider.claude
     static let menuBarStyle = MenuBarVisualizationStyle.bars
     static let detailStyle = DetailVisualizationStyle.bars
+    static let textSize = UsageTextSize.comfortable
 }
 
 enum UsageMetricKind: Equatable {
@@ -238,7 +260,7 @@ enum UsagePresentationMetrics {
         }
     }
 
-    static func countdownProgress(
+    nonisolated static func countdownProgress(
         resetDate: Date?,
         interval: TimeInterval?,
         now: Date = Date()
@@ -247,7 +269,7 @@ enum UsagePresentationMetrics {
         return min(max(resetDate.timeIntervalSince(now) / interval, 0), 1)
     }
 
-    static func compactRemainingTime(
+    nonisolated static func compactRemainingTime(
         until resetDate: Date?,
         now: Date = Date()
     ) -> String? {

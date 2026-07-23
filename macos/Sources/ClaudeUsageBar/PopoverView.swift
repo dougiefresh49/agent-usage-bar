@@ -9,6 +9,8 @@ struct PopoverView: View {
     @AppStorage("setupComplete") private var setupComplete = false
     @AppStorage(UsagePresentationDefaults.detailStyleKey)
     private var detailStyleRaw = UsagePresentationDefaults.detailStyle.rawValue
+    @AppStorage(UsagePresentationDefaults.textSizeKey)
+    private var usageTextSizeRaw = UsagePresentationDefaults.textSize.rawValue
     @State private var selectedProvider: UsageProvider = .claude
     @State private var detailContentHeight: CGFloat = 0
 
@@ -26,10 +28,10 @@ struct PopoverView: View {
             } else {
                 HStack {
                     Text("AI Usage")
-                        .font(.headline)
+                        .usageFont(.pageTitle)
                     Spacer()
                     Text("Overview")
-                        .font(.caption2.weight(.medium))
+                        .usageFont(.sectionEyebrow)
                         .foregroundStyle(.tertiary)
                         .textCase(.uppercase)
                         .tracking(0.5)
@@ -38,7 +40,8 @@ struct PopoverView: View {
                 ProviderOverview(
                     service: service,
                     connectedService: connectedService,
-                    selectedProvider: $selectedProvider
+                    selectedProvider: $selectedProvider,
+                    textSize: usageTextSize
                 )
 
                 Divider()
@@ -85,6 +88,8 @@ struct PopoverView: View {
         .padding()
         .frame(width: 390)
         .frame(maxHeight: 720)
+        .environment(\.usageTextSize, usageTextSize)
+        .dynamicTypeSize(usageTextSize.dynamicTypeSize)
     }
 
     @ViewBuilder
@@ -117,13 +122,13 @@ struct PopoverView: View {
                 UsageChartView(historyService: historyService)
                     .padding(.top, 4)
             }
-            .font(.caption)
+            .usageFont(.supporting)
         } else {
             if service.isAwaitingCode {
                 CodeEntryView(service: service)
             } else {
                 Text("Connect Claude to view account limits.")
-                    .font(.caption)
+                    .usageFont(.supporting)
                     .foregroundStyle(.secondary)
 
                 Button("Sign in with Claude") {
@@ -137,7 +142,7 @@ struct PopoverView: View {
         if let error = service.lastError {
             Label(error, systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.red)
-                .font(.caption)
+                .usageFont(.supporting)
         }
     }
 
@@ -205,6 +210,11 @@ struct PopoverView: View {
             ?? UsagePresentationDefaults.detailStyle
     }
 
+    private var usageTextSize: UsageTextSize {
+        UsageTextSize(rawValue: usageTextSizeRaw)
+            ?? UsagePresentationDefaults.textSize
+    }
+
     private func presentationMetrics(
         for provider: UsageProvider
     ) -> [UsagePresentationMetric] {
@@ -250,12 +260,13 @@ private struct ProviderOverview: View {
     @ObservedObject var service: UsageService
     @ObservedObject var connectedService: ConnectedUsageService
     @Binding var selectedProvider: UsageProvider
+    let textSize: UsageTextSize
 
     var body: some View {
         LazyVGrid(
             columns: Array(
                 repeating: GridItem(.flexible(minimum: 0), spacing: 7),
-                count: 3
+                count: textSize.overviewColumnCount
             ),
             spacing: 7
         ) {
@@ -320,10 +331,10 @@ private struct ProviderSummaryCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 5) {
                     Image(systemName: summary.provider.systemImage)
-                        .font(.caption)
+                        .usageFont(.overviewTitle)
                         .foregroundStyle(isSelected ? Color.accentColor : .secondary)
                     Text(summary.provider.shortName)
-                        .font(.caption.weight(.semibold))
+                        .usageFont(.overviewTitle)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }
@@ -341,7 +352,7 @@ private struct ProviderSummaryCard: View {
                 }
             }
             .padding(8)
-            .frame(maxWidth: .infinity, minHeight: 68, maxHeight: 68, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(isSelected ? Color.accentColor.opacity(0.11) : Color.primary.opacity(0.045))
@@ -366,7 +377,7 @@ private struct ProviderSummaryCard: View {
                 .fill(color)
                 .frame(width: 5, height: 5)
             Text(text)
-                .font(.caption2)
+                .usageFont(.overviewMetric)
                 .foregroundStyle(color)
                 .lineLimit(1)
         }
@@ -397,7 +408,8 @@ private struct CompactMetricCapsule: View {
                 }
             }
         }
-        .frame(height: 28)
+        .padding(.vertical, 5)
+        .frame(minHeight: 30)
         .background(Color.primary.opacity(0.055), in: Capsule())
         .overlay(
             Capsule()
@@ -418,11 +430,11 @@ private struct CompactMetricCell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(compactText)
-            .font(.caption2)
-            .monospacedDigit()
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .frame(maxWidth: .infinity, alignment: .center)
+                .usageFont(.overviewMetric)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity, alignment: .center)
 
             if let progress = metric?.normalizedProgress {
                 GeometryReader { proxy in
@@ -480,10 +492,10 @@ private struct UsageMetricRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(metric.label)
-                    .font(.subheadline)
+                    .usageFont(.metric)
                 Spacer()
                 Text(metric.valueText)
-                    .font(.subheadline)
+                    .usageFont(.metric)
                     .monospacedDigit()
             }
 
@@ -494,11 +506,11 @@ private struct UsageMetricRow: View {
 
             if let resetDate = metric.resetDate {
                 Text("Resets \(resetDate, style: .relative)")
-                    .font(.caption2)
+                    .usageFont(.supporting)
                     .foregroundStyle(.secondary)
             } else if metric.count != nil {
                 Text("Available")
-                    .font(.caption2)
+                    .usageFont(.supporting)
                     .foregroundStyle(.secondary)
             }
         }
@@ -521,7 +533,8 @@ private struct DetailMetricCapsule: View {
                 }
             }
         }
-        .frame(height: 48)
+        .padding(.vertical, 7)
+        .frame(minHeight: 52)
         .background(Color.primary.opacity(0.045), in: Capsule())
         .overlay(
             Capsule()
@@ -549,7 +562,7 @@ private struct DetailMetricCapsuleCell: View {
                 Text(metric?.valueText ?? "—")
                     .monospacedDigit()
             }
-            .font(.caption)
+            .usageFont(.legend)
 
             if let progress = metric?.normalizedProgress {
                 GeometryReader { proxy in
@@ -638,7 +651,7 @@ private struct UsageOrbitView: View {
                 .clipShape(Circle())
 
                 Text(time)
-                    .font(.caption.weight(.medium))
+                    .usageFont(.orbitTime)
                     .monospacedDigit()
                     .foregroundStyle(Color.primary)
             }
@@ -672,12 +685,12 @@ private struct UsageOrbitView: View {
                     legendMark(for: metric, index: index)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(metric.label)
-                            .font(.caption)
+                            .usageFont(.legend)
                             .lineLimit(1)
                         Text(metric.isCount
                             ? "\(metric.valueText) available"
                             : metric.valueText)
-                            .font(.caption.weight(.medium))
+                            .usageFont(.legendEmphasized)
                             .monospacedDigit()
                     }
                 }
@@ -693,7 +706,7 @@ private struct UsageOrbitView: View {
     ) -> some View {
         if metric.isCount {
             Image(systemName: "arrow.counterclockwise.circle")
-                .font(.caption)
+                .usageFont(.legend)
                 .foregroundStyle(.secondary)
                 .frame(width: 10)
         } else {
@@ -725,10 +738,10 @@ private struct ProviderHeader: View {
     var body: some View {
         HStack {
             Label(name, systemImage: systemImage)
-                .font(.subheadline.weight(.semibold))
+                .usageFont(.detailHeader)
             Spacer()
             Text("Details")
-                .font(.caption2)
+                .usageFont(.supporting)
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -778,15 +791,15 @@ private struct OpenAIUsageView: View {
                         ForEach(announcements) { credit in
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(credit.title ?? "Available reset")
-                                    .font(.caption.weight(.medium))
+                                    .usageFont(.legendEmphasized)
                                 if let description = credit.description {
                                     Text(description)
-                                        .font(.caption2)
+                                        .usageFont(.supporting)
                                         .foregroundStyle(.secondary)
                                 }
                                 if let expiry = credit.expiresAtDate {
                                     Text("Expires \(expiry, style: .relative)")
-                                        .font(.caption2)
+                                        .usageFont(.supporting)
                                         .foregroundStyle(.secondary)
                                 }
                             }
@@ -794,7 +807,7 @@ private struct OpenAIUsageView: View {
                     }
                     .padding(.top, 4)
                 }
-                .font(.caption)
+                .usageFont(.supporting)
             }
         } else {
             loadingOrError(service.openAIError)
@@ -838,10 +851,10 @@ private struct CursorUsageView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("On-Demand")
-                            .font(.subheadline)
+                            .usageFont(.metric)
                         Spacer()
                         Text("\(UsageMoney.minorUnits(used)) / \(UsageMoney.minorUnits(limit))")
-                            .font(.subheadline)
+                            .usageFont(.metric)
                             .monospacedDigit()
                     }
                     ProgressView(value: (spend.utilization ?? 0) / 100, total: 1)
@@ -867,17 +880,17 @@ private struct UsageValueRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(label)
-                    .font(.subheadline)
+                    .usageFont(.metric)
                 Spacer()
                 Text(percent.map { "\(Int(round($0)))%" } ?? "—")
-                    .font(.subheadline)
+                    .usageFont(.metric)
                     .monospacedDigit()
             }
             ProgressView(value: (percent ?? 0) / 100, total: 1)
                 .tint(colorForPct((percent ?? 0) / 100))
             if let resetDate {
                 Text("Resets \(resetDate, style: .relative)")
-                    .font(.caption2)
+                    .usageFont(.supporting)
                     .foregroundStyle(.secondary)
             }
         }
@@ -887,13 +900,13 @@ private struct UsageValueRow: View {
 private func configurePrompt(_ text: String) -> some View {
     HStack {
         Text(text)
-            .font(.caption)
+            .usageFont(.supporting)
             .foregroundStyle(.secondary)
         Spacer()
         SettingsLink {
             Text("Configure")
         }
-        .font(.caption)
+        .usageFont(.supporting)
         .buttonStyle(.borderless)
     }
 }
@@ -907,7 +920,7 @@ private func loadingOrError(_ error: String?) -> some View {
             ProgressView()
                 .controlSize(.small)
             Text("Loading…")
-                .font(.caption)
+                .usageFont(.supporting)
                 .foregroundStyle(.secondary)
         }
     }
@@ -915,7 +928,7 @@ private func loadingOrError(_ error: String?) -> some View {
 
 private func errorLabel(_ error: String) -> some View {
     Label(error, systemImage: "exclamationmark.triangle")
-        .font(.caption)
+        .usageFont(.supporting)
         .foregroundStyle(.red)
 }
 
@@ -1059,16 +1072,16 @@ private struct ExtraUsageRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Extra Usage")
-                .font(.subheadline)
+                .usageFont(.metric)
             if let used = extra.usedCreditsAmount, let limit = extra.monthlyLimitAmount {
                 HStack {
                     Text("\(ExtraUsage.formatUSD(used)) / \(ExtraUsage.formatUSD(limit))")
-                        .font(.caption)
+                        .usageFont(.legend)
                         .monospacedDigit()
                     Spacer()
                     if let pct = extra.utilization {
                         Text("\(Int(round(pct)))%")
-                            .font(.caption)
+                            .usageFont(.legend)
                             .monospacedDigit()
                     }
                 }
@@ -1112,5 +1125,98 @@ private func colorForPct(_ pct: Double) -> Color {
     case ..<0.60: return .green
     case 0.60..<0.80: return .yellow
     default: return .red
+    }
+}
+
+private struct UsageTextSizeEnvironmentKey: EnvironmentKey {
+    static let defaultValue = UsagePresentationDefaults.textSize
+}
+
+private extension EnvironmentValues {
+    var usageTextSize: UsageTextSize {
+        get { self[UsageTextSizeEnvironmentKey.self] }
+        set { self[UsageTextSizeEnvironmentKey.self] = newValue }
+    }
+}
+
+private enum UsageFontRole {
+    case pageTitle
+    case sectionEyebrow
+    case overviewTitle
+    case overviewMetric
+    case detailHeader
+    case metric
+    case supporting
+    case legend
+    case legendEmphasized
+    case orbitTime
+
+    func font(for size: UsageTextSize) -> Font {
+        switch (self, size) {
+        case (.pageTitle, .compact): return .headline
+        case (.pageTitle, .comfortable): return .title3.weight(.semibold)
+        case (.pageTitle, .large): return .title2.weight(.semibold)
+
+        case (.sectionEyebrow, .compact): return .caption2.weight(.medium)
+        case (.sectionEyebrow, .comfortable): return .caption.weight(.medium)
+        case (.sectionEyebrow, .large): return .callout.weight(.medium)
+
+        case (.overviewTitle, .compact): return .caption.weight(.semibold)
+        case (.overviewTitle, .comfortable): return .callout.weight(.semibold)
+        case (.overviewTitle, .large): return .body.weight(.semibold)
+
+        case (.overviewMetric, .compact): return .caption2
+        case (.overviewMetric, .comfortable): return .caption
+        case (.overviewMetric, .large): return .callout
+
+        case (.detailHeader, .compact): return .subheadline.weight(.semibold)
+        case (.detailHeader, .comfortable): return .headline
+        case (.detailHeader, .large): return .title3.weight(.semibold)
+
+        case (.metric, .compact): return .subheadline
+        case (.metric, .comfortable): return .body
+        case (.metric, .large): return .title3
+
+        case (.supporting, .compact): return .caption2
+        case (.supporting, .comfortable): return .caption
+        case (.supporting, .large): return .callout
+
+        case (.legend, .compact): return .caption
+        case (.legend, .comfortable): return .callout
+        case (.legend, .large): return .body
+
+        case (.legendEmphasized, .compact): return .caption.weight(.medium)
+        case (.legendEmphasized, .comfortable): return .callout.weight(.semibold)
+        case (.legendEmphasized, .large): return .body.weight(.semibold)
+
+        case (.orbitTime, .compact): return .caption.weight(.medium)
+        case (.orbitTime, .comfortable): return .callout.weight(.medium)
+        case (.orbitTime, .large): return .body.weight(.medium)
+        }
+    }
+}
+
+private struct UsageFontModifier: ViewModifier {
+    @Environment(\.usageTextSize) private var textSize
+    let role: UsageFontRole
+
+    func body(content: Content) -> some View {
+        content.font(role.font(for: textSize))
+    }
+}
+
+private extension View {
+    func usageFont(_ role: UsageFontRole) -> some View {
+        modifier(UsageFontModifier(role: role))
+    }
+}
+
+private extension UsageTextSize {
+    var dynamicTypeSize: DynamicTypeSize {
+        switch self {
+        case .compact: return .large
+        case .comfortable: return .xxLarge
+        case .large: return .accessibility1
+        }
     }
 }
