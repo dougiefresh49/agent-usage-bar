@@ -678,19 +678,28 @@ private struct PreferredProviderDetailsView: View {
                 NoProviderData()
             } else {
                 GeometryReader { proxy in
-                    HStack(spacing: 10) {
-                        VStack(spacing: 4) {
+                    HStack(spacing: 8) {
+                        Group {
                             if entry.snapshot.detailStyle == .orbit {
-                                OrbitGraphic(
-                                    metrics: topMetrics,
-                                    diameter: min(proxy.size.height * 0.72, 98),
-                                    lineWidth: 7
-                                )
-                                OrbitLegend(
-                                    metrics: topMetrics,
-                                    compact: true,
-                                    horizontal: true
-                                )
+                                ZStack {
+                                    OrbitGraphic(
+                                        metrics: topMetrics,
+                                        diameter: min(proxy.size.height * 0.82, 122),
+                                        lineWidth: 7
+                                    )
+                                    .offset(y: -6)
+
+                                    OrbitLegend(
+                                        metrics: topMetrics,
+                                        compact: true,
+                                        horizontal: true
+                                    )
+                                    .frame(
+                                        maxWidth: .infinity,
+                                        maxHeight: .infinity,
+                                        alignment: .bottom
+                                    )
+                                }
                             } else {
                                 DetailVisualization(
                                     style: entry.snapshot.detailStyle,
@@ -698,7 +707,7 @@ private struct PreferredProviderDetailsView: View {
                                 )
                             }
                         }
-                        .frame(width: proxy.size.width * 0.65)
+                        .frame(width: proxy.size.width * 0.68)
                         .frame(maxHeight: .infinity, alignment: .center)
 
                         VStack(spacing: 7) {
@@ -711,7 +720,7 @@ private struct PreferredProviderDetailsView: View {
                 }
             }
         }
-        .widgetSurface(padding: 12)
+        .widgetSurface(padding: 8)
         .accessibilityLabel("\(provider.name) details")
         .accessibilityElement(children: .contain)
     }
@@ -759,35 +768,44 @@ private struct PreferredProviderSnapshotView: View {
         let data = entry.snapshot.data(for: provider)
         let metrics = WidgetMetricSelection.topMetrics(for: provider, in: data)
 
-        VStack(alignment: .leading, spacing: 8) {
-            WidgetHeader(provider: provider, compact: true)
-
+        Group {
             if data == nil {
-                NoProviderData(compact: true)
+                VStack(alignment: .leading, spacing: 8) {
+                    WidgetHeader(provider: provider, compact: true)
+                    NoProviderData(compact: true)
+                }
             } else if entry.snapshot.detailStyle == .orbit {
-                Spacer(minLength: 0)
-                OrbitGraphic(metrics: metrics, diameter: 82, lineWidth: 6)
-                    .frame(maxWidth: .infinity)
-                HStack {
-                    ForEach(metrics.prefix(2)) { metric in
-                        Text("\(metric.compactLabel) \(metric.displayValue)")
-                            .font(.system(size: 8, weight: .semibold))
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity)
+                ZStack {
+                    WidgetHeader(provider: provider, compact: true)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+                    OrbitGraphic(metrics: metrics, diameter: 112, lineWidth: 7)
+
+                    HStack(spacing: 4) {
+                        ForEach(metrics.prefix(2)) { metric in
+                            Text("\(metric.compactLabel) \(metric.displayValue)")
+                                .font(.system(size: 8, weight: .semibold))
+                                .monospacedDigit()
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity)
+                        }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 }
             } else {
-                Spacer(minLength: 0)
-                DetailVisualization(
-                    style: entry.snapshot.detailStyle,
-                    metrics: metrics,
-                    compact: true
-                )
-                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 8) {
+                    WidgetHeader(provider: provider, compact: true)
+                    Spacer(minLength: 0)
+                    DetailVisualization(
+                        style: entry.snapshot.detailStyle,
+                        metrics: metrics,
+                        compact: true
+                    )
+                    Spacer(minLength: 0)
+                }
             }
         }
-        .widgetSurface()
+        .widgetSurface(padding: 8)
     }
 }
 
