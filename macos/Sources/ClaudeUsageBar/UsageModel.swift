@@ -6,6 +6,7 @@ struct UsageResponse: Codable {
     let sevenDayOpus: UsageBucket?
     let sevenDaySonnet: UsageBucket?
     let extraUsage: ExtraUsage?
+    let limits: [ClaudeUsageLimit]?
 
     enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
@@ -13,6 +14,23 @@ struct UsageResponse: Codable {
         case sevenDayOpus = "seven_day_opus"
         case sevenDaySonnet = "seven_day_sonnet"
         case extraUsage = "extra_usage"
+        case limits
+    }
+
+    init(
+        fiveHour: UsageBucket?,
+        sevenDay: UsageBucket?,
+        sevenDayOpus: UsageBucket?,
+        sevenDaySonnet: UsageBucket?,
+        extraUsage: ExtraUsage?,
+        limits: [ClaudeUsageLimit]? = nil
+    ) {
+        self.fiveHour = fiveHour
+        self.sevenDay = sevenDay
+        self.sevenDayOpus = sevenDayOpus
+        self.sevenDaySonnet = sevenDaySonnet
+        self.extraUsage = extraUsage
+        self.limits = limits
     }
 
     func reconciled(with previous: UsageResponse?, now: Date = Date()) -> UsageResponse {
@@ -37,8 +55,60 @@ struct UsageResponse: Codable {
                 resetInterval: 7 * 24 * 60 * 60,
                 now: now
             ),
-            extraUsage: extraUsage
+            extraUsage: extraUsage,
+            limits: limits
         )
+    }
+
+    var scopedModelLimits: [ClaudeUsageLimit] {
+        (limits ?? []).filter {
+            $0.scope?.model?.displayName?.isEmpty == false
+        }
+    }
+}
+
+struct ClaudeUsageLimit: Codable, Equatable, Identifiable {
+    let kind: String
+    let group: String?
+    let percent: Double?
+    let severity: String?
+    let resetsAt: String?
+    let scope: ClaudeUsageScope?
+    let isActive: Bool?
+
+    var id: String {
+        [kind, scope?.model?.displayName, resetsAt]
+            .compactMap { $0 }
+            .joined(separator: ":")
+    }
+
+    var resetsAtDate: Date? {
+        UsageBucket(utilization: percent, resetsAt: resetsAt).resetsAtDate
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case group
+        case percent
+        case severity
+        case resetsAt = "resets_at"
+        case scope
+        case isActive = "is_active"
+    }
+}
+
+struct ClaudeUsageScope: Codable, Equatable {
+    let model: ClaudeUsageModel?
+    let surface: String?
+}
+
+struct ClaudeUsageModel: Codable, Equatable {
+    let id: String?
+    let displayName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName = "display_name"
     }
 }
 

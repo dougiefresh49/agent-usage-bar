@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_NAME="ClaudeUsageBar"
+APP_NAME="AgentUsageBar"
 BUILD_DIR="$PROJECT_DIR/.build"
 APP_BUNDLE="$PROJECT_DIR/$APP_NAME.app"
 ZIP_PATH="$PROJECT_DIR/$APP_NAME.zip"
@@ -59,7 +59,7 @@ version_to_build_number() {
 
 build_app_bundle() {
     echo "==> Building release binary..."
-    swift build -c release
+    swift build -c release --disable-keychain
 
     local binary="$BUILD_DIR/release/$APP_NAME"
     if [[ ! -f "$binary" ]]; then
@@ -140,35 +140,7 @@ create_zip() {
 
 create_applications_alias() {
     local staging_dir="$1"
-    local icon_script
-    icon_script="$(mktemp "${TMPDIR:-/tmp}/set-applications-alias-icon.XXXXXX.swift")"
-
-    osascript - "$staging_dir" <<'OSA'
-on run argv
-    set destinationFolder to POSIX file (item 1 of argv)
-    set applicationsFolder to POSIX file "/Applications" as alias
-
-    tell application "Finder"
-        make new alias file at destinationFolder to applicationsFolder with properties {name:"Applications"}
-    end tell
-end run
-OSA
-
-    cat > "$icon_script" <<'SWIFT'
-import AppKit
-
-let target = CommandLine.arguments[1]
-let source = CommandLine.arguments[2]
-let icon = NSWorkspace.shared.icon(forFile: source)
-
-guard NSWorkspace.shared.setIcon(icon, forFile: target, options: []) else {
-    fputs("Failed to set custom icon on alias\n", stderr)
-    exit(1)
-}
-SWIFT
-
-    swift "$icon_script" "$staging_dir/Applications" "/Applications"
-    rm -f "$icon_script"
+    ln -s /Applications "$staging_dir/Applications"
 }
 
 create_dmg() {
@@ -204,6 +176,7 @@ create_dmg() {
         --icon "Applications" 385 225
         --format UDZO
         --hdiutil-quiet
+        --skip-jenkins
     )
 
     "${create_dmg_args[@]}" "$DMG_PATH" "$staging_dir" > /dev/null

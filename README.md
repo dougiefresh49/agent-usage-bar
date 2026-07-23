@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="macos/Resources/icon.png" width="128" alt="Claude Usage Bar icon">
+  <img src="macos/Resources/icon.png" width="128" alt="Agent Usage Bar icon">
 </p>
 
-# Claude Usage Bar
+# Agent Usage Bar
 
-Have you ever found yourself refreshing the Claude usage page, wondering how close you are to hitting your rate limit? Yeah, I've been there too. So I built this.
+Keep Claude, OpenAI/Codex, and Cursor subscription usage visible from one small macOS menu-bar app.
 
 Now it's just a glimpse away — always sitting at the top of your screen.
 
 <p align="center">
-  <img src="macos/Resources/demo.png" width="400" alt="Claude Usage Bar demo">
+  <img src="macos/Resources/demo.png" width="400" alt="Agent Usage Bar demo">
 </p>
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
@@ -18,24 +18,26 @@ Now it's just a glimpse away — always sitting at the top of your screen.
 
 ## What it does
 
-A tiny macOS menu bar app that shows your Claude API usage at a glance. Click it for the full picture:
+A tiny macOS menu bar app that shows your AI subscription usage at a glance. Click it for the full picture:
 
 - Menu bar icon with a mini dual-bar showing 5-hour and 7-day utilization
-- Detailed popover with per-window usage, per-model breakdown, and reset timers
+- Claude 5-hour, 7-day, extra usage, and dynamic per-model limits such as Fable
+- OpenAI/Codex usage windows, reset timers, and available reset-credit announcements
+- Cursor first-party/API usage plus on-demand spend and billing-cycle reset
 - Extra usage tracking with USD currency display
 - Usage history chart — see how your usage evolves over time (1h / 6h / 1d / 7d / 30d)
 - Hover over the chart to see exact values at any point
 - Configurable polling interval (5m / 15m / 30m / 1h)
 - Built-in update checks via Sparkle
-- Just sign in — OAuth via browser, no API keys to manage
+- Claude OAuth via browser; local session-token configuration for OpenAI and Cursor
 - Minimal dependencies — SwiftUI, Swift Charts, Foundation, and Sparkle for updates
 
 ## Install
 
 ### Download
 
-1. Download `ClaudeUsageBar.dmg` from the [latest release](https://github.com/Blimp-Labs/claude-usage-bar/releases/latest)
-2. Open the disk image and drag `ClaudeUsageBar.app` into `Applications`
+1. Download `AgentUsageBar.dmg` from the [latest release](https://github.com/Blimp-Labs/claude-usage-bar/releases/latest)
+2. Open the disk image and drag `AgentUsageBar.app` into `Applications`
 3. Launch the app from `/Applications`
 4. macOS may require right-click → **Open** on first launch
 
@@ -59,6 +61,21 @@ make install        # copy to /Applications
 4. The icon updates automatically (default: every 30 minutes)
 5. Release builds show **Check for Updates…** in the popover so you can pull newer versions without re-downloading manually
 
+### Connect OpenAI and Cursor
+
+Open **Settings…** from the popover:
+
+- **OpenAI / Codex:** paste the bearer token from the `Authorization` header of the
+  ChatGPT `backend-api/wham/usage` request.
+- **Cursor:** paste the `WorkosCursorSessionToken` cookie value from `cursor.com`.
+  A copied Cookie header or cURL request also works.
+
+These private dashboard endpoints use browser sessions. An OpenAI platform API key
+and a Cursor API key do not expose the subscription limits shown on their account
+dashboards. Tokens are saved only to the local credentials file with `0600`
+permissions. For development, `OPENAI_SESSION_TOKEN` and `CURSOR_SESSION_TOKEN`
+environment variables are also supported.
+
 Click the icon anytime to see:
 - 5-hour and 7-day usage with progress bars and reset timers
 - Per-model breakdown (Opus / Sonnet) when available
@@ -71,15 +88,18 @@ All data is stored locally in `~/.config/claude-usage-bar/`:
 
 | File | Purpose |
 |------|---------|
-| `token` | OAuth access token (permissions: `0600`) |
+| `credentials.json` | Claude OAuth credentials (permissions: `0600`) |
+| `service-credentials.json` | OpenAI and Cursor session tokens (permissions: `0600`) |
 | `history.json` | Usage history for the chart (30-day retention) |
 
-History is buffered in memory and flushed to disk every 5 minutes and on app quit. No data is sent anywhere other than the Anthropic API.
+History is buffered in memory and flushed to disk every 5 minutes and on app quit.
+Usage requests go directly to Anthropic, OpenAI, and Cursor; no credentials or usage
+data are sent anywhere else.
 
 ## Development
 
 ```sh
-make build          # release build only
+make build          # release build only (SwiftPM Keychain access disabled)
 make app            # build + create .app bundle
 make zip            # build + bundle + zip + verify distribution artifact
 make dmg            # build + bundle + DMG + verify distribution artifact
@@ -94,7 +114,7 @@ make clean          # remove build artifacts
 This repo now uses a tag-driven release flow. Pushing a `v*` tag will:
 
 - build the `.app` bundle once
-- produce `ClaudeUsageBar.zip` for Sparkle and `ClaudeUsageBar.dmg` for manual installs
+- produce `AgentUsageBar.zip` for Sparkle and `AgentUsageBar.dmg` for manual installs
 - verify the packaged artifacts contain the expected app bundle resources and updater framework
 - create the GitHub Release
 - reuse GitHub-generated release notes for both the GitHub Release and the Sparkle update entry
@@ -135,7 +155,7 @@ https://blimp-labs.github.io/claude-usage-bar/appcast.xml
 ```
 macos/                           # macOS menu bar app (Swift/SwiftUI)
 ├── Sources/ClaudeUsageBar/
-│   ├── ClaudeUsageBarApp.swift      # App entry point, menu bar setup
+│   ├── AgentUsageBarApp.swift       # App entry point, menu bar setup
 │   ├── UsageService.swift           # OAuth, polling, API calls
 │   ├── UsageModel.swift             # API response types
 │   ├── UsageHistoryModel.swift      # History data types, time ranges

@@ -4,6 +4,10 @@ import ServiceManagement
 struct SettingsWindowContent: View {
     @ObservedObject var service: UsageService
     @ObservedObject var notificationService: NotificationService
+    @ObservedObject var connectedService: ConnectedUsageService
+    @State private var openAIToken = ""
+    @State private var cursorToken = ""
+    @State private var credentialMessage: String?
 
     var body: some View {
         Form {
@@ -12,7 +16,10 @@ struct SettingsWindowContent: View {
 
                 Picker("Polling Interval", selection: Binding(
                     get: { service.pollingMinutes },
-                    set: { service.updatePollingInterval($0) }
+                    set: {
+                        service.updatePollingInterval($0)
+                        connectedService.updatePollingInterval($0)
+                    }
                 )) {
                     ForEach(UsageService.pollingOptions, id: \.self) { mins in
                         Text(pollingOptionLabel(for: mins))
@@ -39,6 +46,64 @@ struct SettingsWindowContent: View {
                 )
             }
 
+            Section("OpenAI / Codex") {
+                Text("Use the bearer token from the Authorization header of a ChatGPT usage request. OpenAI API keys do not expose ChatGPT subscription limits.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                SecureField(
+                    connectedService.isOpenAIConfigured
+                        ? "Session token configured"
+                        : "Bearer session token",
+                    text: $openAIToken
+                )
+
+                HStack {
+                    Button("Save Session Token") {
+                        saveOpenAIToken()
+                    }
+                    .disabled(openAIToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    if connectedService.isOpenAIConfigured {
+                        Button("Clear", role: .destructive) {
+                            connectedService.clearOpenAIToken()
+                        }
+                    }
+                }
+            }
+
+            Section("Cursor") {
+                Text("Paste the WorkosCursorSessionToken cookie value from cursor.com. You can also paste a full Cookie header or copied cURL request.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                SecureField(
+                    connectedService.isCursorConfigured
+                        ? "Session token configured"
+                        : "WorkosCursorSessionToken",
+                    text: $cursorToken
+                )
+
+                HStack {
+                    Button("Save Session Token") {
+                        saveCursorToken()
+                    }
+                    .disabled(cursorToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    if connectedService.isCursorConfigured {
+                        Button("Clear", role: .destructive) {
+                            connectedService.clearCursorToken()
+                        }
+                    }
+                }
+            }
+
+            if let credentialMessage {
+                Text(credentialMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if service.isAuthenticated {
                 Section("Account") {
                     if let email = service.accountEmail {
@@ -51,10 +116,32 @@ struct SettingsWindowContent: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 400)
+        .frame(width: 480)
         .fixedSize(horizontal: false, vertical: true)
         .onAppear {
             focusSettingsWindow()
+        }
+    }
+
+    private func saveOpenAIToken() {
+        do {
+            try connectedService.saveOpenAIToken(openAIToken)
+            openAIToken = ""
+            credentialMessage = "OpenAI session token saved locally."
+            Task { await connectedService.fetchOpenAIUsage() }
+        } catch {
+            credentialMessage = "Could not save OpenAI token: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveCursorToken() {
+        do {
+            try connectedService.saveCursorToken(cursorToken)
+            cursorToken = ""
+            credentialMessage = "Cursor session token saved locally."
+            Task { await connectedService.fetchCursorUsage() }
+        } catch {
+            credentialMessage = "Could not save Cursor token: \(error.localizedDescription)"
         }
     }
 }

@@ -1,11 +1,12 @@
 import SwiftUI
 
 @main
-struct ClaudeUsageBarApp: App {
+struct AgentUsageBarApp: App {
     @StateObject private var service = UsageService()
     @StateObject private var historyService = UsageHistoryService()
     @StateObject private var notificationService = NotificationService()
     @StateObject private var appUpdater = AppUpdater()
+    @StateObject private var connectedService = ConnectedUsageService()
 
     var body: some Scene {
         MenuBarExtra {
@@ -13,13 +14,11 @@ struct ClaudeUsageBarApp: App {
                 service: service,
                 historyService: historyService,
                 notificationService: notificationService,
-                appUpdater: appUpdater
+                appUpdater: appUpdater,
+                connectedService: connectedService
             )
         } label: {
-            Image(nsImage: service.isAuthenticated
-                ? renderIcon(pct5h: service.pct5h, pct7d: service.pct7d)
-                : renderUnauthenticatedIcon()
-            )
+            Image(nsImage: menuBarIcon)
                 .task {
                     // Auto-mark existing users as setup-complete
                     if service.isAuthenticated && !UserDefaults.standard.bool(forKey: "setupComplete") {
@@ -29,6 +28,7 @@ struct ClaudeUsageBarApp: App {
                     service.historyService = historyService
                     service.notificationService = notificationService
                     service.startPolling()
+                    connectedService.startPolling()
                 }
         }
         .menuBarExtraStyle(.window)
@@ -36,10 +36,24 @@ struct ClaudeUsageBarApp: App {
         Settings {
             SettingsWindowContent(
                 service: service,
-                notificationService: notificationService
+                notificationService: notificationService,
+                connectedService: connectedService
             )
         }
         .windowResizability(.contentSize)
         .windowStyle(.titleBar)
+    }
+
+    private var menuBarIcon: NSImage {
+        if service.isAuthenticated {
+            return renderIcon(pct5h: service.pct5h, pct7d: service.pct7d)
+        }
+        if connectedService.hasAnyConfiguredService {
+            return renderIcon(
+                pct5h: connectedService.iconPrimaryUtilization,
+                pct7d: connectedService.iconSecondaryUtilization
+            )
+        }
+        return renderUnauthenticatedIcon()
     }
 }

@@ -13,12 +13,16 @@ jobs:
     runs-on: macos-14
     permissions:
       contents: write
+      pages: write
+      id-token: write
     env:
       REPOSITORY_NAME: ${{ github.event.repository.name }}
+      ENABLE_SPARKLE_UPDATES: ${{ vars.ENABLE_SPARKLE_UPDATES }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure GitHub Pages
+        if: env.ENABLE_SPARKLE_UPDATES == 'true'
         uses: actions/configure-pages@v5
 
       - name: Build release app bundle
@@ -26,7 +30,9 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
           export APP_VERSION="$version"
-          export SU_FEED_URL="https://${owner}.github.io/${REPOSITORY_NAME}/appcast.xml"
+          if [[ "$ENABLE_SPARKLE_UPDATES" == "true" ]]; then
+            export SU_FEED_URL="https://${owner}.github.io/${REPOSITORY_NAME}/appcast.xml"
+          fi
           bash macos/scripts/build.sh
 
       - name: Package and verify release artifacts
@@ -73,7 +79,7 @@ jobs:
           with urllib.request.urlopen(request) as response:
               html = response.read().decode("utf-8")
 
-          with open("dist/archives/ClaudeUsageBar.html", "w", encoding="utf-8") as fh:
+          with open("dist/archives/AgentUsageBar.html", "w", encoding="utf-8") as fh:
               fh.write(html)
           PY
 
@@ -81,11 +87,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            macos/ClaudeUsageBar.zip
-            macos/ClaudeUsageBar.dmg
+            macos/AgentUsageBar.zip
+            macos/AgentUsageBar.dmg
           body_path: dist/release-notes.md
 
       - name: Generate Sparkle appcast
+        if: env.ENABLE_SPARKLE_UPDATES == 'true'
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
@@ -94,7 +101,7 @@ jobs:
             exit 1
           fi
 
-          cp macos/ClaudeUsageBar.zip dist/archives/ClaudeUsageBar.zip
+          cp macos/AgentUsageBar.zip dist/archives/AgentUsageBar.zip
 
           printf '%s' "$SPARKLE_PRIVATE_KEY" | \
             macos/.build/artifacts/sparkle/Sparkle/bin/generate_appcast \
@@ -105,11 +112,13 @@ jobs:
               -o dist/site/appcast.xml
 
       - name: Upload appcast for GitHub Pages
+        if: env.ENABLE_SPARKLE_UPDATES == 'true'
         uses: actions/upload-pages-artifact@v4
         with:
           path: dist/site
 
   deploy_appcast:
+    if: vars.ENABLE_SPARKLE_UPDATES == 'true'
     needs: release
     runs-on: ubuntu-latest
     permissions:

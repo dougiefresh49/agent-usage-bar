@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_NAME="ClaudeUsageBar"
+APP_NAME="AgentUsageBar"
 ARTIFACT_PATH="${1:-$PROJECT_DIR/$APP_NAME.zip}"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/claude-usage-bar-release.XXXXXX")"
 MOUNT_DIR="$TMP_DIR/mount"
@@ -78,8 +78,6 @@ case "$ARTIFACT_PATH" in
         ;;
     *.dmg)
         APP_BUNDLE="$MOUNT_DIR/$APP_NAME.app"
-        DMG_BACKGROUND="$MOUNT_DIR/.background/background.png"
-        DMG_DS_STORE="$MOUNT_DIR/.DS_Store"
 
         echo "==> Mounting $(basename "$ARTIFACT_PATH")..."
         mkdir -p "$MOUNT_DIR"
@@ -88,8 +86,6 @@ case "$ARTIFACT_PATH" in
 
         [[ -d "$APP_BUNDLE" ]] || { echo "Error: mounted DMG did not contain $APP_NAME.app"; exit 1; }
         verify_applications_shortcut "$MOUNT_DIR/Applications"
-        [[ -f "$DMG_DS_STORE" ]] || { echo "Error: mounted DMG is missing Finder layout metadata"; exit 1; }
-        [[ -f "$DMG_BACKGROUND" ]] || { echo "Error: mounted DMG is missing Finder background artwork"; exit 1; }
 
         verify_app_bundle "$APP_BUNDLE"
         ;;
