@@ -681,23 +681,17 @@ private struct PreferredProviderDetailsView: View {
                     HStack(spacing: 8) {
                         Group {
                             if entry.snapshot.detailStyle == .orbit {
-                                ZStack {
+                                HStack(spacing: 8) {
                                     OrbitGraphic(
                                         metrics: topMetrics,
-                                        diameter: min(proxy.size.height * 0.82, 122),
+                                        diameter: min(proxy.size.height * 0.93, 138),
                                         lineWidth: 7
                                     )
-                                    .offset(y: -6)
 
                                     OrbitLegend(
                                         metrics: topMetrics,
                                         compact: true,
-                                        horizontal: true
-                                    )
-                                    .frame(
-                                        maxWidth: .infinity,
-                                        maxHeight: .infinity,
-                                        alignment: .bottom
+                                        horizontal: false
                                     )
                                 }
                             } else {
@@ -707,7 +701,7 @@ private struct PreferredProviderDetailsView: View {
                                 )
                             }
                         }
-                        .frame(width: proxy.size.width * 0.68)
+                        .frame(width: proxy.size.width * 0.69)
                         .frame(maxHeight: .infinity, alignment: .center)
 
                         VStack(spacing: 7) {
