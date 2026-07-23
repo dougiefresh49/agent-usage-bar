@@ -36,10 +36,11 @@ jobs:
           bash macos/scripts/build.sh
 
       - name: Package and verify release artifacts
-        env:
-          EXPECT_FEED_URL: '1'
         run: |
           bash macos/scripts/build.sh --skip-build --zip --dmg
+          if [[ "$ENABLE_SPARKLE_UPDATES" == "true" ]]; then
+            export EXPECT_FEED_URL=1
+          fi
           make verify-release
 
       - name: Generate release notes
