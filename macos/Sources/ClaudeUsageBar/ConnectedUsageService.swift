@@ -19,6 +19,7 @@ final class ConnectedUsageService: ObservableObject {
     private let openAIResetCreditsEndpoint: URL
     private let credentialsStore: ConnectedServiceCredentialsStore
     private let environment: [String: String]
+    var snapshotStore: UsageSnapshotStore?
     private var timer: Timer?
     private var pollingMinutes: Int
 
@@ -96,6 +97,7 @@ final class ConnectedUsageService: ObservableObject {
         var credentials = credentialsStore.load()
         credentials.cursorSessionToken = nil
         try? credentialsStore.save(credentials)
+        snapshotStore?.remove(provider: "cursor")
         cursorUsage = nil
         cursorError = nil
         cursorLastUpdated = nil
@@ -106,6 +108,7 @@ final class ConnectedUsageService: ObservableObject {
         var credentials = credentialsStore.load()
         credentials.openAISessionToken = nil
         try? credentialsStore.save(credentials)
+        snapshotStore?.remove(provider: "openai")
         openAIUsage = nil
         openAIResetCredits = nil
         openAIError = nil
@@ -126,9 +129,14 @@ final class ConnectedUsageService: ObservableObject {
 
         do {
             let data = try await responseData(for: request, serviceName: "Cursor")
-            cursorUsage = try JSONDecoder().decode(CursorUsageResponse.self, from: data)
+            let decoded = try JSONDecoder().decode(CursorUsageResponse.self, from: data)
+            cursorUsage = decoded
             cursorError = nil
             cursorLastUpdated = Date()
+            snapshotStore?.update(
+                provider: "cursor",
+                metrics: UsageSnapshotStore.cursorMetrics(for: decoded)
+            )
         } catch {
             cursorError = error.localizedDescription
         }
@@ -142,9 +150,14 @@ final class ConnectedUsageService: ObservableObject {
                 endpoint: openAIUsageEndpoint,
                 token: token
             )
-            openAIUsage = try JSONDecoder().decode(OpenAIUsageResponse.self, from: usageData)
+            let decoded = try JSONDecoder().decode(OpenAIUsageResponse.self, from: usageData)
+            openAIUsage = decoded
             openAIError = nil
             openAILastUpdated = Date()
+            snapshotStore?.update(
+                provider: "openai",
+                metrics: UsageSnapshotStore.openAIMetrics(for: decoded)
+            )
         } catch {
             openAIError = error.localizedDescription
         }

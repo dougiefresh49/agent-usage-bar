@@ -1,4 +1,4 @@
-.PHONY: build app zip dmg release-artifacts verify-release install clean
+.PHONY: build app zip dmg release-artifacts verify-release install install-skill clean
 
 build:
 	cd macos && swift build -c release --disable-keychain
@@ -26,6 +26,11 @@ verify-release:
 install: app
 	rm -rf /Applications/AgentUsageBar.app
 	cp -R macos/AgentUsageBar.app /Applications/
+
+install-skill:
+	mkdir -p $(HOME)/.claude/skills
+	rm -rf $(HOME)/.claude/skills/ai-usage
+	cp -R skills/ai-usage $(HOME)/.claude/skills/ai-usage
 
 clean:
 	cd macos && swift package clean

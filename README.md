@@ -96,6 +96,25 @@ History is buffered in memory and flushed to disk every 5 minutes and on app qui
 Usage requests go directly to Anthropic, OpenAI, and Cursor; no credentials or usage
 data are sent anywhere else.
 
+## Agent skill
+
+The app writes a usage snapshot to
+`~/Library/Application Support/AgentUsageBar/usage-snapshot.json` after every
+refresh, so coding agents can check remaining quota (e.g. to pick which model to
+route subagent work to) without touching provider APIs or credentials.
+
+Install the bundled Claude Code skill with:
+
+```bash
+make install-skill   # copies skills/ai-usage to ~/.claude/skills/
+```
+
+Agents read the snapshot directly when it is fresh. When it is older than
+2 minutes, the skill's `get-usage.sh` posts a Darwin notification
+(`notifyutil -p com.agentusagebar.refresh`) that asks the running app to
+refresh; the app honors at most one such request per 2 minutes, so scripted
+callers cannot cause API spam.
+
 ## Development
 
 ```sh

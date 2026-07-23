@@ -7,6 +7,8 @@ struct AgentUsageBarApp: App {
     @StateObject private var notificationService = NotificationService()
     @StateObject private var appUpdater = AppUpdater()
     @StateObject private var connectedService = ConnectedUsageService()
+    @State private var snapshotStore: UsageSnapshotStore?
+    @State private var refreshListener: RefreshRequestListener?
 
     var body: some Scene {
         MenuBarExtra {
@@ -27,6 +29,25 @@ struct AgentUsageBarApp: App {
                     historyService.loadHistory()
                     service.historyService = historyService
                     service.notificationService = notificationService
+
+                    let store = snapshotStore ?? UsageSnapshotStore()
+                    snapshotStore = store
+                    service.snapshotStore = store
+                    connectedService.snapshotStore = store
+
+                    if refreshListener == nil {
+                        let listener = RefreshRequestListener { [weak service, weak connectedService] in
+                            Task { @MainActor in
+                                if let service, service.isAuthenticated {
+                                    await service.fetchUsage()
+                                }
+                                await connectedService?.fetchAll()
+                            }
+                        }
+                        listener.start()
+                        refreshListener = listener
+                    }
+
                     service.startPolling()
                     connectedService.startPolling()
                 }
