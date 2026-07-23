@@ -1,4 +1,4 @@
-# Contributing to Claude Usage Bar
+# Contributing to Agent Usage Bar
 
 Thanks for your interest in contributing! This guide will help you get set up and make sure your changes land smoothly.
 
@@ -22,7 +22,7 @@ This builds the release binary via Swift Package Manager, bundles it as a `.app`
 
 ```
 Sources/ClaudeUsageBar/
-├── ClaudeUsageBarApp.swift      # App entry point, menu bar setup
+├── AgentUsageBarApp.swift       # App entry point, menu bar setup
 ├── UsageService.swift           # OAuth, polling, API calls
 ├── UsageModel.swift             # API response types
 ├── UsageHistoryModel.swift      # History data types, time ranges
