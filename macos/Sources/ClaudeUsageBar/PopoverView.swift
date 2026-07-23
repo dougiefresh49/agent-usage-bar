@@ -7,9 +7,10 @@ struct PopoverView: View {
     @ObservedObject var appUpdater: AppUpdater
     @ObservedObject var connectedService: ConnectedUsageService
     @AppStorage("setupComplete") private var setupComplete = false
+    @State private var selectedProvider: UsageProvider = .claude
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             if !setupComplete && !service.isAuthenticated {
                 SetupView(
                     service: service,
@@ -18,24 +19,45 @@ struct PopoverView: View {
                     onComplete: { setupComplete = true }
                 )
             } else {
-                Text("AI Usage")
-                    .font(.headline)
+                HStack {
+                    Text("AI Usage")
+                        .font(.headline)
+                    Spacer()
+                    Text("Overview")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.tertiary)
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                }
+
+                ProviderOverview(
+                    service: service,
+                    connectedService: connectedService,
+                    selectedProvider: $selectedProvider
+                )
+
+                Divider()
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
-                        claudeView
-                        Divider()
-                        OpenAIUsageView(service: connectedService)
-                        Divider()
-                        CursorUsageView(service: connectedService)
+                        switch selectedProvider {
+                        case .claude:
+                            claudeView
+                        case .openAI:
+                            OpenAIUsageView(service: connectedService)
+                        case .cursor:
+                            CursorUsageView(service: connectedService)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .scrollIndicators(.automatic)
 
                 footer
             }
         }
         .padding()
-        .frame(width: 370)
+        .frame(width: 390)
         .frame(maxHeight: 720)
     }
 
@@ -176,14 +198,230 @@ struct PopoverView: View {
     }
 }
 
+private enum UsageProvider: String, CaseIterable, Identifiable {
+    case claude
+    case openAI
+    case cursor
+
+    var id: Self { self }
+
+    var shortName: String {
+        switch self {
+        case .claude: return "Claude"
+        case .openAI: return "Codex"
+        case .cursor: return "Cursor"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .claude: return "sparkles"
+        case .openAI: return "circle.hexagongrid"
+        case .cursor: return "cursorarrow.rays"
+        }
+    }
+}
+
+private struct ProviderSummaryMetric {
+    let label: String
+    let percent: Double?
+}
+
+private struct ProviderSummary {
+    let provider: UsageProvider
+    let isConfigured: Bool
+    let metrics: [ProviderSummaryMetric]
+    let error: String?
+}
+
+private struct ProviderOverview: View {
+    @ObservedObject var service: UsageService
+    @ObservedObject var connectedService: ConnectedUsageService
+    @Binding var selectedProvider: UsageProvider
+
+    var body: some View {
+        HStack(spacing: 7) {
+            ForEach(summaries, id: \.provider) { summary in
+                ProviderSummaryCard(
+                    summary: summary,
+                    isSelected: selectedProvider == summary.provider
+                ) {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        selectedProvider = summary.provider
+                    }
+                }
+            }
+        }
+    }
+
+    private var summaries: [ProviderSummary] {
+        [
+            ProviderSummary(
+                provider: .claude,
+                isConfigured: service.isAuthenticated,
+                metrics: [
+                    ProviderSummaryMetric(label: "5h", percent: service.usage?.fiveHour?.utilization),
+                    ProviderSummaryMetric(label: "7d", percent: service.usage?.sevenDay?.utilization)
+                ],
+                error: service.lastError
+            ),
+            ProviderSummary(
+                provider: .openAI,
+                isConfigured: connectedService.isOpenAIConfigured,
+                metrics: openAIMetrics,
+                error: connectedService.openAIError
+            ),
+            ProviderSummary(
+                provider: .cursor,
+                isConfigured: connectedService.isCursorConfigured,
+                metrics: [
+                    ProviderSummaryMetric(
+                        label: "Models",
+                        percent: connectedService.cursorUsage?.planUsage?.autoPercentUsed
+                    ),
+                    ProviderSummaryMetric(
+                        label: "API",
+                        percent: connectedService.cursorUsage?.planUsage?.apiPercentUsed
+                    )
+                ],
+                error: connectedService.cursorError
+            )
+        ]
+    }
+
+    private var openAIMetrics: [ProviderSummaryMetric] {
+        let rateLimit = connectedService.openAIUsage?.rateLimit
+        return [
+            ProviderSummaryMetric(
+                label: compactWindowLabel(rateLimit?.primaryWindow, fallback: "Primary"),
+                percent: rateLimit?.primaryWindow?.usedPercent
+            ),
+            ProviderSummaryMetric(
+                label: compactWindowLabel(rateLimit?.secondaryWindow, fallback: "Secondary"),
+                percent: rateLimit?.secondaryWindow?.usedPercent
+            )
+        ]
+    }
+}
+
+private struct ProviderSummaryCard: View {
+    let summary: ProviderSummary
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 5) {
+                    Image(systemName: summary.provider.systemImage)
+                        .font(.caption)
+                        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    Text(summary.provider.shortName)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+
+                if !summary.isConfigured {
+                    statusLabel("Connect", color: .secondary)
+                } else if summary.metrics.allSatisfy({ $0.percent == nil }) {
+                    if summary.error != nil {
+                        statusLabel("Check account", color: .red)
+                    } else {
+                        statusLabel("Loading…", color: .secondary)
+                    }
+                } else {
+                    ForEach(Array(summary.metrics.prefix(2).enumerated()), id: \.offset) { _, metric in
+                        SummaryMetricRow(metric: metric)
+                    }
+                }
+            }
+            .padding(9)
+            .frame(maxWidth: .infinity, minHeight: 91, maxHeight: 91, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.11) : Color.primary.opacity(0.045))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(
+                        isSelected ? Color.accentColor.opacity(0.75) : Color.primary.opacity(0.09),
+                        lineWidth: isSelected ? 1.25 : 1
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(summary.provider.shortName) usage details")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func statusLabel(_ text: String, color: Color) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 5, height: 5)
+            Text(text)
+                .font(.caption2)
+                .foregroundStyle(color)
+                .lineLimit(1)
+        }
+        .frame(height: 46, alignment: .center)
+    }
+}
+
+private struct SummaryMetricRow: View {
+    let metric: ProviderSummaryMetric
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 3) {
+                Text(metric.label)
+                    .lineLimit(1)
+                Spacer(minLength: 2)
+                Text(percentText)
+                    .monospacedDigit()
+            }
+            .font(.caption2)
+            .foregroundStyle(metric.percent == nil ? .secondary : .primary)
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.primary.opacity(0.10))
+                    Capsule()
+                        .fill(colorForPct(normalizedPercent))
+                        .frame(width: proxy.size.width * normalizedPercent)
+                }
+            }
+            .frame(height: 3)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var normalizedPercent: Double {
+        min(max((metric.percent ?? 0) / 100, 0), 1)
+    }
+
+    private var percentText: String {
+        metric.percent.map { "\(Int(round($0)))%" } ?? "—"
+    }
+}
+
 private struct ProviderHeader: View {
     let name: String
     let systemImage: String
 
     var body: some View {
-        Label(name, systemImage: systemImage)
-            .font(.subheadline.weight(.semibold))
-            .frame(maxWidth: .infinity, alignment: .leading)
+        HStack {
+            Label(name, systemImage: systemImage)
+                .font(.subheadline.weight(.semibold))
+            Spacer()
+            Text("Details")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -262,6 +500,18 @@ private struct OpenAIUsageView: View {
         }
         return "\(hours)-Hour Window"
     }
+}
+
+private func compactWindowLabel(_ window: OpenAIUsageWindow?, fallback: String) -> String {
+    guard let seconds = window?.limitWindowSeconds else { return fallback }
+    let hours = Int(seconds / 3_600)
+    if hours > 0, hours % 24 == 0 {
+        return "\(hours / 24)d"
+    }
+    if hours > 0 {
+        return "\(hours)h"
+    }
+    return fallback
 }
 
 private struct CursorUsageView: View {
