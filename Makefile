@@ -34,4 +34,4 @@ install-skill:
 
 clean:
 	cd macos && swift package clean
-	rm -rf macos/AgentUsageBar.app macos/AgentUsageBar.zip macos/AgentUsageBar.dmg
+	rm -rf macos/.xcode-widget-build macos/AgentUsageBar.app macos/AgentUsageBar.zip macos/AgentUsageBar.dmg

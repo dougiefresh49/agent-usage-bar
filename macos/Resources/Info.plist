@@ -20,6 +20,17 @@
     <string>AppIcon</string>
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>Agent Usage Bar</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>agentusagebar</string>
+            </array>
+        </dict>
+    </array>
     <key>LSUIElement</key>
     <true/>
     <key>LSMinimumSystemVersion</key>

@@ -191,6 +191,15 @@ final class ConnectedUsageService: ObservableObject {
                 OpenAIResetCreditsResponse.self,
                 from: creditData
             )
+            if let openAIUsage {
+                snapshotStore?.update(
+                    provider: "openai",
+                    metrics: UsageSnapshotStore.openAIMetrics(
+                        for: openAIUsage,
+                        resetCredits: openAIResetCredits
+                    )
+                )
+            }
         } catch {
             if openAIUsage == nil {
                 openAIError = error.localizedDescription
