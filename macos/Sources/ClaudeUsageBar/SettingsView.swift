@@ -142,8 +142,8 @@ struct SettingsWindowContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                SecureField(
-                    connectedService.isOpenAIConfigured
+                CredentialSecureField(
+                    title: connectedService.isOpenAIConfigured
                         ? "Session token configured"
                         : "Bearer session token",
                     text: $openAIToken
@@ -168,8 +168,8 @@ struct SettingsWindowContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                SecureField(
-                    connectedService.isCursorConfigured
+                CredentialSecureField(
+                    title: connectedService.isCursorConfigured
                         ? "Session token configured"
                         : "WorkosCursorSessionToken",
                     text: $cursorToken
@@ -194,8 +194,8 @@ struct SettingsWindowContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                SecureField(
-                    connectedService.isElevenLabsConfigured
+                CredentialSecureField(
+                    title: connectedService.isElevenLabsConfigured
                         ? "API key configured"
                         : "ElevenLabs API key",
                     text: $elevenLabsAPIKey
@@ -533,6 +533,27 @@ func launchAtLoginInstallDirectories(fileManager: FileManager = .default) -> [UR
         URL(fileURLWithPath: "/Applications", isDirectory: true),
         fileManager.homeDirectoryForCurrentUser.appending(path: "Applications", directoryHint: .isDirectory)
     ]
+}
+
+/// Bordered secure field so credential inputs stay visible in grouped Form sections.
+private struct CredentialSecureField: View {
+    let title: String
+    @Binding var text: String
+
+    var body: some View {
+        SecureField(title, text: $text)
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color(nsColor: .textBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.28), lineWidth: 1)
+            )
+    }
 }
 
 private struct ThresholdSlider: View {
