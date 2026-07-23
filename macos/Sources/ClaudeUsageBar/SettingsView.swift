@@ -71,7 +71,7 @@ struct SettingsWindowContent: View {
             }
 
             Section("Appearance") {
-                Picker("Menu Bar Provider", selection: menuBarProviderBinding) {
+                Picker("Preferred Provider", selection: menuBarProviderBinding) {
                     ForEach(UsageProvider.allCases) { provider in
                         Text(provider.settingsName)
                             .tag(provider.rawValue)
@@ -117,7 +117,11 @@ struct SettingsWindowContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text("Orbit is used only in provider details; the menu bar stays readable with bars or a split capsule.")
+                Text("Preferred Provider controls the menu bar and single-provider desktop widgets. Provider Details also controls the widget visualization.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("Orbit is used in provider details and desktop widgets; the menu bar stays readable with bars or a split capsule.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

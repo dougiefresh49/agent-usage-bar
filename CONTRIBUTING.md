@@ -16,7 +16,9 @@ cd claude-usage-bar
 make app
 ```
 
-This builds the release binary via Swift Package Manager, bundles it as a `.app`, and codesigns it. The app also embeds Sparkle for update checks.
+This builds the menu bar app via Swift Package Manager and the WidgetKit
+extension via its Xcode app-extension target, embeds both with Sparkle in the
+`.app`, and codesigns the complete bundle.
 
 ## Project structure
 
@@ -30,6 +32,9 @@ Sources/ClaudeUsageBar/
 ├── UsageChartView.swift         # Swift Charts trajectory view
 ├── PopoverView.swift            # Main popover UI
 └── MenuBarIconRenderer.swift    # Menu bar icon drawing
+Sources/AgentUsageWidget/
+└── AgentUsageWidget.swift       # Four native desktop-widget layouts
+AgentUsageWidget.xcodeproj/      # Widget app-extension build target
 ```
 
 ## Build commands
@@ -44,6 +49,12 @@ Sources/ClaudeUsageBar/
 | `make verify-release` | Inspect the packaged ZIP and DMG artifacts for required resources/frameworks |
 | `make install` | Build + install to `/Applications` |
 | `make clean` | Remove build artifacts |
+
+To test widgets locally, build and install the app, launch it once, then open
+**Edit Widgets** from the desktop context menu and search for **Agent Usage Bar**.
+The Widget Gallery resolves installed host apps by bundle identifier, so an older
+copy in `/Applications` can shadow a worktree build even when PlugInKit lists the
+development extension.
 
 ## Publishing releases
 

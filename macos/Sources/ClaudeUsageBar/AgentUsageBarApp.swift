@@ -17,6 +17,8 @@ struct AgentUsageBarApp: App {
     private var menuBarPrimaryMetricID = UsagePresentationMetrics.claudeFiveHourID
     @AppStorage(UsagePresentationDefaults.menuBarSecondaryMetricKey)
     private var menuBarSecondaryMetricID = UsagePresentationMetrics.claudeSevenDayID
+    @AppStorage(UsagePresentationDefaults.detailStyleKey)
+    private var detailStyleRaw = UsagePresentationDefaults.detailStyle.rawValue
 
     var body: some Scene {
         MenuBarExtra {
@@ -30,6 +32,12 @@ struct AgentUsageBarApp: App {
         } label: {
             Image(nsImage: menuBarIcon)
                 .accessibilityLabel(menuBarAccessibilityLabel)
+                .onChange(of: menuBarProviderRaw) { _, _ in
+                    snapshotStore?.refreshPreferences()
+                }
+                .onChange(of: detailStyleRaw) { _, _ in
+                    snapshotStore?.refreshPreferences()
+                }
                 .task {
                     // Auto-mark existing users as setup-complete
                     if service.isAuthenticated && !UserDefaults.standard.bool(forKey: "setupComplete") {

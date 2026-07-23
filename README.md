@@ -16,6 +16,12 @@ The Orbit Meter app icon mirrors the paired usage windows shown in the popover.
   <img src="macos/Resources/usage-demo--cursor.png" width="32%" align="top" alt="Cursor usage demo">
 </p>
 
+## MacOS Widgets
+
+<p align="center">
+  <img src="docs/images/desktop-widgets-preview.png" width="100%" alt="Agent Usage Bar macOS desktop widget layouts">
+</p>
+
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
 ![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
 ![License](https://img.shields.io/badge/license-BSD--2--Clause-green)
@@ -29,6 +35,7 @@ A tiny macOS menu bar app that shows your AI subscription usage at a glance. Cli
 - OpenAI/Codex usage windows, reset timers, and available reset-credit announcements
 - Cursor first-party/API usage plus on-demand spend and billing-cycle reset
 - ElevenLabs credit balance, plan details, and next billing reset
+- Four native macOS desktop widgets for provider details, snapshots, and grids
 - Extra usage tracking with USD currency display
 - Usage history chart — see how your usage evolves over time (1h / 6h / 1d / 7d / 30d)
 - Hover over the chart to see exact values at any point
@@ -113,6 +120,23 @@ Click the icon anytime to see:
 - Extra usage credits and limits
 - Usage history chart with adjustable time range and hover details
 
+### Desktop widgets
+
+Install Agent Usage Bar in `/Applications` and launch it once, then right-click
+the desktop and choose **Edit Widgets**. Search for **Agent Usage Bar** to add:
+
+- **Provider Details** — the preferred provider's detail visualization plus
+  additional stats, without the usage-history chart
+- **Provider Snapshot** — a small widget with only the top two provider stats
+- **Provider Detail Grid** — a large 2×2 grid using each provider's selected
+  detail visualization
+- **Usage Overview** — the compact 2×2 provider overview from the menu
+
+The **Preferred Provider** and **Provider Details** choices in Settings control
+the single-provider widgets and visualization style. Widgets update after each
+provider refresh and otherwise ask WidgetKit to revisit the cached data every
+15 minutes.
+
 ## Data storage
 
 All data is stored locally in `~/.config/claude-usage-bar/`:
@@ -133,6 +157,10 @@ The app writes a usage snapshot to
 `~/Library/Application Support/AgentUsageBar/usage-snapshot.json` after every
 refresh, so coding agents can check remaining quota (e.g. to pick which model to
 route subagent work to) without touching provider APIs or credentials.
+
+The app also mirrors this credential-free snapshot into the sandboxed widget
+extension's Application Support container. Credentials are never copied into
+the widget container.
 
 Install the bundled Claude Code skill with:
 
@@ -230,9 +258,14 @@ macos/                           # macOS menu bar app (Swift/SwiftUI)
 │   └── Resources/
 │       ├── claude-logo.png          # Pre-rendered menu bar logo (512px)
 │       └── en.lproj/Localizable.strings
+├── Sources/AgentUsageWidget/
+│   └── AgentUsageWidget.swift        # Four WidgetKit desktop layouts
+├── AgentUsageWidget.xcodeproj/        # Widget app-extension build target
 ├── Tests/ClaudeUsageBarTests/
 ├── Resources/                       # App bundle resources (not SwiftPM)
 │   ├── Info.plist
+│   ├── WidgetInfo.plist              # Widget extension metadata
+│   ├── Widget.entitlements           # Widget sandbox entitlement
 │   ├── Assets.xcassets/             # App icon
 │   └── claude-logo.svg             # Source SVG for menu bar logo
 ├── scripts/

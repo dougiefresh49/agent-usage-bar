@@ -4,8 +4,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_NAME="AgentUsageBar"
+WIDGET_NAME="AgentUsageWidget"
 BUILD_DIR="$PROJECT_DIR/.build"
+WIDGET_BUILD_DIR="$PROJECT_DIR/.xcode-widget-build"
 APP_BUNDLE="$PROJECT_DIR/$APP_NAME.app"
+WIDGET_BUNDLE="$APP_BUNDLE/Contents/PlugIns/$WIDGET_NAME.appex"
 ZIP_PATH="$PROJECT_DIR/$APP_NAME.zip"
 DMG_PATH="$PROJECT_DIR/$APP_NAME.dmg"
 CREATE_DMG_VERSION="v1.2.3"
@@ -108,6 +111,31 @@ build_app_bundle() {
            --output-partial-info-plist /dev/null \
            "$PROJECT_DIR/Resources/Assets.xcassets" > /dev/null
 
+    echo "==> Building WidgetKit app extension..."
+    xcodebuild \
+        -project "$PROJECT_DIR/AgentUsageWidget.xcodeproj" \
+        -scheme "$WIDGET_NAME" \
+        -configuration Release \
+        -derivedDataPath "$WIDGET_BUILD_DIR" \
+        CODE_SIGNING_ALLOWED=NO \
+        MARKETING_VERSION="$app_version" \
+        CURRENT_PROJECT_VERSION="$app_build" \
+        build > /dev/null
+
+    local built_widget="$WIDGET_BUILD_DIR/Build/Products/Release/$WIDGET_NAME.appex"
+    if [[ ! -d "$built_widget" ]]; then
+        echo "Error: widget extension not found at $built_widget"
+        exit 1
+    fi
+
+    echo "==> Bundling WidgetKit extension..."
+    mkdir -p "$(dirname "$WIDGET_BUNDLE")"
+    ditto "$built_widget" "$WIDGET_BUNDLE"
+    "$PLIST_BUDDY" -c "Set :CFBundleShortVersionString $app_version" \
+        "$WIDGET_BUNDLE/Contents/Info.plist"
+    "$PLIST_BUDDY" -c "Set :CFBundleVersion $app_build" \
+        "$WIDGET_BUNDLE/Contents/Info.plist"
+
     local sparkle_framework
     sparkle_framework="$(find "$BUILD_DIR" -path '*/Sparkle.framework' -type d | head -n 1 || true)"
     if [[ -n "$sparkle_framework" ]]; then
@@ -117,6 +145,9 @@ build_app_bundle() {
     fi
 
     echo "==> Codesigning (ad-hoc)..."
+    codesign --force --sign - \
+        --entitlements "$PROJECT_DIR/Resources/Widget.entitlements" \
+        "$WIDGET_BUNDLE"
     if [[ -d "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework" ]]; then
         while IFS= read -r nested_bundle; do
             codesign --force --sign - "$nested_bundle"
@@ -127,7 +158,7 @@ build_app_bundle() {
     codesign --force --sign - "$APP_BUNDLE"
 
     echo "==> Built $APP_BUNDLE"
-    codesign -v "$APP_BUNDLE"
+    codesign -v --deep --strict "$APP_BUNDLE"
     echo "==> Codesign verified OK"
 }
 

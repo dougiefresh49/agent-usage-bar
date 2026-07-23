@@ -27,6 +27,9 @@ verify_app_bundle() {
     local app_plist="$app_bundle/Contents/Info.plist"
     local resource_bundle="$app_bundle/Contents/Resources/${APP_NAME}_${APP_NAME}.bundle"
     local sparkle_framework="$app_bundle/Contents/Frameworks/Sparkle.framework"
+    local widget_bundle="$app_bundle/Contents/PlugIns/AgentUsageWidget.appex"
+    local widget_plist="$widget_bundle/Contents/Info.plist"
+    local widget_binary="$widget_bundle/Contents/MacOS/AgentUsageWidget"
 
     echo "==> Verifying packaged resources..."
     [[ -f "$app_plist" ]] || { echo "Error: missing Info.plist"; exit 1; }
@@ -35,9 +38,20 @@ verify_app_bundle() {
     [[ -f "$resource_bundle/claude-logo.png" ]] || { echo "Error: missing packaged logo resource"; exit 1; }
     [[ -f "$resource_bundle/en.lproj/Localizable.strings" ]] || { echo "Error: missing packaged localization resource"; exit 1; }
     [[ -d "$sparkle_framework" ]] || { echo "Error: missing Sparkle.framework"; exit 1; }
+    [[ -f "$widget_plist" ]] || { echo "Error: missing widget Info.plist"; exit 1; }
+    [[ -x "$widget_binary" ]] || { echo "Error: missing widget executable"; exit 1; }
+    [[ "$(plutil -extract NSExtension.NSExtensionPointIdentifier raw "$widget_plist")" == "com.apple.widgetkit-extension" ]] || {
+        echo "Error: invalid widget extension point"
+        exit 1
+    }
+    nm -u "$widget_binary" | grep -q '_NSExtensionMain' || {
+        echo "Error: widget executable is not linked as an app extension"
+        exit 1
+    }
 
     echo "==> Verifying app signature..."
-    codesign -v "$app_bundle"
+    codesign -v --deep --strict "$app_bundle"
+    codesign -v --strict "$widget_bundle"
 
     echo "==> Verifying updater metadata..."
     plutil -extract SUPublicEDKey raw "$app_plist" >/dev/null
