@@ -8,6 +8,9 @@ struct PopoverView: View {
     @ObservedObject var connectedService: ConnectedUsageService
     @AppStorage("setupComplete") private var setupComplete = false
     @State private var selectedProvider: UsageProvider = .claude
+    @State private var detailContentHeight: CGFloat = 0
+
+    private static let maxDetailHeight: CGFloat = 460
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -50,8 +53,21 @@ struct PopoverView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: DetailContentHeightKey.self,
+                                value: proxy.size.height
+                            )
+                        }
+                    )
                 }
                 .scrollIndicators(.automatic)
+                .onPreferenceChange(DetailContentHeightKey.self) { detailContentHeight = $0 }
+                // MenuBarExtra's window measures content at its minimum size, and a
+                // ScrollView's minimum height is 0 — an explicit height keeps it from
+                // collapsing while still scrolling once content exceeds the cap.
+                .frame(height: min(max(detailContentHeight, 1), Self.maxDetailHeight))
 
                 footer
             }
@@ -195,6 +211,13 @@ struct PopoverView: View {
         }
         .buttonStyle(.borderless)
         .font(.caption)
+    }
+}
+
+private struct DetailContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
