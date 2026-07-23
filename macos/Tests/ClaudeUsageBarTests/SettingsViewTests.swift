@@ -37,4 +37,15 @@ final class SettingsViewTests: XCTestCase {
             )
         )
     }
+
+    func testObfuscateEmailMasksLocalAndDomain() {
+        XCTAssertEqual(obfuscateEmail("doug@example.com"), "d•••@e••••••.com")
+        XCTAssertEqual(obfuscateEmail("a@b.co"), "a@b.co")
+        XCTAssertEqual(obfuscateEmail("jane.doe@mail.example.org"), "j•••••••@m•••.e••••••.org")
+    }
+
+    func testObfuscateEmailHandlesNonEmailStrings() {
+        XCTAssertEqual(obfuscateEmail("plaintext"), "•••••••••")
+        XCTAssertEqual(obfuscateEmail(""), "••••")
+    }
 }
