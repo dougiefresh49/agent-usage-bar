@@ -105,9 +105,9 @@ struct SettingsWindowContent: View {
             }
 
             if service.isAuthenticated {
-                Section("Account") {
+                Section("Anthropic Account") {
                     if let email = service.accountEmail {
-                        Text(email)
+                        ObfuscatedEmailRow(email: email)
                     }
                     Button("Sign Out") {
                         service.signOut()
@@ -284,4 +284,78 @@ private struct ThresholdSlider: View {
             d[VerticalAlignment.center]
         }
     }
+}
+
+private struct ObfuscatedEmailRow: View {
+    let email: String
+    @State private var isRevealed = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            emailLabel
+
+            Spacer(minLength: 0)
+
+            Button {
+                isRevealed.toggle()
+            } label: {
+                Image(systemName: isRevealed ? "eye.slash" : "eye")
+            }
+            .buttonStyle(.borderless)
+            .help(isRevealed ? "Hide email" : "Show email")
+            .accessibilityLabel(isRevealed ? "Hide email" : "Show email")
+        }
+    }
+
+    @ViewBuilder
+    private var emailLabel: some View {
+        if isRevealed {
+            Text(email)
+                .textSelection(.enabled)
+                .foregroundStyle(.primary)
+        } else {
+            Text(obfuscateEmail(email))
+                .textSelection(.disabled)
+                .foregroundStyle(.primary)
+        }
+    }
+}
+
+/// Masks an email for display, e.g. `doug@example.com` → `d•••@e••••••.com`.
+func obfuscateEmail(_ email: String) -> String {
+    let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let atIndex = trimmed.firstIndex(of: "@") else {
+        return String(repeating: "•", count: max(trimmed.count, 4))
+    }
+
+    let local = String(trimmed[..<atIndex])
+    let domain = String(trimmed[trimmed.index(after: atIndex)...])
+
+    return "\(obfuscateLocalPart(local))@\(obfuscateDomainPart(domain))"
+}
+
+private func obfuscateLocalPart(_ local: String) -> String {
+    guard let first = local.first else { return "••••" }
+    if local.count == 1 { return String(first) }
+    return String(first) + String(repeating: "•", count: max(local.count - 1, 3))
+}
+
+private func obfuscateDomainPart(_ domain: String) -> String {
+    guard !domain.isEmpty else { return "••••" }
+
+    let parts = domain.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+    guard parts.count >= 2 else {
+        guard let first = domain.first else { return "••••" }
+        return String(first) + String(repeating: "•", count: max(domain.count - 1, 3))
+    }
+
+    let tld = parts.last!
+    let nameParts = parts.dropLast()
+    let maskedName = nameParts.map { part -> String in
+        guard let first = part.first else { return "•" }
+        if part.count == 1 { return String(first) }
+        return String(first) + String(repeating: "•", count: max(part.count - 1, 3))
+    }.joined(separator: ".")
+
+    return "\(maskedName).\(tld)"
 }
