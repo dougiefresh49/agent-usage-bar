@@ -6,17 +6,22 @@ final class ConnectedUsageService: ObservableObject {
     @Published private(set) var cursorUsage: CursorUsageResponse?
     @Published private(set) var openAIUsage: OpenAIUsageResponse?
     @Published private(set) var openAIResetCredits: OpenAIResetCreditsResponse?
+    @Published private(set) var elevenLabsUsage: ElevenLabsSubscriptionResponse?
     @Published private(set) var cursorError: String?
     @Published private(set) var openAIError: String?
+    @Published private(set) var elevenLabsError: String?
     @Published private(set) var cursorLastUpdated: Date?
     @Published private(set) var openAILastUpdated: Date?
+    @Published private(set) var elevenLabsLastUpdated: Date?
     @Published private(set) var isCursorConfigured = false
     @Published private(set) var isOpenAIConfigured = false
+    @Published private(set) var isElevenLabsConfigured = false
 
     private let session: URLSession
     private let cursorEndpoint: URL
     private let openAIUsageEndpoint: URL
     private let openAIResetCreditsEndpoint: URL
+    private let elevenLabsSubscriptionEndpoint: URL
     private let credentialsStore: ConnectedServiceCredentialsStore
     private let environment: [String: String]
     var snapshotStore: UsageSnapshotStore?
@@ -24,7 +29,7 @@ final class ConnectedUsageService: ObservableObject {
     private var pollingMinutes: Int
 
     var hasAnyConfiguredService: Bool {
-        isCursorConfigured || isOpenAIConfigured
+        isCursorConfigured || isOpenAIConfigured || isElevenLabsConfigured
     }
 
     init(
@@ -32,6 +37,7 @@ final class ConnectedUsageService: ObservableObject {
         cursorEndpoint: URL = URL(string: "https://cursor.com/api/dashboard/get-current-period-usage")!,
         openAIUsageEndpoint: URL = URL(string: "https://chatgpt.com/backend-api/wham/usage")!,
         openAIResetCreditsEndpoint: URL = URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")!,
+        elevenLabsSubscriptionEndpoint: URL = URL(string: "https://api.elevenlabs.io/v1/user/subscription")!,
         credentialsStore: ConnectedServiceCredentialsStore = ConnectedServiceCredentialsStore(),
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
@@ -39,6 +45,7 @@ final class ConnectedUsageService: ObservableObject {
         self.cursorEndpoint = cursorEndpoint
         self.openAIUsageEndpoint = openAIUsageEndpoint
         self.openAIResetCreditsEndpoint = openAIResetCreditsEndpoint
+        self.elevenLabsSubscriptionEndpoint = elevenLabsSubscriptionEndpoint
         self.credentialsStore = credentialsStore
         self.environment = environment
 
@@ -64,7 +71,8 @@ final class ConnectedUsageService: ObservableObject {
         updateConfiguredState()
         async let cursor: Void = fetchCursorUsage()
         async let openAI: Void = fetchOpenAIUsage()
-        _ = await (cursor, openAI)
+        async let elevenLabs: Void = fetchElevenLabsUsage()
+        _ = await (cursor, openAI, elevenLabs)
     }
 
     func saveCursorToken(_ rawToken: String) throws {
@@ -83,6 +91,15 @@ final class ConnectedUsageService: ObservableObject {
         try credentialsStore.save(credentials)
         updateConfiguredState()
         openAIError = nil
+    }
+
+    func saveElevenLabsAPIKey(_ rawKey: String) throws {
+        guard let key = ConnectedTokenNormalizer.elevenLabs(rawKey) else { return }
+        var credentials = credentialsStore.load()
+        credentials.elevenLabsAPIKey = key
+        try credentialsStore.save(credentials)
+        updateConfiguredState()
+        elevenLabsError = nil
     }
 
     func clearCursorToken() {
@@ -105,6 +122,17 @@ final class ConnectedUsageService: ObservableObject {
         openAIResetCredits = nil
         openAIError = nil
         openAILastUpdated = nil
+        updateConfiguredState()
+    }
+
+    func clearElevenLabsAPIKey() {
+        var credentials = credentialsStore.load()
+        credentials.elevenLabsAPIKey = nil
+        try? credentialsStore.save(credentials)
+        snapshotStore?.remove(provider: "elevenlabs")
+        elevenLabsUsage = nil
+        elevenLabsError = nil
+        elevenLabsLastUpdated = nil
         updateConfiguredState()
     }
 
@@ -170,6 +198,31 @@ final class ConnectedUsageService: ObservableObject {
         }
     }
 
+    func fetchElevenLabsUsage() async {
+        guard let apiKey = elevenLabsAPIKey else { return }
+
+        var request = URLRequest(url: elevenLabsSubscriptionEndpoint)
+        request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        do {
+            let data = try await responseData(for: request, serviceName: "ElevenLabs")
+            let decoded = try JSONDecoder().decode(
+                ElevenLabsSubscriptionResponse.self,
+                from: data
+            )
+            elevenLabsUsage = decoded
+            elevenLabsError = nil
+            elevenLabsLastUpdated = Date()
+            snapshotStore?.update(
+                provider: "elevenlabs",
+                metrics: UsageSnapshotStore.elevenLabsMetrics(for: decoded)
+            )
+        } catch {
+            elevenLabsError = error.localizedDescription
+        }
+    }
+
     private func openAIResponseData(endpoint: URL, token: String) async throws -> Data {
         var request = URLRequest(url: endpoint)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -211,9 +264,15 @@ final class ConnectedUsageService: ObservableObject {
             ?? environment["OPENAI_SESSION_TOKEN"].flatMap(ConnectedTokenNormalizer.openAI)
     }
 
+    private var elevenLabsAPIKey: String? {
+        credentialsStore.load().elevenLabsAPIKey
+            ?? environment["ELEVENLABS_API_KEY"].flatMap(ConnectedTokenNormalizer.elevenLabs)
+    }
+
     private func updateConfiguredState() {
         isCursorConfigured = cursorToken != nil
         isOpenAIConfigured = openAIToken != nil
+        isElevenLabsConfigured = elevenLabsAPIKey != nil
     }
 }
 
@@ -227,6 +286,9 @@ enum ConnectedUsageError: LocalizedError {
             return "\(service) returned an invalid response"
         case .http(let service, let status):
             if status == 401 || status == 403 {
+                if service == "ElevenLabs" {
+                    return "ElevenLabs API key was rejected — update it in Settings"
+                }
                 return "\(service) session expired — update it in Settings"
             }
             return "\(service) HTTP \(status)"

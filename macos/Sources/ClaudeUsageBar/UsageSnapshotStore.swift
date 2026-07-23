@@ -170,6 +170,19 @@ extension UsageSnapshotStore {
         return metrics
     }
 
+    nonisolated static func elevenLabsMetrics(
+        for usage: ElevenLabsSubscriptionResponse
+    ) -> [UsageSnapshotMetric] {
+        [
+            UsageSnapshotMetric(
+                id: "credits",
+                label: "Credits used",
+                percentUsed: usage.utilization,
+                resetsAt: usage.nextResetDate
+            )
+        ]
+    }
+
     nonisolated private static func windowLabel(_ seconds: Double?, fallback: String) -> String {
         guard let seconds else { return fallback }
         let hours = Int(seconds / 3_600)

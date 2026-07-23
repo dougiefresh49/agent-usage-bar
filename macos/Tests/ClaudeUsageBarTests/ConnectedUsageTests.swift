@@ -106,6 +106,35 @@ final class ConnectedUsageModelTests: XCTestCase {
         XCTAssertEqual(credits.credits.first?.title, "Full reset")
         XCTAssertTrue(credits.credits.first?.isAvailable == true)
     }
+
+    func testDecodesElevenLabsSubscriptionAndCalculatesCreditBalance() throws {
+        let data = Data(
+            """
+            {
+              "tier": "creator",
+              "character_count": 111312,
+              "character_limit": 270914,
+              "next_character_count_reset_unix": 1785289159,
+              "status": "active",
+              "billing_period": "monthly_period",
+              "character_refresh_period": "monthly_period",
+              "voice_slots_used": 3,
+              "voice_limit": 30
+            }
+            """.utf8
+        )
+
+        let usage = try JSONDecoder().decode(
+            ElevenLabsSubscriptionResponse.self,
+            from: data
+        )
+
+        XCTAssertEqual(usage.tier, "creator")
+        XCTAssertEqual(usage.creditsRemaining, 159602)
+        XCTAssertEqual(usage.utilization ?? 0, 41.09, accuracy: 0.01)
+        XCTAssertNotNil(usage.nextResetDate)
+        XCTAssertEqual(usage.voiceSlotsUsed, 3)
+    }
 }
 
 final class ConnectedServiceCredentialsTests: XCTestCase {
@@ -121,6 +150,14 @@ final class ConnectedServiceCredentialsTests: XCTestCase {
             "session-token"
         )
         XCTAssertEqual(ConnectedTokenNormalizer.openAI("Bearer raw-token"), "raw-token")
+        XCTAssertEqual(
+            ConnectedTokenNormalizer.elevenLabs("-H 'xi-api-key: elevenlabs-key'"),
+            "elevenlabs-key"
+        )
+        XCTAssertEqual(
+            ConnectedTokenNormalizer.elevenLabs("ELEVENLABS_API_KEY=env-key"),
+            "env-key"
+        )
     }
 
     func testCredentialsFileUsesPrivatePermissions() throws {
@@ -150,14 +187,15 @@ final class ConnectedUsageServiceTests: XCTestCase {
         super.tearDown()
     }
 
-    func testFetchesCursorAndOpenAIWithMinimalSessionHeaders() async throws {
+    func testFetchesConfiguredProvidersWithMinimalHeaders() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let store = ConnectedServiceCredentialsStore(directoryURL: directory)
         try store.save(
             ConnectedServiceCredentials(
                 openAISessionToken: "openai-token",
-                cursorSessionToken: "cursor-token"
+                cursorSessionToken: "cursor-token",
+                elevenLabsAPIKey: "elevenlabs-key"
             )
         )
 
@@ -186,6 +224,18 @@ final class ConnectedUsageServiceTests: XCTestCase {
                 return (response, Data(#"{"rate_limit":{"primary_window":{"used_percent":43}}}"#.utf8))
             case "/credits":
                 return (response, Data(#"{"credits":[],"available_count":0}"#.utf8))
+            case "/elevenlabs":
+                XCTAssertEqual(request.httpMethod, "GET")
+                XCTAssertEqual(
+                    request.value(forHTTPHeaderField: "xi-api-key"),
+                    "elevenlabs-key"
+                )
+                return (
+                    response,
+                    Data(
+                        #"{"tier":"creator","character_count":1000,"character_limit":10000}"#.utf8
+                    )
+                )
             default:
                 throw URLError(.badURL)
             }
@@ -196,6 +246,7 @@ final class ConnectedUsageServiceTests: XCTestCase {
             cursorEndpoint: URL(string: "https://example.com/cursor")!,
             openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
             openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
+            elevenLabsSubscriptionEndpoint: URL(string: "https://example.com/elevenlabs")!,
             credentialsStore: store,
             environment: [:]
         )
@@ -204,8 +255,10 @@ final class ConnectedUsageServiceTests: XCTestCase {
 
         XCTAssertEqual(service.cursorUsage?.planUsage?.apiPercentUsed, 6)
         XCTAssertEqual(service.openAIUsage?.rateLimit?.primaryWindow?.usedPercent, 43)
+        XCTAssertEqual(service.elevenLabsUsage?.creditsRemaining, 9000)
         XCTAssertNil(service.cursorError)
         XCTAssertNil(service.openAIError)
+        XCTAssertNil(service.elevenLabsError)
     }
 
     private func makeSession() -> URLSession {
