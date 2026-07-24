@@ -1,17 +1,25 @@
 <p align="center">
-  <img src="macos/Resources/icon.png" width="128" alt="Agent Usage Bar icon">
+  <img src="macos/Resources/icon.png" width="128" alt="Agent Usage Bar Orbit Meter app icon">
 </p>
 
 # Agent Usage Bar
 
-Keep Claude, OpenAI/Codex, and Cursor subscription usage visible from one small macOS menu-bar app.
+Keep Claude, OpenAI/Codex, Cursor, and ElevenLabs subscription usage visible from one small macOS menu-bar app.
 
 Now it's just a glimpse away — always sitting at the top of your screen.
 
+The Orbit Meter app icon mirrors the paired usage windows shown in the popover.
+
 <p align="center">
-  <img src="macos/Resources/usage-demo--claude.png" width="384" alt="Agent Usage Bar demo">
-  <img src="macos/Resources/usage-demo--codex.png" width="384" alt="Agent Usage Bar demo">
-  <img src="macos/Resources/usage-demo--cursor.png" width="384" alt="Agent Usage Bar demo">
+  <img src="macos/Resources/usage-demo--claude.png" width="32%" align="top" alt="Claude usage demo">
+  <img src="macos/Resources/usage-demo--codex.png" width="32%" align="top" alt="OpenAI Codex usage demo">
+  <img src="macos/Resources/usage-demo--cursor.png" width="32%" align="top" alt="Cursor usage demo">
+</p>
+
+## MacOS Widgets
+
+<p align="center">
+  <img src="docs/images/desktop-widgets-preview.png" width="100%" alt="Agent Usage Bar macOS desktop widget layouts">
 </p>
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
@@ -26,12 +34,14 @@ A tiny macOS menu bar app that shows your AI subscription usage at a glance. Cli
 - Claude 5-hour, 7-day, extra usage, and dynamic per-model limits such as Fable
 - OpenAI/Codex usage windows, reset timers, and available reset-credit announcements
 - Cursor first-party/API usage plus on-demand spend and billing-cycle reset
+- ElevenLabs credit balance, plan details, and next billing reset
+- Four native macOS desktop widgets for provider details, snapshots, and grids
 - Extra usage tracking with USD currency display
 - Usage history chart — see how your usage evolves over time (1h / 6h / 1d / 7d / 30d)
 - Hover over the chart to see exact values at any point
 - Configurable polling interval (5m / 15m / 30m / 1h)
 - Built-in update checks via Sparkle
-- Claude OAuth via browser; local session-token configuration for OpenAI and Cursor
+- Claude OAuth via browser; local credential configuration for OpenAI, Cursor, and ElevenLabs
 - Minimal dependencies — SwiftUI, Swift Charts, Foundation, and Sparkle for updates
 
 ## Install
@@ -87,7 +97,7 @@ make install        # copy to /Applications
 4. The icon updates automatically (default: every 30 minutes)
 5. Release builds show **Check for Updates…** in the popover so you can pull newer versions without re-downloading manually
 
-### Connect OpenAI and Cursor
+### Connect OpenAI, Cursor, and ElevenLabs
 
 Open **Settings…** from the popover:
 
@@ -95,12 +105,13 @@ Open **Settings…** from the popover:
   ChatGPT `backend-api/wham/usage` request.
 - **Cursor:** paste the `WorkosCursorSessionToken` cookie value from `cursor.com`.
   A copied Cookie header or cURL request also works.
+- **ElevenLabs:** paste an API key that can access the user subscription endpoint.
 
 These private dashboard endpoints use browser sessions. An OpenAI platform API key
 and a Cursor API key do not expose the subscription limits shown on their account
 dashboards. Tokens are saved only to the local credentials file with `0600`
-permissions. For development, `OPENAI_SESSION_TOKEN` and `CURSOR_SESSION_TOKEN`
-environment variables are also supported.
+permissions. For development, `OPENAI_SESSION_TOKEN`, `CURSOR_SESSION_TOKEN`, and
+`ELEVENLABS_API_KEY` environment variables are also supported.
 
 Click the icon anytime to see:
 
@@ -109,19 +120,36 @@ Click the icon anytime to see:
 - Extra usage credits and limits
 - Usage history chart with adjustable time range and hover details
 
+### Desktop widgets
+
+Install Agent Usage Bar in `/Applications` and launch it once, then right-click
+the desktop and choose **Edit Widgets**. Search for **Agent Usage Bar** to add:
+
+- **Provider Details** — the preferred provider's detail visualization plus
+  additional stats, without the usage-history chart
+- **Provider Snapshot** — a small widget with only the top two provider stats
+- **Provider Detail Grid** — a large 2×2 grid using each provider's selected
+  detail visualization
+- **Usage Overview** — the compact 2×2 provider overview from the menu
+
+The **Preferred Provider** and **Provider Details** choices in Settings control
+the single-provider widgets and visualization style. Widgets update after each
+provider refresh and otherwise ask WidgetKit to revisit the cached data every
+15 minutes.
+
 ## Data storage
 
 All data is stored locally in `~/.config/claude-usage-bar/`:
 
-| File                       | Purpose                                                |
-| -------------------------- | ------------------------------------------------------ |
-| `credentials.json`         | Claude OAuth credentials (permissions: `0600`)         |
-| `service-credentials.json` | OpenAI and Cursor session tokens (permissions: `0600`) |
-| `history.json`             | Usage history for the chart (30-day retention)         |
+| File                       | Purpose                                             |
+| -------------------------- | --------------------------------------------------- |
+| `credentials.json`         | Claude OAuth credentials (permissions: `0600`)      |
+| `service-credentials.json` | OpenAI, Cursor, and ElevenLabs credentials (`0600`) |
+| `history.json`             | Usage history for the chart (30-day retention)      |
 
 History is buffered in memory and flushed to disk every 5 minutes and on app quit.
-Usage requests go directly to Anthropic, OpenAI, and Cursor; no credentials or usage
-data are sent anywhere else.
+Usage requests go directly to Anthropic, OpenAI, Cursor, and ElevenLabs; no
+credentials or usage data are sent anywhere else.
 
 ## Agent skill
 
@@ -129,6 +157,10 @@ The app writes a usage snapshot to
 `~/Library/Application Support/AgentUsageBar/usage-snapshot.json` after every
 refresh, so coding agents can check remaining quota (e.g. to pick which model to
 route subagent work to) without touching provider APIs or credentials.
+
+The app also mirrors this credential-free snapshot into the sandboxed widget
+extension's Application Support container. Credentials are never copied into
+the widget container.
 
 Install the bundled Claude Code skill with:
 
@@ -226,9 +258,14 @@ macos/                           # macOS menu bar app (Swift/SwiftUI)
 │   └── Resources/
 │       ├── claude-logo.png          # Pre-rendered menu bar logo (512px)
 │       └── en.lproj/Localizable.strings
+├── Sources/AgentUsageWidget/
+│   └── AgentUsageWidget.swift        # Four WidgetKit desktop layouts
+├── AgentUsageWidget.xcodeproj/        # Widget app-extension build target
 ├── Tests/ClaudeUsageBarTests/
 ├── Resources/                       # App bundle resources (not SwiftPM)
 │   ├── Info.plist
+│   ├── WidgetInfo.plist              # Widget extension metadata
+│   ├── Widget.entitlements           # Widget sandbox entitlement
 │   ├── Assets.xcassets/             # App icon
 │   └── claude-logo.svg             # Source SVG for menu bar logo
 ├── scripts/

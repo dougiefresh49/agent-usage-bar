@@ -1,4 +1,5 @@
 .build/
+.xcode-widget-build/
 .swiftpm/
 *.zip
 *.dmg
