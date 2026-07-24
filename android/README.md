@@ -10,6 +10,7 @@ Kotlin/Jetpack Compose port of Agent Usage Bar with home-screen widgets.
   - **Usage Overview** (≈4×2): all three providers at a glance
   - **Provider Usage** (≈2×2): focused detail for the provider chosen in Settings
 - Encrypted local storage for Claude OAuth + OpenAI/Cursor session tokens
+- QR import for selected settings and connections from the macOS app
 - Background refresh via WorkManager (every 15 minutes minimum — Android platform limit)
 
 ## Requirements to build
@@ -92,6 +93,14 @@ The debug package id is `com.agentusagebar.android.debug`.
 3. **OpenAI / Codex:** Settings → paste the ChatGPT usage bearer token (same as macOS)
 4. **Cursor:** Settings → paste `WorkosCursorSessionToken` (same as macOS)
 
+Alternatively, open **Settings → Devices → Add Device** on the Mac, choose what
+to transfer, then use **Settings → Devices → Scan QR Code** on Android. The QR
+contains only a one-time handshake and the Mac's public key—not credentials.
+Confirm the matching six-digit code on both devices, then approve the phone on
+the Mac. Selected settings and OpenAI/Cursor/ElevenLabs credentials are
+encrypted specifically for that phone. Pairing expires after 10 minutes and
+uses the local network; there is no cloud sync server.
+
 Tokens never leave the phone except when calling Anthropic / OpenAI / Cursor APIs.
 
 ## Findings / Android constraints worth knowing
@@ -103,7 +112,8 @@ Tokens never leave the phone except when calling Anthropic / OpenAI / Cursor API
 | **Battery optimizations** | Aggressive OEMs can delay WorkManager. On Pixel this is usually fine; if widgets go stale, disable battery restriction for the app under **Settings → Apps → Agent Usage Bar → Battery**. |
 | **Claude OAuth** | Same public client + PKCE flow as macOS. Android opens the browser; you paste the callback code. No custom URL scheme is required for this flow. |
 | **Session tokens** | OpenAI/Cursor tokens still come from private dashboard/session endpoints — same instructions as the macOS app. They expire; when they do, Settings will show an auth error. |
-| **No cross-device sync** | Intentional. Credentials live in EncryptedSharedPreferences on-device only. |
+| **Cross-device pairing** | The Mac and phone perform P-256 ECDH, confirm a matching code, and transfer settings with AES-GCM. Imported credentials are written to EncryptedSharedPreferences; Claude OAuth remains a separate sign-in because copying its rotating refresh token could invalidate a session on either device. |
+| **Device removal** | The Mac keeps a device ledger. Removing a phone stops future sync and queues deletion of credentials originally transferred by that Mac. The wipe is delivered when the phone next reaches the running Mac on the same local network; use the provider's session/key controls for immediate remote revocation. |
 | **Notifications** | Thresholds are stored (parity with macOS). Local notification firing is stubbed for this first Android cut — widgets + in-app UI are the primary glance surfaces. |
 | **Install source warning** | First sideload may ask you to allow installing unknown apps for the installer you used (`adb` usually skips that UI). |
 
@@ -128,18 +138,18 @@ android/
 - **Claude sign-in fails with state mismatch** — start Sign in again and paste the newest code without restarting the flow mid-way.
 
 
-## Copying tokens from your Mac
+## Importing settings from your Mac
 
-On macOS the app stores tokens here (permissions `0600`):
+1. On macOS, open **Settings → Devices → Add Device**.
+2. Select polling, appearance, notifications, and any configured connections
+   you want to copy.
+3. Generate the QR code.
+4. On Android, open **Settings → Devices → Scan QR Code** and scan it.
+5. Verify that the six-digit codes match, then approve the phone on the Mac.
 
-| File | Contents |
-| --- | --- |
-| `~/.config/claude-usage-bar/credentials.json` | Claude OAuth (`accessToken` / `refreshToken`) |
-| `~/.config/claude-usage-bar/service-credentials.json` | `openAISessionToken`, `cursorSessionToken`, `elevenLabsAPIKey` |
-
-Open those files locally, copy the values into the Android app under **Settings → Connections**. Do not AirDrop/email the raw files if you can avoid it — paste only into the phone app.
-
-Claude on Android still uses the browser OAuth + paste-code flow (same as first-time macOS setup), so the Mac `accessToken` is optional to reuse.
+The QR carries no connection values. The encrypted transfer expires after 10
+minutes, and Android stores imported credentials in encrypted app storage.
+Claude still uses the browser OAuth flow separately on each device.
 
 
 ## Wireless updates (no USB cable)

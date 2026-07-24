@@ -13,6 +13,9 @@ import com.agentusagebar.android.data.model.ProviderUsageState
 import com.agentusagebar.android.data.model.UsageMetric
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.data.network.UsageApiClient
+import com.agentusagebar.android.data.sync.DevicePairingClient
+import com.agentusagebar.android.data.sync.DeviceSyncPayload
+import com.agentusagebar.android.data.sync.TrustedDeviceStore
 import com.agentusagebar.android.widget.WidgetSnapshotStore
 import com.agentusagebar.android.widget.WidgetUpdater
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +34,8 @@ class UsageRepository(
     private val credentialsStore: CredentialsStore = CredentialsStore(context),
     private val settingsStore: SettingsStore = SettingsStore(context),
     private val api: UsageApiClient = UsageApiClient(credentialsStore),
+    private val trustedDeviceStore: TrustedDeviceStore = TrustedDeviceStore(context),
+    private val devicePairingClient: DevicePairingClient = DevicePairingClient(trustedDeviceStore),
 ) {
     private val appContext = context.applicationContext
 
@@ -146,6 +151,66 @@ class UsageRepository(
         publishWidgets()
     }
 
+    suspend fun pairDevice(
+        rawValue: String,
+        onWaitingForApproval: (desktopName: String, confirmationCode: String) -> Unit,
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val result = devicePairingClient.pair(rawValue, onWaitingForApproval)
+            applyImportedPayload(result.payload)
+            trustedDeviceStore.save(result.trustedDevice)
+            refreshConfiguredFlags()
+            refreshAll()
+
+            val categories = buildList {
+                if (result.payload.general != null) add("polling")
+                if (result.payload.appearance != null) add("appearance")
+                if (result.payload.notifications != null) add("notifications")
+                result.payload.connections?.count?.takeIf { it > 0 }?.let {
+                    add("$it connection${if (it == 1) "" else "s"}")
+                }
+            }
+            "Paired with ${result.trustedDevice.desktopName}; imported ${categories.joinToString()}."
+        }
+    }
+
+    private suspend fun applyImportedPayload(payload: DeviceSyncPayload) {
+        payload.connections?.let { imported ->
+            val current = credentialsStore.loadConnected()
+            credentialsStore.saveConnected(
+                current.copy(
+                    openAISessionToken = imported.openAISessionToken
+                        ?.takeIf { it.isNotBlank() }
+                        ?: current.openAISessionToken,
+                    cursorSessionToken = imported.cursorSessionToken
+                        ?.takeIf { it.isNotBlank() }
+                        ?: current.cursorSessionToken,
+                    elevenLabsAPIKey = imported.elevenLabsAPIKey
+                        ?.takeIf { it.isNotBlank() }
+                        ?: current.elevenLabsAPIKey,
+                ),
+            )
+        }
+        settingsStore.applyDeviceSync(payload)
+    }
+
+    private fun checkDeviceRevocations() {
+        trustedDeviceStore.load()
+            .filter { it.revokedAtEpochMs == null }
+            .forEach { device ->
+                runCatching { devicePairingClient.checkStatus(device) }
+                    .onSuccess { command ->
+                        val revoked = command.action == "wipe"
+                        if (revoked) {
+                            credentialsStore.wipeCredentialsImportedFrom(device)
+                            devicePairingClient.acknowledgeWipe(device)
+                        }
+                        trustedDeviceStore.markChecked(device.desktopID, revoked)
+                    }
+            }
+        refreshConfiguredFlags()
+    }
+
     suspend fun setPollingMinutes(minutes: Int) = settingsStore.setPollingMinutes(minutes)
     suspend fun setSetupComplete(complete: Boolean) = settingsStore.setSetupComplete(complete)
     suspend fun setWidgetProvider(provider: UsageProvider) {
@@ -171,6 +236,7 @@ class UsageRepository(
     suspend fun refreshAll() = withContext(Dispatchers.IO) {
         _isRefreshing.value = true
         try {
+            checkDeviceRevocations()
             coroutineScope {
                 val claude = async { refreshClaude() }
                 val openAI = async { refreshOpenAI() }
