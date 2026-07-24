@@ -13,8 +13,9 @@ android {
         applicationId = "com.agentusagebar.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI release tags can override via -PversionName / -PversionCode.
+        versionCode = (findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
+        versionName = (findProperty("versionName") as String?) ?: "0.1.0"
     }
 
     buildTypes {

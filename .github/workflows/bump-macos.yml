@@ -1,0 +1,110 @@
+name: Version bump macOS
+
+on:
+  workflow_run:
+    workflows: [Build macOS]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: write
+  pull-requests: read
+
+concurrency:
+  group: version-bump-macos-main
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Create macOS version tag
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Ensure tip of main
+        id: tip
+        run: |
+          git fetch origin main --tags
+          MAIN_SHA="$(git rev-parse origin/main)"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [ "$HEAD_SHA" != "$MAIN_SHA" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Build SHA ${HEAD_SHA} is not tip of main (${MAIN_SHA}); skipping."
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Check skip-release label
+        id: pr
+        if: steps.tip.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_LABELS="$(gh pr list --search "${{ github.event.workflow_run.head_sha }}" --state merged --json labels --jq '.[0].labels[].name // empty' 2>/dev/null || true)"
+          if echo "$PR_LABELS" | grep -qx 'skip-release'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Merged PR has skip-release label; skipping."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip empty or cross-platform release window
+        id: guard
+        if: steps.tip.outputs.skip != 'true' && steps.pr.outputs.skip != 'true'
+        run: bash scripts/platform-changes.sh macos
+
+      - name: Resolve bump type
+        id: resolve
+        if: >
+          steps.tip.outputs.skip != 'true' &&
+          steps.pr.outputs.skip != 'true' &&
+          steps.guard.outputs.skip != 'true'
+        run: bash scripts/resolve-bump.sh
+        env:
+          PLATFORM: macos
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Create tag and dispatch release
+        if: >
+          steps.tip.outputs.skip != 'true' &&
+          steps.pr.outputs.skip != 'true' &&
+          steps.guard.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_VERSION: ${{ steps.resolve.outputs.new_version }}
+          BUMP_TYPE: ${{ steps.resolve.outputs.bump_type }}
+          CURRENT_VERSION: ${{ steps.resolve.outputs.current_version }}
+        run: |
+          if [ -z "${NEW_VERSION:-}" ]; then
+            echo "::error::resolve-bump.sh did not produce new_version"
+            exit 1
+          fi
+
+          if [[ "$NEW_VERSION" == *-android ]]; then
+            echo "::error::macOS bump produced Android tag ${NEW_VERSION}"
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/${NEW_VERSION}" >/dev/null; then
+            echo "::error::Tag ${NEW_VERSION} already exists"
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEW_VERSION" -m "Release ${NEW_VERSION} (${BUMP_TYPE} from ${CURRENT_VERSION})"
+          git push origin "refs/tags/${NEW_VERSION}"
+
+          # Tag pushes made with GITHUB_TOKEN do not trigger other workflows.
+          # Explicitly dispatch Release on the new tag instead.
+          gh workflow run release.yml --ref "$NEW_VERSION"
+
+          echo "Created ${NEW_VERSION} (${BUMP_TYPE} from ${CURRENT_VERSION}) and dispatched Release"

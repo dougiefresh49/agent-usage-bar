@@ -1,0 +1,79 @@
+name: Release Android
+
+on:
+  push:
+    tags: ['v*-android']
+  # Allow Version bump (and manual runs) to start Release. Tag pushes made with
+  # GITHUB_TOKEN do not trigger workflow runs, so bump dispatches this explicitly.
+  workflow_dispatch:
+
+concurrency:
+  group: release-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    if: ${{ endsWith(github.ref_name, '-android') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          core="${tag#v}"
+          core="${core%-android}"
+          if [[ ! "$core" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Android tag must look like vX.Y.Z-android (got ${tag})"
+            exit 1
+          fi
+
+          IFS=. read -r major minor patch <<< "$core"
+          version_code=$((10#$major * 1000000 + 10#$minor * 1000 + 10#$patch))
+
+          echo "version_name=${core}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${version_code}" >> "$GITHUB_OUTPUT"
+          echo "Resolved Android versionName=${core} versionCode=${version_code}"
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          ./gradlew assembleDebug \
+            -PversionName="${{ steps.version.outputs.version_name }}" \
+            -PversionCode="${{ steps.version.outputs.version_code }}" \
+            --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk AgentUsageBar-debug.apk
+
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            --method POST \
+            -f tag_name="${GITHUB_REF_NAME}" \
+            --jq '.body' > dist/release-notes.md
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/AgentUsageBar-debug.apk
+          body_path: dist/release-notes.md
+          make_latest: false
+          name: Android ${{ github.ref_name }}

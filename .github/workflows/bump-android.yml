@@ -1,8 +1,8 @@
-name: Version bump
+name: Version bump Android
 
 on:
   workflow_run:
-    workflows: [Build]
+    workflows: [Build Android]
     types: [completed]
     branches: [main]
 
@@ -12,12 +12,12 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: version-bump-main
+  group: version-bump-android-main
   cancel-in-progress: false
 
 jobs:
   bump:
-    name: Create version tag
+    name: Create Android version tag
     if: >
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push'
@@ -56,25 +56,10 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Skip empty release window
+      - name: Skip empty or cross-platform release window
         id: guard
         if: steps.tip.outputs.skip != 'true' && steps.pr.outputs.skip != 'true'
-        run: |
-          LAST_TAG="$(git tag --list 'v*' --sort=-v:refname | head -n 1 || true)"
-          if [ -z "$LAST_TAG" ]; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "No existing version tags; continuing."
-            exit 0
-          fi
-
-          COMMITS="$(git log "${LAST_TAG}..HEAD" --oneline | wc -l | tr -d ' ')"
-          if [ "$COMMITS" = "0" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "No commits since ${LAST_TAG}; skipping tag."
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Found ${COMMITS} commit(s) since ${LAST_TAG}."
-          fi
+        run: bash scripts/platform-changes.sh android
 
       - name: Resolve bump type
         id: resolve
@@ -84,6 +69,7 @@ jobs:
           steps.guard.outputs.skip != 'true'
         run: bash scripts/resolve-bump.sh
         env:
+          PLATFORM: android
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: Create tag and dispatch release
@@ -102,6 +88,11 @@ jobs:
             exit 1
           fi
 
+          if [[ "$NEW_VERSION" != *-android ]]; then
+            echo "::error::Android bump produced non-Android tag ${NEW_VERSION}"
+            exit 1
+          fi
+
           if git rev-parse -q --verify "refs/tags/${NEW_VERSION}" >/dev/null; then
             echo "::error::Tag ${NEW_VERSION} already exists"
             exit 1
@@ -114,6 +105,6 @@ jobs:
 
           # Tag pushes made with GITHUB_TOKEN do not trigger other workflows.
           # Explicitly dispatch Release on the new tag instead.
-          gh workflow run release.yml --ref "$NEW_VERSION"
+          gh workflow run release-android.yml --ref "$NEW_VERSION"
 
           echo "Created ${NEW_VERSION} (${BUMP_TYPE} from ${CURRENT_VERSION}) and dispatched Release"

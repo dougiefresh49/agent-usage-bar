@@ -1,0 +1,48 @@
+name: Build Android
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'Makefile'
+      - '.github/workflows/build-android.yml'
+      - '.github/workflows/bump-android.yml'
+      - '.github/workflows/release-android.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'Makefile'
+      - '.github/workflows/build-android.yml'
+      - '.github/workflows/bump-android.yml'
+      - '.github/workflows/release-android.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentUsageBar-debug.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk

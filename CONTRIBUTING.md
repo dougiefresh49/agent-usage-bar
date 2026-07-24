@@ -58,9 +58,26 @@ development extension.
 
 ## Publishing releases
 
-Merging a PR into `main` runs Build first. When Build succeeds, Version bump creates the next `v*` tag and starts Release (via `workflow_dispatch`, because tag pushes from `GITHUB_TOKEN` do not trigger other workflows). Gemini classifies the bump as major/minor/patch from recent commits (override with `[major]`, `[minor]`, or `[patch]` in the merge commit subject). Add a `skip-release` label to a PR to skip tagging.
+macOS and Android have **independent** build → bump → release pipelines. A change that only touches one platform will not cut a release for the other.
 
-The release workflow then:
+| Platform | Tags | Build | Bump | Release |
+|----------|------|-------|------|---------|
+| macOS | `v1.6.2` (plain semver) | `build-macos.yml` | `bump-macos.yml` | `release.yml` (Sparkle zip/dmg) |
+| Android | `v0.1.0-android` | `build-android.yml` | `bump-android.yml` | `release-android.yml` (debug APK) |
+
+Path filters decide which Build runs:
+
+- **macOS:** `macos/**`, shared bump helpers under `scripts/`, macOS workflows, `Makefile`
+- **Android:** `android/**`, Android workflows, `Makefile`
+- **Neither:** docs, README, skills, license-only changes, etc.
+
+When a platform Build succeeds on a push to `main`, that platform’s Version bump creates the next tag and starts Release (via `workflow_dispatch`, because tag pushes from `GITHUB_TOKEN` do not trigger other workflows). Gemini classifies the bump as major/minor/patch from recent commits (override with `[major]`, `[minor]`, or `[patch]` in the merge commit subject). Add a `skip-release` label to a PR to skip tagging for both platforms.
+
+Android GitHub Releases set `make_latest: false` so they do not replace the macOS release at `/releases/latest`.
+
+### macOS release steps
+
+The macOS release workflow:
 
 - builds the release app bundle once
 - produces both a ZIP (for Sparkle) and a DMG (for manual drag-to-Applications installs)
@@ -70,11 +87,20 @@ The release workflow then:
 - generates a signed Sparkle appcast from that zip
 - deploys the appcast to GitHub Pages
 
-One-time repository setup:
+### Android release steps
+
+The Android release workflow:
+
+- builds a debug APK with `versionName` / `versionCode` injected from the `vX.Y.Z-android` tag
+- attaches `AgentUsageBar-debug.apk` to a GitHub Release (not marked latest)
+
+Signed Play-ready APKs can be added later in the same Android release workflow without changing the tag scheme.
+
+### One-time repository setup
 
 1. Enable GitHub Pages with source `GitHub Actions`
 2. Add the `SPARKLE_PRIVATE_KEY` repository secret
-3. Add the `GEMINI_API_KEY` repository secret (used by the version-bump workflow)
+3. Add the `GEMINI_API_KEY` repository secret (used by the version-bump workflows)
 
 Local source builds intentionally leave `SUFeedURL` unset, so Sparkle stays disabled unless your packaging flow injects a feed URL. This prevents forks and dev builds from auto-updating to upstream releases.
 
