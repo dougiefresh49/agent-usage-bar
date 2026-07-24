@@ -277,6 +277,15 @@ scripts/                         # Shared tooling
 └── mock-server.py               # Local mock API for development
 ```
 
+## Android (Pixel sideload)
+
+See [`android/README.md`](android/README.md) for the full Pixel install guide.
+
+```sh
+make android-apk       # builds android/AgentUsageBar-debug.apk
+make android-install   # adb install to a connected phone
+```
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing with the mock server, and submission guidelines.
