@@ -7,6 +7,7 @@ struct AgentUsageBarApp: App {
     @StateObject private var notificationService = NotificationService()
     @StateObject private var appUpdater = AppUpdater()
     @StateObject private var connectedService = ConnectedUsageService()
+    @StateObject private var deviceSyncManager = DeviceSyncManager()
     @State private var snapshotStore: UsageSnapshotStore?
     @State private var refreshListener: RefreshRequestListener?
     @AppStorage(UsagePresentationDefaults.menuBarProviderKey)
@@ -47,6 +48,7 @@ struct AgentUsageBarApp: App {
                     service.historyService = historyService
                     service.notificationService = notificationService
                     connectedService.notificationService = notificationService
+                    deviceSyncManager.startServer()
 
                     let store = snapshotStore ?? UsageSnapshotStore()
                     snapshotStore = store
@@ -76,7 +78,8 @@ struct AgentUsageBarApp: App {
             SettingsWindowContent(
                 service: service,
                 notificationService: notificationService,
-                connectedService: connectedService
+                connectedService: connectedService,
+                deviceSyncManager: deviceSyncManager
             )
         }
         .windowResizability(.contentSize)

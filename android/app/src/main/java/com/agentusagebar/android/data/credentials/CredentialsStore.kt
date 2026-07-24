@@ -5,6 +5,8 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.agentusagebar.android.data.model.ClaudeCredentials
 import com.agentusagebar.android.data.model.ConnectedCredentials
+import com.agentusagebar.android.data.sync.DeviceSyncCodec
+import com.agentusagebar.android.data.sync.TrustedDesktopDevice
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -49,6 +51,29 @@ class CredentialsStore(context: Context) {
             return
         }
         prefs.edit().putString(KEY_CONNECTED, json.encodeToString(credentials)).apply()
+    }
+
+    fun wipeCredentialsImportedFrom(device: TrustedDesktopDevice): Boolean {
+        val current = loadConnected()
+        val updated = current.copy(
+            openAISessionToken = current.openAISessionToken.clearIfMatching(
+                device.openAITokenHash,
+            ),
+            cursorSessionToken = current.cursorSessionToken.clearIfMatching(
+                device.cursorTokenHash,
+            ),
+            elevenLabsAPIKey = current.elevenLabsAPIKey.clearIfMatching(
+                device.elevenLabsKeyHash,
+            ),
+        )
+        val changed = updated != current
+        if (changed) saveConnected(updated)
+        return changed
+    }
+
+    private fun String?.clearIfMatching(importedHash: String?): String? {
+        if (this == null || importedHash == null) return this
+        return if (DeviceSyncCodec.credentialHash(this) == importedHash) null else this
     }
 
     companion object {

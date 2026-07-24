@@ -1,5 +1,6 @@
 package com.agentusagebar.android.ui.settings
 
+import android.app.Activity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,7 +13,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -36,6 +39,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,11 +50,15 @@ import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.data.model.UsageTextSize
 import com.agentusagebar.android.ui.usage.ThresholdSlider
 import com.agentusagebar.android.ui.usage.UsageViewModel
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
 private enum class SettingsTab(val title: String) {
     Connections("Connections"),
     Appearance("Appearance"),
     Notifications("Notifications"),
+    Devices("Devices"),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,12 +71,24 @@ fun SettingsScreen(
     val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
     val email by viewModel.claudeEmail.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val devicePairing by viewModel.devicePairing.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var selectedTab by remember { mutableIntStateOf(0) }
 
     var openAIToken by remember { mutableStateOf("") }
     var cursorToken by remember { mutableStateOf("") }
     var elevenLabsKey by remember { mutableStateOf("") }
+    val activity = LocalContext.current as? Activity
+    val uriHandler = LocalUriHandler.current
+    val scanner = remember(activity) {
+        activity?.let {
+            val options = GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .enableAutoZoom()
+                .build()
+            GmsBarcodeScanning.getClient(it, options)
+        }
+    }
 
     val claudeConnected = snapshot.providers[UsageProvider.CLAUDE]?.isConfigured == true
     val openAIConnected = snapshot.providers[UsageProvider.OPENAI]?.isConfigured == true
@@ -369,6 +390,86 @@ fun SettingsScreen(
                                 viewModel::setCursorCreditThreshold,
                             )
                         }
+                    }
+
+                    SettingsTab.Devices -> {
+                        Icon(
+                            Icons.Outlined.Devices,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Text("Sync from your Mac", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "On the Mac, open Settings → Devices → Add Device. Choose what to sync, then scan the temporary QR code here.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Button(
+                            onClick = {
+                                scanner?.startScan()
+                                    ?.addOnSuccessListener { barcode ->
+                                        barcode.rawValue?.let(viewModel::startDevicePairing)
+                                    }
+                                    ?.addOnFailureListener {
+                                        viewModel.showMessage(
+                                            it.message ?: "Could not scan the QR code.",
+                                        )
+                                    }
+                            },
+                            enabled = scanner != null && !devicePairing.isPairing,
+                        ) {
+                            Text("Scan QR Code")
+                        }
+                        if (devicePairing.isPairing) {
+                            HorizontalDivider()
+                            CircularProgressIndicator()
+                            devicePairing.desktopName?.let {
+                                Text("Waiting for approval on $it")
+                            }
+                            devicePairing.confirmationCode?.let { code ->
+                                Text(
+                                    "Confirm this code matches the Mac:",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    "${code.take(3)} ${code.takeLast(3)}",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                )
+                            }
+                            TextButton(onClick = viewModel::cancelDevicePairing) {
+                                Text("Cancel Pairing")
+                            }
+                        }
+                        Text(
+                            "Imported connection secrets are saved in Android's encrypted app storage. Claude sign-in stays device-specific.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "Only scan a code you just generated on a Mac you trust. Codes expire after 10 minutes.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        HorizontalDivider()
+                        Text("Lost device?", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Removing a phone on the Mac queues a wipe for the next local-network check. For immediate protection, revoke sessions or keys at the provider.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(
+                            onClick = { uriHandler.openUri("https://chatgpt.com/") },
+                        ) { Text("OpenAI active sessions") }
+                        TextButton(
+                            onClick = {
+                                uriHandler.openUri("https://claude.ai/settings/account")
+                            },
+                        ) { Text("Claude account sessions") }
+                        TextButton(
+                            onClick = {
+                                uriHandler.openUri("https://elevenlabs.io/app/settings/api-keys")
+                            },
+                        ) { Text("ElevenLabs API keys") }
                     }
                 }
                 Spacer(modifier = Modifier.height(24.dp))

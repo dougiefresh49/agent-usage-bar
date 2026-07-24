@@ -13,7 +13,14 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+
+data class DevicePairingUiState(
+    val isPairing: Boolean = false,
+    val desktopName: String? = null,
+    val confirmationCode: String? = null,
+)
 
 class UsageViewModel(
     private val repository: UsageRepository,
@@ -27,6 +34,9 @@ class UsageViewModel(
     val isRefreshing = repository.isRefreshing
     val awaitingClaudeCode = repository.awaitingClaudeCode
     val claudeEmail = repository.claudeEmail
+    private val _devicePairing = MutableStateFlow(DevicePairingUiState())
+    val devicePairing = _devicePairing.asStateFlow()
+    private var devicePairingJob: Job? = null
 
     private val _selectedProvider = MutableStateFlow(UsageProvider.CLAUDE)
     val selectedProvider = _selectedProvider.asStateFlow()
@@ -114,6 +124,38 @@ class UsageViewModel(
         viewModelScope.launch { repository.clearElevenLabsAPIKey() }
     }
 
+    fun startDevicePairing(rawValue: String) {
+        devicePairingJob?.cancel()
+        _devicePairing.value = DevicePairingUiState(isPairing = true)
+        devicePairingJob = viewModelScope.launch {
+            repository.pairDevice(rawValue) { desktopName, confirmationCode ->
+                _devicePairing.value = DevicePairingUiState(
+                    isPairing = true,
+                    desktopName = desktopName,
+                    confirmationCode = confirmationCode,
+                )
+            }
+                .onSuccess {
+                    _message.value = it
+                    _devicePairing.value = DevicePairingUiState()
+                    UsageRefreshScheduler.ensureScheduled(
+                        AgentUsageBarAppHolder.context(),
+                        forceReschedule = true,
+                    )
+                }
+                .onFailure {
+                    _message.value = it.message
+                    _devicePairing.value = DevicePairingUiState()
+                }
+        }
+    }
+
+    fun cancelDevicePairing() {
+        devicePairingJob?.cancel()
+        devicePairingJob = null
+        _devicePairing.value = DevicePairingUiState()
+    }
+
     fun setPollingMinutes(minutes: Int) {
         viewModelScope.launch {
             repository.setPollingMinutes(minutes)
@@ -174,6 +216,10 @@ class UsageViewModel(
 
     fun consumeMessage() {
         _message.value = null
+    }
+
+    fun showMessage(message: String) {
+        _message.value = message
     }
 }
 
