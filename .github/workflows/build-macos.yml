@@ -1,10 +1,26 @@
-name: Build
+name: Build macOS
 
 on:
   push:
     branches: [main]
+    paths:
+      - 'macos/**'
+      - 'scripts/resolve-bump.sh'
+      - 'scripts/platform-changes.sh'
+      - 'Makefile'
+      - '.github/workflows/build-macos.yml'
+      - '.github/workflows/bump-macos.yml'
+      - '.github/workflows/release.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'macos/**'
+      - 'scripts/resolve-bump.sh'
+      - 'scripts/platform-changes.sh'
+      - 'Makefile'
+      - '.github/workflows/build-macos.yml'
+      - '.github/workflows/bump-macos.yml'
+      - '.github/workflows/release.yml'
 
 jobs:
   build:

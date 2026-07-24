@@ -8,18 +8,68 @@ if [ -z "${GITHUB_OUTPUT:-}" ]; then
   trap 'echo "--- GITHUB_OUTPUT (local) ---"; cat "$_RESOLVE_BUMP_OUT" 2>/dev/null || true; rm -f "$_RESOLVE_BUMP_OUT"' EXIT
 fi
 
-# Resolve semver bump type from commit messages.
+# Resolve semver bump type from commit messages for a platform.
+# Usage: PLATFORM=macos|android bash scripts/resolve-bump.sh
 # Priority: explicit [major]/[minor]/[patch] keyword in HEAD commit → Gemini analysis → patch fallback.
-# Outputs: bump_type (major|minor|patch), current_version, new_version (vX.Y.Z)
+# Outputs: bump_type (major|minor|patch), current_version, new_version
+#   macOS:   vX.Y.Z
+#   Android: vX.Y.Z-android
+
+PLATFORM="${PLATFORM:-macos}"
+if [[ "$PLATFORM" != "macos" && "$PLATFORM" != "android" ]]; then
+  echo "PLATFORM must be macos or android (got: ${PLATFORM})" >&2
+  exit 1
+fi
+
+latest_macos_tag() {
+  git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true
+}
+
+latest_android_tag() {
+  git tag --list 'v*-android' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-android$' | head -n 1 || true
+}
+
+seed_android_version() {
+  local name
+  # Prefer the default literal in `?: "X.Y.Z"` after -P override support was added.
+  name="$(
+    grep -E 'versionName\s*=' android/app/build.gradle.kts \
+      | head -n 1 \
+      | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' \
+      | tail -n 1
+  )"
+  if [[ ! "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    name="0.1.0"
+  fi
+  printf 'v%s-android\n' "$name"
+}
 
 latest_version_tag() {
-  git tag --list 'v*' --sort=-v:refname | head -n 1
+  if [[ "$PLATFORM" == "android" ]]; then
+    latest_android_tag
+  else
+    latest_macos_tag
+  fi
+}
+
+# Strip optional leading v and optional -android suffix for numeric bumping.
+semver_core() {
+  local version="$1"
+  version="${version#v}"
+  version="${version%-android}"
+  printf '%s\n' "$version"
 }
 
 bump_semver() {
   local version="$1"
   local bump="$2"
-  version="${version#v}"
+  local suffix=""
+
+  if [[ "$version" == *-android || "$PLATFORM" == "android" ]]; then
+    suffix="-android"
+  fi
+
+  version="$(semver_core "$version")"
 
   local major minor patch
   IFS=. read -r major minor patch <<< "$version"
@@ -28,9 +78,9 @@ bump_semver() {
   patch="${patch:-0}"
 
   case "$bump" in
-    major) printf 'v%s.0.0\n' "$((major + 1))" ;;
-    minor) printf 'v%s.%s.0\n' "$major" "$((minor + 1))" ;;
-    patch) printf 'v%s.%s.%s\n' "$major" "$minor" "$((patch + 1))" ;;
+    major) printf 'v%s.0.0%s\n' "$((major + 1))" "$suffix" ;;
+    minor) printf 'v%s.%s.0%s\n' "$major" "$((minor + 1))" "$suffix" ;;
+    patch) printf 'v%s.%s.%s%s\n' "$major" "$minor" "$((patch + 1))" "$suffix" ;;
     *)
       echo "Unknown bump type: $bump" >&2
       return 1
@@ -50,11 +100,17 @@ write_outputs() {
     echo "new_version=$new_version"
   } >> "$GITHUB_OUTPUT"
 
-  echo "Resolved bump: ${bump_type} (${current_version} → ${new_version})"
+  echo "Resolved ${PLATFORM} bump: ${bump_type} (${current_version} → ${new_version})"
 }
 
 CURRENT_TAG="$(latest_version_tag || true)"
-CURRENT_VERSION="${CURRENT_TAG:-v0.0.0}"
+if [ -n "$CURRENT_TAG" ]; then
+  CURRENT_VERSION="$CURRENT_TAG"
+elif [[ "$PLATFORM" == "android" ]]; then
+  CURRENT_VERSION="$(seed_android_version)"
+else
+  CURRENT_VERSION="v0.0.0"
+fi
 
 # Commits since last version tag (or all commits if no tags exist)
 if [ -n "$CURRENT_TAG" ]; then
@@ -89,14 +145,20 @@ fi
 
 # 2. Ask Gemini to classify the bump
 if [ -n "${GEMINI_API_KEY:-}" ]; then
-  PROMPT="You are a semver versioning assistant. Given the current version and recent git commits for a macOS menu bar app (Agent Usage Bar), determine if the next version bump should be major, minor, or patch.
+  if [[ "$PLATFORM" == "android" ]]; then
+    APP_DESC="Android app (Agent Usage Bar)"
+  else
+    APP_DESC="macOS menu bar app (Agent Usage Bar)"
+  fi
+
+  PROMPT="You are a semver versioning assistant. Given the current version and recent git commits for an ${APP_DESC}, determine if the next version bump should be major, minor, or patch.
 
 Rules:
 - major: breaking changes, large rewrites, incompatible behavior changes
 - minor: new features, significant enhancements, new providers/UI surfaces
 - patch: bug fixes, small tweaks, dependency updates, refactoring, docs, CI/config changes
 
-Current version: ${CURRENT_VERSION#v}
+Current version: $(semver_core "$CURRENT_VERSION")
 
 Recent commits:
 ${COMMITS}

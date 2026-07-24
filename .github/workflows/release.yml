@@ -2,7 +2,9 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
+      - '!v*-android'
   # Allow Version bump (and manual runs) to start Release. Tag pushes made with
   # GITHUB_TOKEN do not trigger workflow runs, so bump dispatches this explicitly.
   workflow_dispatch:
@@ -13,6 +15,8 @@ concurrency:
 
 jobs:
   release:
+    # Android tags use the same v* glob (v0.1.0-android); keep Sparkle releases macOS-only.
+    if: ${{ !endsWith(github.ref_name, '-android') }}
     runs-on: macos-14
     permissions:
       contents: write
@@ -122,7 +126,9 @@ jobs:
           path: dist/site
 
   deploy_appcast:
-    if: vars.ENABLE_SPARKLE_UPDATES == 'true'
+    if: >
+      vars.ENABLE_SPARKLE_UPDATES == 'true' &&
+      !endsWith(github.ref_name, '-android')
     needs: release
     runs-on: ubuntu-latest
     permissions:
