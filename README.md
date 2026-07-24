@@ -141,11 +141,11 @@ provider refresh and otherwise ask WidgetKit to revisit the cached data every
 
 All data is stored locally in `~/.config/claude-usage-bar/`:
 
-| File                       | Purpose                                                |
-| -------------------------- | ------------------------------------------------------ |
-| `credentials.json`         | Claude OAuth credentials (permissions: `0600`)         |
-| `service-credentials.json` | OpenAI, Cursor, and ElevenLabs credentials (`0600`)    |
-| `history.json`             | Usage history for the chart (30-day retention)         |
+| File                       | Purpose                                             |
+| -------------------------- | --------------------------------------------------- |
+| `credentials.json`         | Claude OAuth credentials (permissions: `0600`)      |
+| `service-credentials.json` | OpenAI, Cursor, and ElevenLabs credentials (`0600`) |
+| `history.json`             | Usage history for the chart (30-day retention)      |
 
 History is buffered in memory and flushed to disk every 5 minutes and on app quit.
 Usage requests go directly to Anthropic, OpenAI, Cursor, and ElevenLabs; no
