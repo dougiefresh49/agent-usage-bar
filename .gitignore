@@ -8,3 +8,16 @@
 xcuserdata/
 .env
 examples.md
+
+# Android
+android/.gradle/
+android/.kotlin/
+android/**/build/
+android/local.properties
+android/*.apk
+android/.idea/
+android/*.iml
+android/captures/
+*.apk
+*.ap_
+*.dex

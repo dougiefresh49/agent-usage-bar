@@ -2,8 +2,8 @@ import SwiftUI
 import ServiceManagement
 
 private enum SettingsTab: Hashable {
-    case general
     case connections
+    case appearance
     case notifications
 }
 
@@ -11,7 +11,7 @@ struct SettingsWindowContent: View {
     @ObservedObject var service: UsageService
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var connectedService: ConnectedUsageService
-    @State private var selectedTab: SettingsTab = .general
+    @State private var selectedTab: SettingsTab = .connections
     @State private var openAIToken = ""
     @State private var cursorToken = ""
     @State private var elevenLabsAPIKey = ""
@@ -31,13 +31,13 @@ struct SettingsWindowContent: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            generalTab
-                .tabItem { Label("General", systemImage: "gearshape") }
-                .tag(SettingsTab.general)
-
             connectionsTab
                 .tabItem { Label("Connections", systemImage: "link") }
                 .tag(SettingsTab.connections)
+
+            appearanceTab
+                .tabItem { Label("Appearance", systemImage: "paintpalette") }
+                .tag(SettingsTab.appearance)
 
             notificationsTab
                 .tabItem { Label("Notifications", systemImage: "bell") }
@@ -51,7 +51,7 @@ struct SettingsWindowContent: View {
 
     // MARK: - General
 
-    private var generalTab: some View {
+    private var appearanceTab: some View {
         Form {
             Section("General") {
                 LaunchAtLoginToggle()
@@ -245,53 +245,69 @@ struct SettingsWindowContent: View {
 
     private var notificationsTab: some View {
         Form {
-            Section("Claude") {
-                ThresholdSlider(
-                    label: "Session usage",
-                    value: notificationService.claudeSessionThreshold,
-                    onChange: { notificationService.setClaudeSessionThreshold($0) }
-                )
-                ThresholdSlider(
-                    label: "Seven-day usage",
-                    value: notificationService.claudeSevenDayThreshold,
-                    onChange: { notificationService.setClaudeSevenDayThreshold($0) }
-                )
-                ThresholdSlider(
-                    label: "Fable usage",
-                    value: notificationService.claudeFableThreshold,
-                    onChange: { notificationService.setClaudeFableThreshold($0) }
-                )
+            if !service.isAuthenticated
+                && !connectedService.isOpenAIConfigured
+                && !connectedService.isCursorConfigured {
+                Section {
+                    Text("Connect a provider in Connections to configure alert thresholds.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            Section("Codex") {
-                ThresholdSlider(
-                    label: "Weekly usage limits",
-                    value: notificationService.openAIWeeklyThreshold,
-                    onChange: { notificationService.setOpenAIWeeklyThreshold($0) }
-                )
-                CountThresholdSlider(
-                    label: "Reset credits",
-                    value: notificationService.openAIResetCreditsThreshold,
-                    onChange: { notificationService.setOpenAIResetCreditsThreshold($0) }
-                )
+            if service.isAuthenticated {
+                Section("Claude") {
+                    ThresholdSlider(
+                        label: "Session usage",
+                        value: notificationService.claudeSessionThreshold,
+                        onChange: { notificationService.setClaudeSessionThreshold($0) }
+                    )
+                    ThresholdSlider(
+                        label: "Seven-day usage",
+                        value: notificationService.claudeSevenDayThreshold,
+                        onChange: { notificationService.setClaudeSevenDayThreshold($0) }
+                    )
+                    ThresholdSlider(
+                        label: "Fable usage",
+                        value: notificationService.claudeFableThreshold,
+                        onChange: { notificationService.setClaudeFableThreshold($0) }
+                    )
+                }
             }
 
-            Section("Cursor") {
-                ThresholdSlider(
-                    label: "API usage",
-                    value: notificationService.cursorAPIThreshold,
-                    onChange: { notificationService.setCursorAPIThreshold($0) }
-                )
-                ThresholdSlider(
-                    label: "Auto usage",
-                    value: notificationService.cursorAutoThreshold,
-                    onChange: { notificationService.setCursorAutoThreshold($0) }
-                )
-                ThresholdSlider(
-                    label: "Credit",
-                    value: notificationService.cursorCreditThreshold,
-                    onChange: { notificationService.setCursorCreditThreshold($0) }
-                )
+            if connectedService.isOpenAIConfigured {
+                Section("Codex") {
+                    ThresholdSlider(
+                        label: "Weekly usage limits",
+                        value: notificationService.openAIWeeklyThreshold,
+                        onChange: { notificationService.setOpenAIWeeklyThreshold($0) }
+                    )
+                    CountThresholdSlider(
+                        label: "Reset credits",
+                        value: notificationService.openAIResetCreditsThreshold,
+                        onChange: { notificationService.setOpenAIResetCreditsThreshold($0) }
+                    )
+                }
+            }
+
+            if connectedService.isCursorConfigured {
+                Section("Cursor") {
+                    ThresholdSlider(
+                        label: "API usage",
+                        value: notificationService.cursorAPIThreshold,
+                        onChange: { notificationService.setCursorAPIThreshold($0) }
+                    )
+                    ThresholdSlider(
+                        label: "Auto usage",
+                        value: notificationService.cursorAutoThreshold,
+                        onChange: { notificationService.setCursorAutoThreshold($0) }
+                    )
+                    ThresholdSlider(
+                        label: "Credit",
+                        value: notificationService.cursorCreditThreshold,
+                        onChange: { notificationService.setCursorCreditThreshold($0) }
+                    )
+                }
             }
         }
         .formStyle(.grouped)

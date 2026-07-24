@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Agent Usage Bar</string>
+    <string name="widget_overview_label">Usage Overview</string>
+    <string name="widget_overview_description">Glanceable Claude, Codex, and Cursor usage bars.</string>
+    <string name="widget_provider_label">Provider Usage</string>
+    <string name="widget_provider_description">Larger usage detail for one connected provider.</string>
+</resources>
