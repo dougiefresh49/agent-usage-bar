@@ -9,13 +9,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -24,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.SnackbarHost
@@ -50,11 +55,17 @@ import com.agentusagebar.android.data.model.DetailVisualizationStyle
 import com.agentusagebar.android.data.model.UsageMetricPreferences
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.data.model.UsageTextSize
+import com.agentusagebar.android.data.sync.TrustedDesktopDevice
+import com.agentusagebar.android.ui.usage.DeviceActionPhase
 import com.agentusagebar.android.ui.usage.ThresholdSlider
 import com.agentusagebar.android.ui.usage.UsageViewModel
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 private enum class SettingsTab(val title: String) {
     Connections("Connections"),
@@ -74,12 +85,16 @@ fun SettingsScreen(
     val email by viewModel.claudeEmail.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val devicePairing by viewModel.devicePairing.collectAsStateWithLifecycle()
+    val trustedDevices by viewModel.trustedDevices.collectAsStateWithLifecycle()
+    val deviceActions by viewModel.deviceActions.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var selectedTab by remember { mutableIntStateOf(0) }
 
     var openAIToken by remember { mutableStateOf("") }
     var cursorToken by remember { mutableStateOf("") }
     var elevenLabsKey by remember { mutableStateOf("") }
+    var pendingUnlink by remember { mutableStateOf<TrustedDesktopDevice?>(null) }
+    var removeImportedCredentials by remember { mutableStateOf(false) }
     val activity = LocalContext.current as? Activity
     val uriHandler = LocalUriHandler.current
     val scanner = remember(activity) {
@@ -114,6 +129,46 @@ fun SettingsScreen(
             snackbar.showSnackbar(it)
             viewModel.consumeMessage()
         }
+    }
+
+    pendingUnlink?.let { device ->
+        AlertDialog(
+            onDismissRequest = { pendingUnlink = null },
+            title = { Text("Unlink ${device.desktopName}?") },
+            text = {
+                Column {
+                    Text(
+                        "Android will delete this Mac’s trusted key. If the Mac is reachable, it will also remove this phone.",
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row {
+                        Checkbox(
+                            checked = removeImportedCredentials,
+                            onCheckedChange = { removeImportedCredentials = it },
+                        )
+                        Text(
+                            "Also remove credentials imported from this Mac",
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.unlinkMac(
+                            device.desktopID,
+                            device.desktopName,
+                            removeImportedCredentials,
+                        )
+                        pendingUnlink = null
+                    },
+                ) { Text("Unlink Mac") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingUnlink = null }) { Text("Cancel") }
+            },
+        )
     }
 
     Scaffold(
@@ -502,6 +557,101 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         HorizontalDivider()
+                        Text("Trusted Macs", style = MaterialTheme.typography.titleMedium)
+                        if (trustedDevices.isEmpty()) {
+                            Text(
+                                "No Macs are paired yet.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            trustedDevices.forEach { device ->
+                                val action = deviceActions[device.desktopID]
+                                Card(modifier = Modifier.fillMaxWidth()) {
+                                    Column(
+                                        modifier = Modifier.padding(16.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                        ) {
+                                            Text(
+                                                device.desktopName,
+                                                style = MaterialTheme.typography.titleMedium,
+                                            )
+                                            Text(
+                                                "Paired",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                        Text(
+                                            "Last successful contact: ${formatDeviceTime(device.lastCheckedAtEpochMs)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        Text(
+                                            "Last settings sync: ${formatDeviceTime(device.lastSettingsSyncAtEpochMs)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        action?.message?.let { status ->
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            ) {
+                                                if (
+                                                    action.phase == DeviceActionPhase.CHECKING ||
+                                                    action.phase == DeviceActionPhase.UNLINKING
+                                                ) {
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.size(18.dp),
+                                                        strokeWidth = 2.dp,
+                                                    )
+                                                }
+                                                Text(
+                                                    status,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = when (action.phase) {
+                                                        DeviceActionPhase.ERROR ->
+                                                            MaterialTheme.colorScheme.error
+                                                        DeviceActionPhase.SUCCESS ->
+                                                            MaterialTheme.colorScheme.primary
+                                                        else ->
+                                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                                    },
+                                                )
+                                            }
+                                        }
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            Button(
+                                                onClick = {
+                                                    viewModel.checkForSync(
+                                                        device.desktopID,
+                                                        device.desktopName,
+                                                    )
+                                                },
+                                                enabled = action?.phase !in setOf(
+                                                    DeviceActionPhase.CHECKING,
+                                                    DeviceActionPhase.UNLINKING,
+                                                ),
+                                            ) { Text("Check for Sync") }
+                                            OutlinedButton(
+                                                onClick = {
+                                                    removeImportedCredentials = false
+                                                    pendingUnlink = device
+                                                },
+                                                enabled = action?.phase !in setOf(
+                                                    DeviceActionPhase.CHECKING,
+                                                    DeviceActionPhase.UNLINKING,
+                                                ),
+                                            ) { Text("Unlink Mac") }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalDivider()
                         Text("Lost device?", style = MaterialTheme.typography.titleMedium)
                         Text(
                             "Removing a phone on the Mac queues a wipe for the next local-network check. For immediate protection, revoke sessions or keys at the provider.",
@@ -527,4 +677,14 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+private val deviceTimeFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+
+private fun formatDeviceTime(epochMs: Long?): String {
+    if (epochMs == null) return "Never"
+    return deviceTimeFormatter.format(
+        Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()),
+    )
 }

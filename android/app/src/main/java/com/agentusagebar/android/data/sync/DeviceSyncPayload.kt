@@ -139,6 +139,14 @@ data class DeviceSyncAcknowledgement(
     val proof: String,
 )
 
+@Serializable
+data class DeviceUnlinkRequest(
+    val desktopID: String,
+    val deviceID: String,
+    val timestamp: Long,
+    val proof: String,
+)
+
 object DeviceSyncCodec {
     const val PAIRING_INFO = "agentusagebar-device-pair-v2"
     const val STATUS_INFO = "agentusagebar-device-status-v2"

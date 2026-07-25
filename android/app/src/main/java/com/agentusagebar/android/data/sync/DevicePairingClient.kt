@@ -116,6 +116,8 @@ class DevicePairingClient(
                         DeviceSyncCrypto.rawPublicKey(keyPair.public),
                     ),
                     pairedAtEpochMs = System.currentTimeMillis(),
+                    lastCheckedAtEpochMs = System.currentTimeMillis(),
+                    lastSettingsSyncAtEpochMs = System.currentTimeMillis(),
                     openAITokenHash = DeviceSyncCodec.credentialHash(
                         connections?.openAISessionToken,
                     ),
@@ -218,6 +220,35 @@ class DevicePairingClient(
             method = "POST",
             path = "/v2/status/sync-ack",
             body = DeviceSyncCodec.json.encodeToString(acknowledgement).toByteArray(),
+        )
+        require(response.status in 200..299) { response.errorMessage() }
+    }
+
+    fun unlink(device: TrustedDesktopDevice) {
+        val secret = DeviceSyncCrypto.sharedSecret(
+            DeviceSyncCrypto.restorePrivateKey(device.privateKey),
+            DeviceSyncCodec.base64URLDecode(device.desktopPublicKey),
+        )
+        val timestamp = System.currentTimeMillis() / 1_000
+        val request = DeviceUnlinkRequest(
+            desktopID = device.desktopID,
+            deviceID = device.deviceID,
+            timestamp = timestamp,
+            proof = DeviceSyncCrypto.authenticationProof(
+                secret,
+                device.desktopID,
+                DeviceSyncCodec.STATUS_INFO,
+                "unlink:${device.desktopID}:${device.deviceID}:$timestamp",
+            ),
+        )
+        val response = LocalPairingHttpClient.request(
+            host = device.host,
+            port = device.port,
+            method = "POST",
+            path = "/v2/unlink",
+            body = DeviceSyncCodec.json.encodeToString(request).toByteArray(),
+            connectTimeoutMs = 1_500,
+            readTimeoutMs = 3_000,
         )
         require(response.status in 200..299) { response.errorMessage() }
     }

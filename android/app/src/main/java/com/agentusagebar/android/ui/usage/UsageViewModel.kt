@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.agentusagebar.android.data.credentials.AppSettings
 import com.agentusagebar.android.data.model.AppUsageSnapshot
 import com.agentusagebar.android.data.model.UsageProvider
+import com.agentusagebar.android.data.repository.DeviceSyncCheckResult
 import com.agentusagebar.android.data.repository.UsageRepository
 import com.agentusagebar.android.worker.UsageRefreshScheduler
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +23,19 @@ data class DevicePairingUiState(
     val confirmationCode: String? = null,
 )
 
+enum class DeviceActionPhase {
+    IDLE,
+    CHECKING,
+    UNLINKING,
+    SUCCESS,
+    ERROR,
+}
+
+data class DeviceActionUiState(
+    val phase: DeviceActionPhase = DeviceActionPhase.IDLE,
+    val message: String? = null,
+)
+
 class UsageViewModel(
     private val repository: UsageRepository,
 ) : ViewModel() {
@@ -34,9 +48,13 @@ class UsageViewModel(
     val isRefreshing = repository.isRefreshing
     val awaitingClaudeCode = repository.awaitingClaudeCode
     val claudeEmail = repository.claudeEmail
+    val trustedDevices = repository.trustedDevices
     private val _devicePairing = MutableStateFlow(DevicePairingUiState())
     val devicePairing = _devicePairing.asStateFlow()
     private var devicePairingJob: Job? = null
+    private val _deviceActions =
+        MutableStateFlow<Map<String, DeviceActionUiState>>(emptyMap())
+    val deviceActions = _deviceActions.asStateFlow()
 
     private val _selectedProvider = MutableStateFlow(UsageProvider.CLAUDE)
     val selectedProvider = _selectedProvider.asStateFlow()
@@ -154,6 +172,94 @@ class UsageViewModel(
         devicePairingJob?.cancel()
         devicePairingJob = null
         _devicePairing.value = DevicePairingUiState()
+    }
+
+    fun checkForSync(desktopID: String, desktopName: String) {
+        if (_deviceActions.value[desktopID]?.phase == DeviceActionPhase.CHECKING) return
+        _deviceActions.value = _deviceActions.value + (
+            desktopID to DeviceActionUiState(
+                phase = DeviceActionPhase.CHECKING,
+                message = "Contacting $desktopName…",
+            )
+        )
+        viewModelScope.launch {
+            repository.checkForSync(desktopID)
+                .onSuccess { result ->
+                    val message = when (result) {
+                        DeviceSyncCheckResult.UP_TO_DATE ->
+                            "Connected successfully. No settings update is queued."
+                        DeviceSyncCheckResult.SETTINGS_APPLIED ->
+                            "Settings synced successfully."
+                        DeviceSyncCheckResult.UNLINKED_BY_MAC ->
+                            "$desktopName removed this phone. Imported credentials were removed."
+                    }
+                    _deviceActions.value = _deviceActions.value + (
+                        desktopID to DeviceActionUiState(
+                            phase = DeviceActionPhase.SUCCESS,
+                            message = message,
+                        )
+                    )
+                }
+                .onFailure { error ->
+                    val connectionError = generateSequence(error as Throwable?) { it.cause }
+                        .any { it is java.io.IOException }
+                    val detail = if (
+                        error.message?.startsWith("Settings were applied") == true
+                    ) {
+                        error.message.orEmpty()
+                    } else if (connectionError) {
+                        "Couldn’t connect to $desktopName. Make sure both devices are on the same network and the Mac app is open."
+                    } else {
+                        error.message ?: "Couldn’t check for a settings update."
+                    }
+                    _deviceActions.value = _deviceActions.value + (
+                        desktopID to DeviceActionUiState(
+                            phase = DeviceActionPhase.ERROR,
+                            message = detail,
+                        )
+                    )
+                }
+        }
+    }
+
+    fun unlinkMac(
+        desktopID: String,
+        desktopName: String,
+        removeImportedCredentials: Boolean,
+    ) {
+        _deviceActions.value = _deviceActions.value + (
+            desktopID to DeviceActionUiState(
+                phase = DeviceActionPhase.UNLINKING,
+                message = "Unlinking $desktopName…",
+            )
+        )
+        viewModelScope.launch {
+            repository.unlinkMac(desktopID, removeImportedCredentials)
+                .onSuccess { result ->
+                    _deviceActions.value = _deviceActions.value - desktopID
+                    val unlinkMessage = if (result.macWasNotified) {
+                        "$desktopName was unlinked on both devices."
+                    } else {
+                        "$desktopName was unlinked from Android. The Mac didn’t confirm the request, so a stale phone entry may need to be removed there manually."
+                    }
+                    val credentialsMessage = when {
+                        !removeImportedCredentials -> ""
+                        result.credentialsRemoved ->
+                            " Matching imported credentials were removed."
+                        else -> " No matching imported credentials remained."
+                    }
+                    _message.value = unlinkMessage + credentialsMessage
+                }
+                .onFailure {
+                    _deviceActions.value = _deviceActions.value + (
+                        desktopID to DeviceActionUiState(
+                            phase = DeviceActionPhase.ERROR,
+                            message = it.message ?: "Couldn’t unlink $desktopName.",
+                        )
+                    )
+                    _message.value = it.message ?: "Couldn’t unlink $desktopName."
+                }
+        }
     }
 
     fun setPollingMinutes(minutes: Int) {
