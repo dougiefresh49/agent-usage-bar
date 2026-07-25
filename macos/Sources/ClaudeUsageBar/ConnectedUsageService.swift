@@ -137,6 +137,14 @@ final class ConnectedUsageService: ObservableObject {
         updateConfiguredState()
     }
 
+    func deviceSyncCredentials() -> ConnectedServiceCredentials {
+        ConnectedServiceCredentials(
+            openAISessionToken: openAIToken,
+            cursorSessionToken: cursorToken,
+            elevenLabsAPIKey: elevenLabsAPIKey
+        )
+    }
+
     func fetchCursorUsage() async {
         guard let token = cursorToken else { return }
 

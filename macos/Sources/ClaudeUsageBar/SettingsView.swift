@@ -5,12 +5,14 @@ private enum SettingsTab: Hashable {
     case connections
     case appearance
     case notifications
+    case devices
 }
 
 struct SettingsWindowContent: View {
     @ObservedObject var service: UsageService
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var connectedService: ConnectedUsageService
+    @ObservedObject var deviceSyncManager: DeviceSyncManager
     @State private var selectedTab: SettingsTab = .connections
     @State private var openAIToken = ""
     @State private var cursorToken = ""
@@ -42,6 +44,15 @@ struct SettingsWindowContent: View {
             notificationsTab
                 .tabItem { Label("Notifications", systemImage: "bell") }
                 .tag(SettingsTab.notifications)
+
+            DevicesSettingsView(
+                service: service,
+                notificationService: notificationService,
+                connectedService: connectedService,
+                deviceSyncManager: deviceSyncManager
+            )
+            .tabItem { Label("Devices", systemImage: "laptopcomputer.and.iphone") }
+            .tag(SettingsTab.devices)
         }
         .frame(width: 520, height: 560)
         .onAppear {

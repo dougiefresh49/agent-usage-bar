@@ -42,6 +42,7 @@ A tiny macOS menu bar app that shows your AI subscription usage at a glance. Cli
 - Configurable polling interval (5m / 15m / 30m / 1h)
 - Built-in update checks via Sparkle
 - Claude OAuth via browser; local credential configuration for OpenAI, Cursor, and ElevenLabs
+- Authenticated local-device pairing and selective encrypted sync from macOS to Android
 - Minimal dependencies — SwiftUI, Swift Charts, Foundation, and Sparkle for updates
 
 ## Install

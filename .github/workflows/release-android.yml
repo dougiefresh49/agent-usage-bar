@@ -51,14 +51,61 @@ jobs:
           echo "version_code=${version_code}" >> "$GITHUB_OUTPUT"
           echo "Resolved Android versionName=${core} versionCode=${version_code}"
 
-      - name: Build debug APK
-        working-directory: android
+      - name: Prepare release keystore
+        id: keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          ./gradlew assembleDebug \
+          set -euo pipefail
+          for secret_name in \
+            ANDROID_KEYSTORE_BASE64 \
+            ANDROID_KEYSTORE_PASSWORD \
+            ANDROID_KEY_ALIAS \
+            ANDROID_KEY_PASSWORD
+          do
+            if [ -z "${!secret_name:-}" ]; then
+              echo "::error::Required secret ${secret_name} is not configured"
+              exit 1
+            fi
+          done
+
+          keystore_path="${RUNNER_TEMP}/agent-usage-bar-release.p12"
+          umask 077
+          printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${keystore_path}"
+          test -s "${keystore_path}"
+          echo "path=${keystore_path}" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed release APK
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease \
             -PversionName="${{ steps.version.outputs.version_name }}" \
             -PversionCode="${{ steps.version.outputs.version_code }}" \
             --stacktrace
-          cp app/build/outputs/apk/debug/app-debug.apk AgentUsageBar-debug.apk
+          cp app/build/outputs/apk/release/app-release.apk AgentUsageBar.apk
+
+      - name: Verify release signature
+        working-directory: android
+        run: |
+          set -euo pipefail
+          apksigner_path="$(
+            find "${ANDROID_HOME}/build-tools" -type f -name apksigner |
+              sort -V |
+              tail -n 1
+          )"
+          if [ -z "${apksigner_path}" ]; then
+            echo "::error::Could not find apksigner in ${ANDROID_HOME}/build-tools"
+            exit 1
+          fi
+          "${apksigner_path}" verify --verbose --print-certs AgentUsageBar.apk
 
       - name: Generate release notes
         env:
@@ -73,7 +120,11 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: android/AgentUsageBar-debug.apk
+          files: android/AgentUsageBar.apk
           body_path: dist/release-notes.md
           make_latest: false
           name: Android ${{ github.ref_name }}
+
+      - name: Remove release keystore
+        if: always()
+        run: rm -f "${{ steps.keystore.outputs.path }}"

@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.agentusagebar.android.data.model.DetailVisualizationStyle
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.data.model.UsageTextSize
+import com.agentusagebar.android.data.sync.DeviceSyncPayload
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -109,6 +110,50 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setCursorCreditThreshold(value: Int) {
         context.settingsDataStore.edit { it[KEY_CURSOR_CREDIT] = value }
+    }
+
+    suspend fun applyDeviceSync(payload: DeviceSyncPayload) {
+        context.settingsDataStore.edit { prefs ->
+            payload.general?.let { general ->
+                if (general.pollingMinutes in POLLING_OPTIONS) {
+                    prefs[KEY_POLLING] = general.pollingMinutes
+                }
+            }
+            payload.appearance?.let { appearance ->
+                providerFromMacValue(appearance.preferredProvider)?.let {
+                    prefs[KEY_WIDGET_PROVIDER] = it.name
+                }
+                enumValueOrNull<DetailVisualizationStyle>(appearance.detailStyle)?.let {
+                    prefs[KEY_DETAIL_STYLE] = it.name
+                }
+                enumValueOrNull<UsageTextSize>(appearance.textSize)?.let {
+                    prefs[KEY_TEXT_SIZE] = it.name
+                }
+            }
+            payload.notifications?.let { notifications ->
+                prefs[KEY_CLAUDE_SESSION] = notifications.claudeSession.coerceIn(0, 100)
+                prefs[KEY_CLAUDE_SEVEN_DAY] = notifications.claudeSevenDay.coerceIn(0, 100)
+                prefs[KEY_CLAUDE_FABLE] = notifications.claudeFable.coerceIn(0, 100)
+                prefs[KEY_OPENAI_WEEKLY] = notifications.openAIWeekly.coerceIn(0, 100)
+                prefs[KEY_OPENAI_RESET_CREDITS] =
+                    notifications.openAIResetCredits.coerceIn(0, 10)
+                prefs[KEY_CURSOR_API] = notifications.cursorAPI.coerceIn(0, 100)
+                prefs[KEY_CURSOR_AUTO] = notifications.cursorAuto.coerceIn(0, 100)
+                prefs[KEY_CURSOR_CREDIT] = notifications.cursorCredit.coerceIn(0, 100)
+            }
+            prefs[KEY_SETUP] = true
+        }
+    }
+
+    private inline fun <reified T : Enum<T>> enumValueOrNull(rawValue: String): T? =
+        enumValues<T>().firstOrNull { it.name.equals(rawValue, ignoreCase = true) }
+
+    private fun providerFromMacValue(rawValue: String): UsageProvider? = when (rawValue) {
+        "claude" -> UsageProvider.CLAUDE
+        "openAI" -> UsageProvider.OPENAI
+        "cursor" -> UsageProvider.CURSOR
+        "elevenLabs" -> UsageProvider.ELEVENLABS
+        else -> null
     }
 
     companion object {
