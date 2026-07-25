@@ -181,11 +181,13 @@ fun ProviderDetailSection(
     when (style) {
         DetailVisualizationStyle.ORBIT -> {
             val ringMetrics = metrics.filter { it.percentUsed != null }.take(2)
+            val legendMetrics = orbitLegendMetrics(metrics)
             if (ringMetrics.isNotEmpty()) {
-                OrbitUsageBlock(ringMetrics)
+                OrbitUsageBlock(ringMetrics = ringMetrics, legendMetrics = legendMetrics)
                 Spacer(modifier = Modifier.height(12.dp))
             }
-            metrics.filter { m -> ringMetrics.none { it.id == m.id } }.forEach { metric ->
+            val shownIds = (ringMetrics + legendMetrics).map { it.id }.toSet()
+            metrics.filter { it.id !in shownIds }.forEach { metric ->
                 UsageMetricRow(metric, style = DetailVisualizationStyle.BARS)
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -197,10 +199,26 @@ fun ProviderDetailSection(
     }
 }
 
+/**
+ * Legend next to the orbit. Prefer a count metric (e.g. OpenAI reset credits) as the
+ * second entry when present — matching macOS detail pairing — otherwise the second percent ring.
+ */
+fun orbitLegendMetrics(metrics: List<UsageMetric>): List<UsageMetric> {
+    val percentMetrics = metrics.filter { it.percentUsed != null }
+    val primary = percentMetrics.firstOrNull() ?: return metrics.take(2)
+    val countMetric = metrics.firstOrNull { it.countValue != null }
+    val secondary = countMetric
+        ?: percentMetrics.firstOrNull { it.id != primary.id }
+    return listOfNotNull(primary, secondary)
+}
+
 @Composable
-fun OrbitUsageBlock(metrics: List<UsageMetric>) {
-    val primary = metrics.getOrNull(0)
-    val secondary = metrics.getOrNull(1)
+fun OrbitUsageBlock(
+    ringMetrics: List<UsageMetric>,
+    legendMetrics: List<UsageMetric> = ringMetrics,
+) {
+    val primary = ringMetrics.getOrNull(0)
+    val secondary = ringMetrics.getOrNull(1)
     val resetLabel = compactRemainingTime(primary?.resetsAtEpochMs) ?: "—"
     val countdown = countdownProgress(primary?.resetsAtEpochMs, primary?.resetIntervalMs)
     Row(
@@ -222,17 +240,27 @@ fun OrbitUsageBlock(metrics: List<UsageMetric>) {
             )
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            metrics.take(2).forEachIndexed { index, metric ->
+            legendMetrics.take(2).forEachIndexed { index, metric ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
                             .size(8.dp)
                             .clip(CircleShape)
-                            .background(if (index == 0) Color(0xFF5B8CFF) else Color(0xFFFF9F0A)),
+                            .background(
+                                when {
+                                    metric.countValue != null -> Color(0xFF9CA3AF)
+                                    index == 0 -> Color(0xFF5B8CFF)
+                                    else -> Color(0xFFFF9F0A)
+                                },
+                            ),
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "${metric.label} ${metric.displayValue}",
+                        text = if (metric.countValue != null) {
+                            "${metric.label} ${metric.displayValue} available"
+                        } else {
+                            "${metric.label} ${metric.displayValue}"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -253,10 +281,17 @@ fun OrbitRings(
     val hasSecondary = secondaryPercent != null
     val drain = countdownFraction.coerceIn(0f, 1f)
     Canvas(modifier = modifier) {
-        val stroke = 10.dp.toPx()
-        val pad = stroke
-        fun arc(progress: Float, color: Color, inset: Float) {
-            val diameter = min(size.width, size.height) - inset * 2
+        // Match macOS UsageOrbitView proportions in a 120pt frame so the
+        // session timer well and orbital bars keep a visible gap.
+        val container = min(size.width, size.height)
+        val scale = container / 120f
+        val stroke = 8f * scale
+        val outerDiameter = (if (hasSecondary) 112f else 106f) * scale
+        val innerDiameter = 84f * scale
+        val centerDiameter = 58f * scale
+
+        fun arc(progress: Float, color: Color, diameter: Float) {
+            val inset = (container - diameter) / 2f
             drawArc(
                 color = color.copy(alpha = 0.18f),
                 startAngle = -90f,
@@ -279,13 +314,12 @@ fun OrbitRings(
             }
         }
         if (hasSecondary) {
-            arc(secondary, Color(0xFFFF9F0A), pad)
-            arc(primary, Color(0xFF5B8CFF), pad + stroke * 1.6f)
+            arc(secondary, Color(0xFFFF9F0A), outerDiameter)
+            arc(primary, Color(0xFF5B8CFF), innerDiameter)
         } else {
-            arc(primary, Color(0xFF5B8CFF), pad)
+            arc(primary, Color(0xFF5B8CFF), outerDiameter)
         }
 
-        val centerDiameter = min(size.width, size.height) * (if (hasSecondary) 0.48f else 0.55f)
         val centerLeft = (size.width - centerDiameter) / 2f
         val centerTop = (size.height - centerDiameter) / 2f
         drawOval(

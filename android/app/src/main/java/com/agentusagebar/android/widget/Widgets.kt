@@ -43,6 +43,7 @@ import com.agentusagebar.android.data.model.UsageMetricPreferences
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.ui.components.compactRemainingTime
 import com.agentusagebar.android.ui.components.countdownProgress
+import com.agentusagebar.android.ui.components.orbitLegendMetrics
 import com.agentusagebar.android.ui.components.relativeTime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -312,6 +313,7 @@ private fun ProviderWidgetContent(
             }
             style == DetailVisualizationStyle.ORBIT -> {
                 val ringMetrics = state.metrics.filter { it.percentUsed != null }.take(2)
+                val legendMetrics = orbitLegendMetrics(state.metrics)
                 val primary = ringMetrics.getOrNull(0)
                 val secondary = ringMetrics.getOrNull(1)
                 val center = compactRemainingTime(primary?.resetsAtEpochMs) ?: "—"
@@ -331,10 +333,19 @@ private fun ProviderWidgetContent(
                     )
                     Spacer(GlanceModifier.width(10.dp))
                     Column {
-                        ringMetrics.forEachIndexed { index, metric ->
-                            val tint = if (index == 0) OrbitBlue else OrbitOrange
+                        legendMetrics.forEachIndexed { index, metric ->
+                            val tint = when {
+                                metric.countValue != null -> WidgetMuted
+                                index == 0 -> OrbitBlue
+                                else -> OrbitOrange
+                            }
+                            val value = if (metric.countValue != null) {
+                                "${metric.displayValue} available"
+                            } else {
+                                metric.displayValue
+                            }
                             Text(
-                                text = "● ${shortMetricLabel(metric)} ${metric.displayValue}",
+                                text = "● ${shortMetricLabel(metric)} $value",
                                 style = TextStyle(color = ColorProvider(tint), fontSize = 11.sp),
                                 maxLines = 1,
                             )
@@ -342,7 +353,8 @@ private fun ProviderWidgetContent(
                         }
                     }
                 }
-                state.metrics.filter { m -> ringMetrics.none { it.id == m.id } }.take(2).forEach { metric ->
+                val shownIds = (ringMetrics + legendMetrics).map { it.id }.toSet()
+                state.metrics.filter { it.id !in shownIds }.take(2).forEach { metric ->
                     Spacer(GlanceModifier.height(6.dp))
                     MetricLine(metric, compact = false)
                 }
@@ -408,7 +420,7 @@ private fun shortMetricLabel(metric: UsageMetric): String = when (metric.id) {
     UsageMetricPreferences.CURSOR_TOTAL -> "Total"
     UsageMetricPreferences.OPENAI_PRIMARY -> "Primary"
     UsageMetricPreferences.OPENAI_SECONDARY -> "Secondary"
-    UsageMetricPreferences.OPENAI_RESET_CREDITS -> "Resets"
+    UsageMetricPreferences.OPENAI_RESET_CREDITS -> "Reset Credits"
     UsageMetricPreferences.ELEVENLABS_CREDITS -> "Used"
     UsageMetricPreferences.ELEVENLABS_REMAINING -> "Left"
     else -> metric.label
