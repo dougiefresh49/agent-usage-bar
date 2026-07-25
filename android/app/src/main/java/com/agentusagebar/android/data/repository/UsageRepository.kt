@@ -195,19 +195,51 @@ class UsageRepository(
         settingsStore.applyDeviceSync(payload)
     }
 
-    private fun checkDeviceRevocations() {
+    private suspend fun checkTrustedDevices() {
         trustedDeviceStore.load()
             .filter { it.revokedAtEpochMs == null }
             .forEach { device ->
-                runCatching { devicePairingClient.checkStatus(device) }
-                    .onSuccess { command ->
-                        val revoked = command.action == "wipe"
-                        if (revoked) {
+                runCatching {
+                    val command = devicePairingClient.checkStatus(device)
+                    val now = System.currentTimeMillis() / 1_000
+                    require(kotlin.math.abs(now - command.issuedAtEpochSeconds) <= 60) {
+                        "The Mac returned a stale device command."
+                    }
+
+                    when (command.action) {
+                        "wipe" -> {
                             credentialsStore.wipeCredentialsImportedFrom(device)
                             devicePairingClient.acknowledgeWipe(device)
+                            trustedDeviceStore.markChecked(device.desktopID, revoked = true)
                         }
-                        trustedDeviceStore.markChecked(device.desktopID, revoked)
+
+                        "sync" -> {
+                            val syncID = requireNotNull(command.syncID) {
+                                "The Mac sent an invalid sync command."
+                            }
+                            val envelope = requireNotNull(command.syncEnvelope) {
+                                "The Mac sent no settings to sync."
+                            }
+                            val payload = devicePairingClient.openSyncPayload(
+                                device,
+                                syncID,
+                                envelope,
+                            )
+                            applyImportedPayload(payload)
+                            trustedDeviceStore.updateCredentialHashes(
+                                device.desktopID,
+                                payload.connections,
+                            )
+                            devicePairingClient.acknowledgeSync(device, syncID)
+                            trustedDeviceStore.markChecked(device.desktopID, revoked = false)
+                        }
+
+                        else -> trustedDeviceStore.markChecked(
+                            device.desktopID,
+                            revoked = false,
+                        )
                     }
+                }
             }
         refreshConfiguredFlags()
     }
@@ -249,7 +281,7 @@ class UsageRepository(
     suspend fun refreshAll() = withContext(Dispatchers.IO) {
         _isRefreshing.value = true
         try {
-            checkDeviceRevocations()
+            checkTrustedDevices()
             coroutineScope {
                 val claude = async { refreshClaude() }
                 val openAI = async { refreshOpenAI() }

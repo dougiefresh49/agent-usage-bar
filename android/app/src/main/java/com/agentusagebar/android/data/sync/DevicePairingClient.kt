@@ -194,6 +194,53 @@ class DevicePairingClient(
         require(response.status in 200..299) { response.errorMessage() }
     }
 
+    fun acknowledgeSync(device: TrustedDesktopDevice, syncID: String) {
+        val secret = DeviceSyncCrypto.sharedSecret(
+            DeviceSyncCrypto.restorePrivateKey(device.privateKey),
+            DeviceSyncCodec.base64URLDecode(device.desktopPublicKey),
+        )
+        val timestamp = System.currentTimeMillis() / 1_000
+        val acknowledgement = DeviceSyncAcknowledgement(
+            desktopID = device.desktopID,
+            deviceID = device.deviceID,
+            syncID = syncID,
+            timestamp = timestamp,
+            proof = DeviceSyncCrypto.authenticationProof(
+                secret,
+                device.desktopID,
+                DeviceSyncCodec.STATUS_INFO,
+                "sync-ack:${device.desktopID}:${device.deviceID}:$syncID:$timestamp",
+            ),
+        )
+        val response = LocalPairingHttpClient.request(
+            host = device.host,
+            port = device.port,
+            method = "POST",
+            path = "/v2/status/sync-ack",
+            body = DeviceSyncCodec.json.encodeToString(acknowledgement).toByteArray(),
+        )
+        require(response.status in 200..299) { response.errorMessage() }
+    }
+
+    fun openSyncPayload(
+        device: TrustedDesktopDevice,
+        syncID: String,
+        envelope: DeviceEncryptedEnvelope,
+    ): DeviceSyncPayload {
+        val secret = DeviceSyncCrypto.sharedSecret(
+            DeviceSyncCrypto.restorePrivateKey(device.privateKey),
+            DeviceSyncCodec.base64URLDecode(device.desktopPublicKey),
+        )
+        return DeviceSyncCodec.decodeResyncPayload(
+            DeviceSyncCrypto.open(
+                envelope,
+                secret,
+                syncID,
+                DeviceSyncCodec.RESYNC_INFO,
+            ),
+        )
+    }
+
     private fun url(value: String): String =
         URLEncoder.encode(value, Charsets.UTF_8.name())
 }

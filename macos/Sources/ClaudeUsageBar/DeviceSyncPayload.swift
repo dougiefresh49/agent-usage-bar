@@ -66,6 +66,7 @@ struct DeviceSyncPayload: Codable, Equatable {
         self.notifications = notifications
         self.connections = connections
     }
+
 }
 
 struct DevicePairingCode: Equatable {
@@ -128,6 +129,8 @@ struct DeviceEncryptedEnvelope: Codable, Equatable {
 struct DeviceStatusCommand: Codable {
     let action: String
     let issuedAtEpochSeconds: Int64
+    let syncID: String?
+    let syncEnvelope: DeviceEncryptedEnvelope?
 }
 
 struct DeviceWipeAcknowledgement: Codable {
@@ -137,9 +140,18 @@ struct DeviceWipeAcknowledgement: Codable {
     let proof: String
 }
 
+struct DeviceSyncAcknowledgement: Codable {
+    let desktopID: String
+    let deviceID: String
+    let syncID: String
+    let timestamp: Int64
+    let proof: String
+}
+
 enum DeviceSyncCrypto {
     static let pairingInfo = Data("agentusagebar-device-pair-v2".utf8)
     static let statusInfo = Data("agentusagebar-device-status-v2".utf8)
+    static let resyncInfo = Data("agentusagebar-device-resync-v1".utf8)
 
     static func sharedSecret(
         desktopPrivateKey: P256.KeyAgreement.PrivateKey,
