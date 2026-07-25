@@ -8,6 +8,7 @@ import com.agentusagebar.android.data.model.AppUsageSnapshot
 import com.agentusagebar.android.data.model.ClaudeUsageResponse
 import com.agentusagebar.android.data.model.CursorUsageResponse
 import com.agentusagebar.android.data.model.ElevenLabsSubscriptionResponse
+import com.agentusagebar.android.data.model.OpenAIResetCreditsResponse
 import com.agentusagebar.android.data.model.OpenAIUsageResponse
 import com.agentusagebar.android.data.model.ProviderUsageState
 import com.agentusagebar.android.data.model.UsageMetric
@@ -431,13 +432,15 @@ class UsageRepository(
             )
             return
         }
-        api.fetchOpenAIUsage()
+        val usageResult = api.fetchOpenAIUsage()
+        val resetCredits = api.fetchOpenAIResetCredits().getOrNull()
+        usageResult
             .onSuccess { usage ->
                 updateProvider(
                     ProviderUsageState(
                         provider = UsageProvider.OPENAI,
                         isConfigured = true,
-                        metrics = openAIMetrics(usage),
+                        metrics = openAIMetrics(usage, resetCredits),
                         updatedAtEpochMs = System.currentTimeMillis(),
                     ),
                 )
@@ -635,7 +638,10 @@ class UsageRepository(
             return metrics
         }
 
-        fun openAIMetrics(usage: OpenAIUsageResponse): List<UsageMetric> {
+        fun openAIMetrics(
+            usage: OpenAIUsageResponse,
+            resetCredits: OpenAIResetCreditsResponse? = null,
+        ): List<UsageMetric> {
             val metrics = mutableListOf<UsageMetric>()
             val primary = usage.rateLimit?.primaryWindow
             metrics += UsageMetric(
@@ -645,11 +651,15 @@ class UsageRepository(
                 resetsAtEpochMs = primary?.resetAt?.times(1000)?.toLong(),
                 resetIntervalMs = primary?.limitWindowSeconds?.times(1000)?.toLong(),
             )
+            // Prefer the dedicated reset-credits endpoint. The usage summary often
+            // reports applicable_available_count: 0 even when credits are available.
+            val resetCreditsCount = resetCredits?.availableCreditsCount
+                ?: usage.rateLimitResetCredits?.applicableAvailableCount
+                ?: usage.rateLimitResetCredits?.availableCount
             metrics += UsageMetric(
                 id = UsageMetricPreferences.OPENAI_RESET_CREDITS,
                 label = "Reset Credits",
-                countValue = usage.rateLimitResetCredits?.applicableAvailableCount
-                    ?: usage.rateLimitResetCredits?.availableCount,
+                countValue = resetCreditsCount,
             )
             usage.rateLimit?.secondaryWindow?.let { secondary ->
                 metrics += UsageMetric(

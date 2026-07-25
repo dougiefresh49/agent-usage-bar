@@ -113,6 +113,31 @@ data class OpenAIResetCreditSummary(
 )
 
 @Serializable
+data class OpenAIResetCreditsResponse(
+    val credits: List<OpenAIResetCredit> = emptyList(),
+    @SerialName("available_count") val availableCount: Int? = null,
+    @SerialName("total_earned_count") val totalEarnedCount: Int? = null,
+) {
+    val availableCreditsCount: Int
+        get() = availableCount ?: credits.count { it.isAvailable }
+}
+
+@Serializable
+data class OpenAIResetCredit(
+    val id: String,
+    @SerialName("reset_type") val resetType: String? = null,
+    @SerialName("is_supported_by_plan") val isSupportedByPlan: Boolean? = null,
+    val status: String? = null,
+    @SerialName("granted_at") val grantedAt: String? = null,
+    @SerialName("expires_at") val expiresAt: String? = null,
+    val title: String? = null,
+    val description: String? = null,
+) {
+    val isAvailable: Boolean
+        get() = status == "available"
+}
+
+@Serializable
 data class OpenAIRateLimit(
     val allowed: Boolean? = null,
     @SerialName("limit_reached") val limitReached: Boolean? = null,
@@ -193,11 +218,15 @@ data class ConnectedCredentials(
             && elevenLabsAPIKey.isNullOrBlank()
 }
 
-enum class UsageProvider(val displayName: String, val shortName: String) {
-    CLAUDE("Claude", "Claude"),
-    OPENAI("OpenAI / Codex", "Codex"),
-    CURSOR("Cursor", "Cursor"),
-    ELEVENLABS("ElevenLabs", "11Labs"),
+enum class UsageProvider(
+    val displayName: String,
+    val shortName: String,
+    val usagePageUrl: String,
+) {
+    CLAUDE("Claude", "Claude", "https://claude.ai/new#settings/usage"),
+    OPENAI("OpenAI / Codex", "Codex", "https://chatgpt.com/#settings/Usage"),
+    CURSOR("Cursor", "Cursor", "https://cursor.com/dashboard/spending"),
+    ELEVENLABS("ElevenLabs", "11Labs", "https://elevenlabs.io/app/subscription/"),
 }
 
 enum class DetailVisualizationStyle(val displayName: String) {

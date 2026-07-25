@@ -5,6 +5,26 @@ import org.junit.Test
 
 class UsageMetricPreferencesTest {
     @Test
+    fun providerUsagePageUrls() {
+        assertEquals(
+            "https://claude.ai/new#settings/usage",
+            UsageProvider.CLAUDE.usagePageUrl,
+        )
+        assertEquals(
+            "https://chatgpt.com/#settings/Usage",
+            UsageProvider.OPENAI.usagePageUrl,
+        )
+        assertEquals(
+            "https://cursor.com/dashboard/spending",
+            UsageProvider.CURSOR.usagePageUrl,
+        )
+        assertEquals(
+            "https://elevenlabs.io/app/subscription/",
+            UsageProvider.ELEVENLABS.usagePageUrl,
+        )
+    }
+
+    @Test
     fun resolvesStoredPairInPreferenceOrder() {
         val metrics = listOf(
             UsageMetric(UsageMetricPreferences.CURSOR_MODELS, "First-Party Models"),

@@ -154,10 +154,29 @@ private fun HomeScreen(
 
             HorizontalDivider()
 
-            Text(
-                text = selected.displayName,
-                style = MaterialTheme.typography.titleMedium,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = selected.displayName,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = {
+                        val uri = Uri.parse(selected.usagePageUrl)
+                        runCatching {
+                            CustomTabsIntent.Builder().build()
+                                .launchUrl(context, uri)
+                        }.onFailure {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                        }
+                    },
+                ) {
+                    Text("Details")
+                }
+            }
 
             when {
                 selected == UsageProvider.CLAUDE && awaitingCode -> {
