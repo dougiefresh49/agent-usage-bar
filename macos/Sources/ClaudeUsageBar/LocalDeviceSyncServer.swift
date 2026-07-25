@@ -84,6 +84,13 @@ final class LocalDeviceSyncServer {
     }
 
     private func send(_ response: LocalHTTPResponse, on connection: NWConnection) {
+        let data = Self.serializedResponse(response)
+        connection.send(content: data, completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+
+    static func serializedResponse(_ response: LocalHTTPResponse) -> Data {
         let reason = switch response.status {
         case 200: "OK"
         case 202: "Accepted"
@@ -93,19 +100,17 @@ final class LocalDeviceSyncServer {
         case 410: "Gone"
         default: "Error"
         }
-        var data = Data(
-            """
-            HTTP/1.1 \(response.status) \(reason)\r
-            Content-Type: application/json\r
-            Content-Length: \(response.body.count)\r
-            Connection: close\r
-            \r
-            """.utf8
-        )
+        let header = [
+            "HTTP/1.1 \(response.status) \(reason)",
+            "Content-Type: application/json",
+            "Content-Length: \(response.body.count)",
+            "Connection: close",
+            "",
+            "",
+        ].joined(separator: "\r\n")
+        var data = Data(header.utf8)
         data.append(response.body)
-        connection.send(content: data, completion: .contentProcessed { _ in
-            connection.cancel()
-        })
+        return data
     }
 
     private static func parseRequest(_ data: Data) -> LocalHTTPRequest? {
