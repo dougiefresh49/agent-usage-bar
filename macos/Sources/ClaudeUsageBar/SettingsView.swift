@@ -2,6 +2,7 @@ import SwiftUI
 import ServiceManagement
 
 private enum SettingsTab: Hashable {
+    case general
     case connections
     case appearance
     case notifications
@@ -13,7 +14,7 @@ struct SettingsWindowContent: View {
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var connectedService: ConnectedUsageService
     @ObservedObject var deviceSyncManager: DeviceSyncManager
-    @State private var selectedTab: SettingsTab = .connections
+    @State private var selectedTab: SettingsTab = .general
     @State private var openAIToken = ""
     @State private var cursorToken = ""
     @State private var elevenLabsAPIKey = ""
@@ -33,6 +34,10 @@ struct SettingsWindowContent: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
+            generalTab
+                .tabItem { Label("General", systemImage: "gearshape") }
+                .tag(SettingsTab.general)
+
             connectionsTab
                 .tabItem { Label("Connections", systemImage: "link") }
                 .tag(SettingsTab.connections)
@@ -62,7 +67,7 @@ struct SettingsWindowContent: View {
 
     // MARK: - General
 
-    private var appearanceTab: some View {
+    private var generalTab: some View {
         Form {
             Section("General") {
                 LaunchAtLoginToggle()
@@ -81,6 +86,17 @@ struct SettingsWindowContent: View {
                 }
             }
 
+            Section("About") {
+                LabeledContent("Version", value: appVersionString)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - Appearance
+
+    private var appearanceTab: some View {
+        Form {
             Section("Appearance") {
                 Picker("Preferred Provider", selection: menuBarProviderBinding) {
                     ForEach(UsageProvider.allCases) { provider in
@@ -135,10 +151,6 @@ struct SettingsWindowContent: View {
                 Text("Orbit is used in provider details and desktop widgets; the menu bar stays readable with bars or a split capsule.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-
-            Section("About") {
-                LabeledContent("Version", value: appVersionString)
             }
         }
         .formStyle(.grouped)

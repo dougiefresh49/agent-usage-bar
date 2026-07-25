@@ -16,6 +16,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -45,11 +49,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.agentusagebar.android.BuildConfig
 import com.agentusagebar.android.data.credentials.SettingsStore
 import com.agentusagebar.android.data.model.DetailVisualizationStyle
 import com.agentusagebar.android.data.model.UsageMetricPreferences
@@ -67,11 +73,12 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
-private enum class SettingsTab(val title: String) {
-    Connections("Connections"),
-    Appearance("Appearance"),
-    Notifications("Notifications"),
-    Devices("Devices"),
+private enum class SettingsTab(val title: String, val icon: ImageVector) {
+    General("General", Icons.Outlined.Settings),
+    Connections("Connections", Icons.Outlined.Link),
+    Appearance("Appearance", Icons.Outlined.Palette),
+    Notifications("Notifications", Icons.Outlined.Notifications),
+    Devices("Devices", Icons.Outlined.Devices),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -194,7 +201,12 @@ fun SettingsScreen(
                     Tab(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
-                        text = { Text(tab.title) },
+                        icon = {
+                            Icon(
+                                tab.icon,
+                                contentDescription = tab.title,
+                            )
+                        },
                     )
                 }
             }
@@ -208,6 +220,27 @@ fun SettingsScreen(
             ) {
                 Spacer(modifier = Modifier.height(8.dp))
                 when (SettingsTab.entries[selectedTab]) {
+                    SettingsTab.General -> {
+                        Text("Polling Interval", style = MaterialTheme.typography.titleMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SettingsStore.POLLING_OPTIONS.forEach { mins ->
+                                FilterChip(
+                                    selected = settings.pollingMinutes == mins,
+                                    onClick = { viewModel.setPollingMinutes(mins) },
+                                    label = { Text(if (mins == 60) "1h" else "${mins}m") },
+                                )
+                            }
+                        }
+
+                        HorizontalDivider()
+                        Text("About", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Version ${BuildConfig.VERSION_NAME}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
                     SettingsTab.Connections -> {
                         Text("OpenAI / Codex", style = MaterialTheme.typography.titleMedium)
                         Text(
@@ -328,18 +361,6 @@ fun SettingsScreen(
                     }
 
                     SettingsTab.Appearance -> {
-                        Text("Polling Interval", style = MaterialTheme.typography.titleMedium)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SettingsStore.POLLING_OPTIONS.forEach { mins ->
-                                FilterChip(
-                                    selected = settings.pollingMinutes == mins,
-                                    onClick = { viewModel.setPollingMinutes(mins) },
-                                    label = { Text(if (mins == 60) "1h" else "${mins}m") },
-                                )
-                            }
-                        }
-
-                        HorizontalDivider()
                         Text("Provider Details", style = MaterialTheme.typography.titleMedium)
                         Text(
                             "Bars, capsule, or orbit visualization in the provider detail section and widgets.",
