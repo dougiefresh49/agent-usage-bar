@@ -7,9 +7,12 @@ Kotlin/Jetpack Compose port of Agent Usage Bar with home-screen widgets.
 - One-page usage overview (Claude / Codex / Cursor), matching the macOS popover
 - Settings for polling, widget provider, primary/secondary stats, appearance,
   notification thresholds, and session tokens
-- Two home-screen widgets:
-  - **Usage Overview** (≈4×2): all three providers at a glance
-  - **Provider Usage** (≈2×2): focused detail for the provider chosen in Settings
+- Five home-screen widgets:
+  - **Usage Grid (4 × 3)**: compact four-provider grid with larger charts
+  - **Usage Dashboard (4 × 4)**: grid plus Settings and Refresh actions
+  - **Usage Row (4 × 1)**: provider charts arranged left to right
+  - **Usage Column (1 × 4)**: provider charts arranged top to bottom
+  - **Provider Usage** (≈2 × 2): focused detail for the provider chosen in Settings
 - Encrypted local storage for Claude OAuth + OpenAI/Cursor session tokens
 - QR import for selected settings (including widget stats) and connections from
   the macOS app

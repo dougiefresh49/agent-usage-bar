@@ -49,11 +49,14 @@ import com.agentusagebar.android.ui.components.formatUpdated
 import com.agentusagebar.android.ui.settings.SettingsScreen
 
 @Composable
-fun UsageApp(viewModel: UsageViewModel) {
+fun UsageApp(
+    viewModel: UsageViewModel,
+    initialDestination: String = "home",
+) {
     val navController = rememberNavController()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
 
-    NavHost(navController = navController, startDestination = "home") {
+    NavHost(navController = navController, startDestination = initialDestination) {
         composable("home") {
             if (!settings.setupComplete) {
                 SetupScreen(
@@ -72,7 +75,11 @@ fun UsageApp(viewModel: UsageViewModel) {
         composable("settings") {
             SettingsScreen(
                 viewModel = viewModel,
-                onBack = { navController.popBackStack() },
+                onBack = {
+                    if (!navController.popBackStack()) {
+                        navController.navigate("home") { launchSingleTop = true }
+                    }
+                },
             )
         }
     }

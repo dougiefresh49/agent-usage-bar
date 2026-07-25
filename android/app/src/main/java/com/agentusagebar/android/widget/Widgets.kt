@@ -1,6 +1,7 @@
 package com.agentusagebar.android.widget
 
 import android.content.Context
+import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -10,12 +11,17 @@ import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
 import androidx.glance.Image
 import androidx.glance.ImageProvider
+import androidx.glance.action.Action
+import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.LinearProgressIndicator
+import androidx.glance.appwidget.action.ActionCallback
+import androidx.glance.appwidget.action.actionRunCallback
+import androidx.glance.appwidget.action.actionStartActivity as actionStartActivityIntent
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
@@ -35,6 +41,7 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.agentusagebar.android.MainActivity
+import com.agentusagebar.android.R
 import com.agentusagebar.android.data.credentials.SettingsStore
 import com.agentusagebar.android.data.model.DetailVisualizationStyle
 import com.agentusagebar.android.data.model.ProviderUsageState
@@ -63,12 +70,26 @@ private val OrbitOrange = Color(0xFFFF9F0A)
 
 private val widgetScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-class OverviewWidget : GlanceAppWidget() {
+enum class OverviewLayout {
+    COMPACT_GRID,
+    DASHBOARD,
+    HORIZONTAL,
+    VERTICAL,
+}
+
+abstract class SnapshotOverviewWidget(
+    private val layout: OverviewLayout,
+) : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         // Always read the persisted snapshot so all four providers render even if
         // the activity process is cold.
         val providers = WidgetSnapshotStore.load(context)
         val settings = SettingsStore(context).settings.first()
+        val openAppAction = actionStartActivity<MainActivity>()
+        val openSettingsAction = actionStartActivityIntent(
+            Intent(context, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_OPEN_SETTINGS, true),
+        )
         provideContent {
             GlanceTheme {
                 OverviewWidgetContent(
@@ -77,11 +98,22 @@ class OverviewWidget : GlanceAppWidget() {
                     preferredProvider = settings.widgetProvider,
                     primaryMetric = settings.primaryMetric,
                     secondaryMetric = settings.secondaryMetric,
+                    layout = layout,
+                    openAppAction = openAppAction,
+                    openSettingsAction = openSettingsAction,
                 )
             }
         }
     }
 }
+
+class OverviewWidget : SnapshotOverviewWidget(OverviewLayout.COMPACT_GRID)
+
+class DashboardWidget : SnapshotOverviewWidget(OverviewLayout.DASHBOARD)
+
+class HorizontalWidget : SnapshotOverviewWidget(OverviewLayout.HORIZONTAL)
+
+class VerticalWidget : SnapshotOverviewWidget(OverviewLayout.VERTICAL)
 
 class ProviderWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
@@ -112,75 +144,133 @@ private fun OverviewWidgetContent(
     preferredProvider: UsageProvider,
     primaryMetric: String,
     secondaryMetric: String,
+    layout: OverviewLayout,
+    openAppAction: Action,
+    openSettingsAction: Action,
 ) {
-    val claude = providers[UsageProvider.CLAUDE] ?: ProviderUsageState(UsageProvider.CLAUDE, false)
-    val openAI = providers[UsageProvider.OPENAI] ?: ProviderUsageState(UsageProvider.OPENAI, false)
-    val cursor = providers[UsageProvider.CURSOR] ?: ProviderUsageState(UsageProvider.CURSOR, false)
-    val eleven = providers[UsageProvider.ELEVENLABS] ?: ProviderUsageState(UsageProvider.ELEVENLABS, false)
+    val states = listOf(
+        UsageProvider.CLAUDE,
+        UsageProvider.OPENAI,
+        UsageProvider.CURSOR,
+        UsageProvider.ELEVENLABS,
+    ).map { providers[it] ?: ProviderUsageState(it, false) }
 
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
             .cornerRadius(20.dp)
             .background(ColorProvider(WidgetBg))
-            .padding(horizontal = 12.dp, vertical = 10.dp)
-            .clickable(actionStartActivity<MainActivity>()),
-    ) {
-        Text(
-            text = "AI Usage",
-            style = TextStyle(
-                color = ColorProvider(WidgetFg),
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
-            ),
-        )
-        Spacer(GlanceModifier.height(6.dp))
-
-        // Weighted rows fill the widget height so the 2x2 doesn't hug the top.
-        Row(
-            modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OverviewCell(
-                claude,
-                style,
-                preferredProvider,
-                primaryMetric,
-                secondaryMetric,
-                GlanceModifier.defaultWeight().fillMaxHeight(),
+            .padding(
+                horizontal = if (layout == OverviewLayout.VERTICAL) 4.dp else 10.dp,
+                vertical = if (
+                    layout == OverviewLayout.HORIZONTAL || layout == OverviewLayout.VERTICAL
+                ) {
+                    4.dp
+                } else {
+                    8.dp
+                },
             )
-            Spacer(GlanceModifier.width(10.dp))
-            OverviewCell(
-                openAI,
-                style,
-                preferredProvider,
-                primaryMetric,
-                secondaryMetric,
-                GlanceModifier.defaultWeight().fillMaxHeight(),
+            .clickable(openAppAction),
+    ) {
+        when (layout) {
+            OverviewLayout.COMPACT_GRID,
+            OverviewLayout.DASHBOARD,
+            -> OverviewGrid(
+                states = states,
+                style = style,
+                preferredProvider = preferredProvider,
+                primaryMetric = primaryMetric,
+                secondaryMetric = secondaryMetric,
+                modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
+            )
+
+            OverviewLayout.HORIZONTAL -> Row(
+                modifier = GlanceModifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                states.forEachIndexed { index, state ->
+                    StripOverviewCell(
+                        state,
+                        style,
+                        preferredProvider,
+                        primaryMetric,
+                        secondaryMetric,
+                        GlanceModifier.defaultWeight().fillMaxHeight(),
+                    )
+                    if (index != states.lastIndex) Spacer(GlanceModifier.width(4.dp))
+                }
+            }
+
+            OverviewLayout.VERTICAL -> Column(
+                modifier = GlanceModifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                states.forEachIndexed { index, state ->
+                    StripOverviewCell(
+                        state,
+                        style,
+                        preferredProvider,
+                        primaryMetric,
+                        secondaryMetric,
+                        GlanceModifier.defaultWeight().fillMaxWidth(),
+                    )
+                    if (index != states.lastIndex) Spacer(GlanceModifier.height(4.dp))
+                }
+            }
+        }
+
+        if (layout == OverviewLayout.DASHBOARD) {
+            Spacer(GlanceModifier.height(8.dp))
+            QuickActions(
+                openSettingsAction = openSettingsAction,
+                refreshAction = actionRunCallback<RefreshWidgetAction>(),
             )
         }
-        Spacer(GlanceModifier.height(6.dp))
+    }
+}
+
+@Composable
+private fun OverviewGrid(
+    states: List<ProviderUsageState>,
+    style: DetailVisualizationStyle,
+    preferredProvider: UsageProvider,
+    primaryMetric: String,
+    secondaryMetric: String,
+    modifier: GlanceModifier,
+) {
+    Column(modifier = modifier) {
         Row(
             modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OverviewCell(
-                cursor,
-                style,
-                preferredProvider,
-                primaryMetric,
-                secondaryMetric,
-                GlanceModifier.defaultWeight().fillMaxHeight(),
-            )
-            Spacer(GlanceModifier.width(10.dp))
-            OverviewCell(
-                eleven,
-                style,
-                preferredProvider,
-                primaryMetric,
-                secondaryMetric,
-                GlanceModifier.defaultWeight().fillMaxHeight(),
-            )
+            states.take(2).forEachIndexed { index, state ->
+                OverviewCell(
+                    state,
+                    style,
+                    preferredProvider,
+                    primaryMetric,
+                    secondaryMetric,
+                    GlanceModifier.defaultWeight().fillMaxHeight(),
+                )
+                if (index == 0) Spacer(GlanceModifier.width(8.dp))
+            }
+        }
+        Spacer(GlanceModifier.height(4.dp))
+        Row(
+            modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            states.drop(2).forEachIndexed { index, state ->
+                OverviewCell(
+                    state,
+                    style,
+                    preferredProvider,
+                    primaryMetric,
+                    secondaryMetric,
+                    GlanceModifier.defaultWeight().fillMaxHeight(),
+                )
+                if (index == 0) Spacer(GlanceModifier.width(8.dp))
+            }
         }
     }
 }
@@ -194,45 +284,24 @@ private fun OverviewCell(
     secondaryMetric: String,
     modifier: GlanceModifier,
 ) {
-    val pair = if (state.provider == preferredProvider) {
-        UsageMetricPreferences.resolvedPair(
-            provider = state.provider,
-            primaryID = primaryMetric,
-            secondaryID = secondaryMetric,
-            available = state.metrics,
-        )
-    } else {
-        UsageMetricPreferences.resolvedPair(
-            provider = state.provider,
-            primaryID = "",
-            secondaryID = "",
-            available = state.metrics,
-        )
-    }
+    val pair = overviewMetricPair(
+        state,
+        preferredProvider,
+        primaryMetric,
+        secondaryMetric,
+    )
     val primary = pair.getOrNull(0)
     val secondary = pair.getOrNull(1)
-    val value = when {
-        !state.isConfigured -> "Connect"
-        primary == null -> "…"
-        else -> primary.displayValue
-    }
-
     Column(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = state.provider.shortName,
-            style = TextStyle(color = ColorProvider(WidgetMuted), fontSize = 11.sp),
-            maxLines = 1,
-        )
-        Spacer(GlanceModifier.height(4.dp))
         if (style == DetailVisualizationStyle.ORBIT && primary?.percentUsed != null) {
             val label = compactRemainingTime(primary.resetsAtEpochMs) ?: "—"
             val countdown = countdownProgress(primary.resetsAtEpochMs, primary.resetIntervalMs)
             val bitmap = OrbitBitmapRenderer.render(
-                sizePx = 220,
+                sizePx = 280,
                 primaryPercent = primary.percentUsed,
                 secondaryPercent = secondary?.percentUsed,
                 centerLabel = label.take(7),
@@ -241,27 +310,12 @@ private fun OverviewCell(
             Image(
                 provider = ImageProvider(bitmap),
                 contentDescription = state.provider.shortName,
-                modifier = GlanceModifier.size(72.dp),
+                modifier = GlanceModifier.size(80.dp),
             )
-            Spacer(GlanceModifier.height(4.dp))
-            Text(
-                text = listOfNotNull(
-                    primary.displayValue,
-                    secondary?.takeIf { it.percentUsed != null || it.countValue != null }?.displayValue,
-                ).joinToString(" · "),
-                style = TextStyle(color = ColorProvider(WidgetFg), fontSize = 11.sp),
-                maxLines = 1,
-            )
+            Spacer(GlanceModifier.height(2.dp))
+            ProviderValueRow(state, primary, secondary)
         } else {
-            Text(
-                text = value,
-                style = TextStyle(
-                    color = ColorProvider(WidgetFg),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                ),
-                maxLines = 1,
-            )
+            ProviderValueRow(state, primary, secondary)
             Spacer(GlanceModifier.height(5.dp))
             UsageBarGlance(primary?.percentUsed)
             secondary?.let {
@@ -273,6 +327,186 @@ private fun OverviewCell(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ProviderValueRow(
+    state: ProviderUsageState,
+    primary: UsageMetric?,
+    secondary: UsageMetric?,
+) {
+    val value = when {
+        !state.isConfigured -> "Connect"
+        primary == null -> "…"
+        else -> listOfNotNull(
+            primary.displayValue,
+            secondary
+                ?.takeIf { it.percentUsed != null || it.countValue != null }
+                ?.displayValue,
+        ).joinToString(" · ")
+    }
+    Row(
+        modifier = GlanceModifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = state.provider.shortName,
+            style = TextStyle(color = ColorProvider(WidgetMuted), fontSize = 10.sp),
+            maxLines = 1,
+            modifier = GlanceModifier.defaultWeight(),
+        )
+        Text(
+            text = value,
+            style = TextStyle(
+                color = ColorProvider(WidgetFg),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+            ),
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun StripOverviewCell(
+    state: ProviderUsageState,
+    style: DetailVisualizationStyle,
+    preferredProvider: UsageProvider,
+    primaryMetric: String,
+    secondaryMetric: String,
+    modifier: GlanceModifier,
+) {
+    val pair = overviewMetricPair(state, preferredProvider, primaryMetric, secondaryMetric)
+    val primary = pair.getOrNull(0)
+    val secondary = pair.getOrNull(1)
+
+    Column(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (style == DetailVisualizationStyle.ORBIT && primary?.percentUsed != null) {
+            val label = compactRemainingTime(primary.resetsAtEpochMs) ?: "—"
+            val bitmap = OrbitBitmapRenderer.render(
+                sizePx = 180,
+                primaryPercent = primary.percentUsed,
+                secondaryPercent = secondary?.percentUsed,
+                centerLabel = label.take(6),
+                countdownFraction = countdownProgress(
+                    primary.resetsAtEpochMs,
+                    primary.resetIntervalMs,
+                ),
+            )
+            Image(
+                provider = ImageProvider(bitmap),
+                contentDescription = state.provider.shortName,
+                modifier = GlanceModifier.size(46.dp),
+            )
+        } else {
+            Text(
+                text = primary?.displayValue ?: if (state.isConfigured) "…" else "Connect",
+                style = TextStyle(
+                    color = ColorProvider(WidgetFg),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+                maxLines = 1,
+            )
+            Spacer(GlanceModifier.height(3.dp))
+            UsageBarGlance(primary?.percentUsed)
+            Spacer(GlanceModifier.height(3.dp))
+        }
+        Text(
+            text = stripCaption(state, primary),
+            style = TextStyle(color = ColorProvider(WidgetMuted), fontSize = 9.sp),
+            maxLines = 1,
+        )
+    }
+}
+
+private fun overviewMetricPair(
+    state: ProviderUsageState,
+    preferredProvider: UsageProvider,
+    primaryMetric: String,
+    secondaryMetric: String,
+): List<UsageMetric> {
+    return UsageMetricPreferences.resolvedPair(
+        provider = state.provider,
+        primaryID = if (state.provider == preferredProvider) primaryMetric else "",
+        secondaryID = if (state.provider == preferredProvider) secondaryMetric else "",
+        available = state.metrics,
+    )
+}
+
+private fun stripCaption(state: ProviderUsageState, primary: UsageMetric?): String {
+    val value = when {
+        !state.isConfigured -> "Connect"
+        primary == null -> "…"
+        else -> primary.displayValue
+    }
+    return "${state.provider.shortName} $value"
+}
+
+@Composable
+private fun QuickActions(
+    openSettingsAction: Action,
+    refreshAction: Action,
+) {
+    Row(
+        modifier = GlanceModifier.fillMaxWidth().height(42.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        QuickAction(
+            icon = R.drawable.ic_widget_settings,
+            label = "Settings",
+            action = openSettingsAction,
+            modifier = GlanceModifier.defaultWeight().fillMaxHeight(),
+        )
+        Spacer(GlanceModifier.width(6.dp))
+        QuickAction(
+            icon = R.drawable.ic_widget_refresh,
+            label = "Refresh",
+            action = refreshAction,
+            modifier = GlanceModifier.defaultWeight().fillMaxHeight(),
+        )
+        // Keep two equal action slots open for future quick actions.
+        Spacer(GlanceModifier.defaultWeight().fillMaxHeight())
+        Spacer(GlanceModifier.defaultWeight().fillMaxHeight())
+    }
+}
+
+@Composable
+private fun QuickAction(
+    icon: Int,
+    label: String,
+    action: Action,
+    modifier: GlanceModifier,
+) {
+    Row(
+        modifier = modifier
+            .cornerRadius(12.dp)
+            .background(ColorProvider(Track))
+            .padding(horizontal = 6.dp)
+            .clickable(action),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Image(
+            provider = ImageProvider(icon),
+            contentDescription = null,
+            modifier = GlanceModifier.size(16.dp),
+        )
+        Spacer(GlanceModifier.width(4.dp))
+        Text(
+            text = label,
+            style = TextStyle(
+                color = ColorProvider(WidgetFg),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+            ),
+            maxLines = 1,
+        )
     }
 }
 
@@ -453,8 +687,34 @@ class OverviewWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = OverviewWidget()
 }
 
+class DashboardWidgetReceiver : GlanceAppWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = DashboardWidget()
+}
+
+class HorizontalWidgetReceiver : GlanceAppWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = HorizontalWidget()
+}
+
+class VerticalWidgetReceiver : GlanceAppWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = VerticalWidget()
+}
+
 class ProviderWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = ProviderWidget()
+}
+
+class RefreshWidgetAction : ActionCallback {
+    override suspend fun onAction(
+        context: Context,
+        glanceId: GlanceId,
+        parameters: ActionParameters,
+    ) {
+        // refreshAll persists the new snapshot and asks every installed widget
+        // instance to redraw when the provider requests complete.
+        runCatching {
+            com.agentusagebar.android.AgentUsageBarApp.instance.repository.refreshAll()
+        }
+    }
 }
 
 object WidgetUpdater {
@@ -465,6 +725,15 @@ object WidgetUpdater {
                 val manager = GlanceAppWidgetManager(appContext)
                 manager.getGlanceIds(OverviewWidget::class.java).forEach { id ->
                     OverviewWidget().update(appContext, id)
+                }
+                manager.getGlanceIds(DashboardWidget::class.java).forEach { id ->
+                    DashboardWidget().update(appContext, id)
+                }
+                manager.getGlanceIds(HorizontalWidget::class.java).forEach { id ->
+                    HorizontalWidget().update(appContext, id)
+                }
+                manager.getGlanceIds(VerticalWidget::class.java).forEach { id ->
+                    VerticalWidget().update(appContext, id)
                 }
                 manager.getGlanceIds(ProviderWidget::class.java).forEach { id ->
                     ProviderWidget().update(appContext, id)
