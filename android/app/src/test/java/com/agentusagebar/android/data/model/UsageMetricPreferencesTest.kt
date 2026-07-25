@@ -95,4 +95,47 @@ class UsageMetricPreferencesTest {
             ordered.map { it.id },
         )
     }
+
+    @Test
+    fun claudeLimitMetricIdsAreStableAcrossResetWindows() {
+        val first = UsageMetricPreferences.claudeLimitMetricId(
+            kind = "model",
+            modelDisplayName = "Fable",
+            group = "weekly",
+        )
+        val second = UsageMetricPreferences.claudeLimitMetricId(
+            kind = "model",
+            modelDisplayName = "Fable",
+            group = "weekly",
+        )
+        assertEquals("claude.limit.model:Fable:weekly", first)
+        assertEquals(first, second)
+    }
+
+    @Test
+    fun resolvesLegacyClaudeLimitIdsThatEmbeddedResetsAt() {
+        val liveId = UsageMetricPreferences.claudeLimitMetricId(
+            kind = "model",
+            modelDisplayName = "Fable",
+            group = "weekly",
+        )
+        val legacyStored = "claude.limit.model:Fable:2026-07-31T12:00:00Z"
+        val metrics = listOf(
+            UsageMetric(UsageMetricPreferences.CLAUDE_FIVE_HOUR, "5-Hour Window", percentUsed = 13.0),
+            UsageMetric(UsageMetricPreferences.CLAUDE_SEVEN_DAY, "7-Day Window", percentUsed = 40.0),
+            UsageMetric(liveId, "Fable (7 day)", percentUsed = 65.0),
+        )
+
+        val resolved = UsageMetricPreferences.resolvedPair(
+            provider = UsageProvider.CLAUDE,
+            primaryID = UsageMetricPreferences.CLAUDE_FIVE_HOUR,
+            secondaryID = legacyStored,
+            available = metrics,
+        )
+
+        assertEquals(
+            listOf(UsageMetricPreferences.CLAUDE_FIVE_HOUR, liveId),
+            resolved.map { it.id },
+        )
+    }
 }

@@ -443,7 +443,7 @@ fun SettingsScreen(
                                 }
                         }
                         Text(
-                            "These stats appear first in the home-screen widgets.",
+                            "These stats drive the preferred provider’s overview card, detail chart orbits, and home-screen widgets.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

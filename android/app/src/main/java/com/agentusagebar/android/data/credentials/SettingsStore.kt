@@ -41,7 +41,7 @@ data class AppSettings(
 class SettingsStore(private val context: Context) {
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { prefs ->
         val widgetProvider = prefs[KEY_WIDGET_PROVIDER]
-            ?.let { runCatching { UsageProvider.valueOf(it) }.getOrNull() }
+            ?.let { enumValueOrNull<UsageProvider>(it) }
             ?: UsageProvider.CLAUDE
         val metricDefaults = UsageMetricPreferences.defaults(widgetProvider)
         AppSettings(
@@ -51,10 +51,10 @@ class SettingsStore(private val context: Context) {
             primaryMetric = prefs[KEY_PRIMARY_METRIC] ?: metricDefaults.first,
             secondaryMetric = prefs[KEY_SECONDARY_METRIC] ?: metricDefaults.second,
             detailStyle = prefs[KEY_DETAIL_STYLE]
-                ?.let { runCatching { DetailVisualizationStyle.valueOf(it) }.getOrNull() }
+                ?.let { enumValueOrNull<DetailVisualizationStyle>(it) }
                 ?: DetailVisualizationStyle.BARS,
             textSize = prefs[KEY_TEXT_SIZE]
-                ?.let { runCatching { UsageTextSize.valueOf(it) }.getOrNull() }
+                ?.let { enumValueOrNull<UsageTextSize>(it) }
                 ?: UsageTextSize.COMFORTABLE,
             claudeSessionThreshold = prefs[KEY_CLAUDE_SESSION] ?: prefs[KEY_LEGACY_5H] ?: 80,
             claudeSevenDayThreshold = prefs[KEY_CLAUDE_SEVEN_DAY] ?: prefs[KEY_LEGACY_7D] ?: 0,
@@ -89,7 +89,7 @@ class SettingsStore(private val context: Context) {
             prefs[KEY_PRIMARY_METRIC] = metricID
             if (prefs[KEY_SECONDARY_METRIC] == metricID) {
                 val provider = prefs[KEY_WIDGET_PROVIDER]
-                    ?.let { runCatching { UsageProvider.valueOf(it) }.getOrNull() }
+                    ?.let { enumValueOrNull<UsageProvider>(it) }
                     ?: UsageProvider.CLAUDE
                 prefs[KEY_SECONDARY_METRIC] = UsageMetricPreferences.defaults(provider)
                     .let { defaults ->

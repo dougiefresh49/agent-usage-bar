@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cloud backup + device transfer (API 31+). Persist DataStore appearance settings
+  across reinstalls/updates when the user restores from backup, while keeping
+  encrypted credentials and trusted-device keys off-device.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="agent_usage_bar_secure.xml" />
+        <exclude domain="sharedpref" path="agent_usage_bar_trusted_devices.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="agent_usage_bar_secure.xml" />
+        <exclude domain="sharedpref" path="agent_usage_bar_trusted_devices.xml" />
+    </device-transfer>
+</data-extraction-rules>

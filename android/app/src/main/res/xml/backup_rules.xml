@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup (API <= 30). Keep appearance / polling settings; exclude encrypted
+  credential and device-pairing stores so tokens never leave the phone via backup.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="agent_usage_bar_secure" />
+    <exclude domain="sharedpref" path="agent_usage_bar_trusted_devices" />
+</full-backup-content>
