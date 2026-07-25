@@ -5,6 +5,7 @@ import com.agentusagebar.android.data.model.ClaudeCredentials
 import com.agentusagebar.android.data.model.ClaudeUsageResponse
 import com.agentusagebar.android.data.model.CursorUsageResponse
 import com.agentusagebar.android.data.model.ElevenLabsSubscriptionResponse
+import com.agentusagebar.android.data.model.OpenAIResetCreditsResponse
 import com.agentusagebar.android.data.model.OpenAIUsageResponse
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -128,17 +129,31 @@ class UsageApiClient(
     fun fetchOpenAIUsage(): Result<OpenAIUsageResponse> = runCatching {
         val token = credentialsStore.loadConnected().openAISessionToken
             ?: error("OpenAI not configured")
+        json.decodeFromString<OpenAIUsageResponse>(
+            openAIAuthorizedGet(OPENAI_USAGE_ENDPOINT, token),
+        )
+    }
+
+    fun fetchOpenAIResetCredits(): Result<OpenAIResetCreditsResponse> = runCatching {
+        val token = credentialsStore.loadConnected().openAISessionToken
+            ?: error("OpenAI not configured")
+        json.decodeFromString<OpenAIResetCreditsResponse>(
+            openAIAuthorizedGet(OPENAI_RESET_CREDITS_ENDPOINT, token),
+        )
+    }
+
+    private fun openAIAuthorizedGet(url: String, token: String): String {
         val request = Request.Builder()
-            .url(OPENAI_USAGE_ENDPOINT)
+            .url(url)
             .header("Authorization", "Bearer $token")
             .header("Accept", "application/json")
             .build()
-        client.newCall(request).execute().use { response ->
+        return client.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw httpError("OpenAI", response.code)
             }
-            json.decodeFromString<OpenAIUsageResponse>(body)
+            body
         }
     }
 
@@ -350,6 +365,8 @@ class UsageApiClient(
         private const val USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
         private const val USERINFO_ENDPOINT = "https://api.anthropic.com/api/oauth/userinfo"
         private const val OPENAI_USAGE_ENDPOINT = "https://chatgpt.com/backend-api/wham/usage"
+        private const val OPENAI_RESET_CREDITS_ENDPOINT =
+            "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
         private const val CURSOR_USAGE_ENDPOINT =
             "https://cursor.com/api/dashboard/get-current-period-usage"
         private const val ELEVENLABS_SUBSCRIPTION_ENDPOINT =

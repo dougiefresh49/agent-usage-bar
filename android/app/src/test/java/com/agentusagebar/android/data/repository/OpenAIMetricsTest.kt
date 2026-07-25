@@ -1,7 +1,9 @@
 package com.agentusagebar.android.data.repository
 
 import com.agentusagebar.android.data.model.OpenAIRateLimit
+import com.agentusagebar.android.data.model.OpenAIResetCredit
 import com.agentusagebar.android.data.model.OpenAIResetCreditSummary
+import com.agentusagebar.android.data.model.OpenAIResetCreditsResponse
 import com.agentusagebar.android.data.model.OpenAIUsageResponse
 import com.agentusagebar.android.data.model.OpenAIUsageWindow
 import com.agentusagebar.android.data.model.UsageMetricPreferences
@@ -40,6 +42,52 @@ class OpenAIMetricsTest {
             ),
             metrics.map { it.id }.take(2),
         )
+    }
+
+    @Test
+    fun openAIMetricsPrefersDedicatedResetCreditsEndpointOverUsageSummary() {
+        // Usage summary often reports applicable_available_count: 0 even when
+        // credits are available — the dedicated endpoint has the real count.
+        val usage = OpenAIUsageResponse(
+            rateLimit = OpenAIRateLimit(
+                primaryWindow = OpenAIUsageWindow(usedPercent = 82.0),
+            ),
+            rateLimitResetCredits = OpenAIResetCreditSummary(
+                availableCount = 2,
+                applicableAvailableCount = 0,
+            ),
+        )
+        val resetCredits = OpenAIResetCreditsResponse(
+            credits = listOf(
+                OpenAIResetCredit(id = "reset-1", status = "available"),
+                OpenAIResetCredit(id = "reset-2", status = "available"),
+            ),
+            availableCount = 2,
+        )
+
+        val metrics = UsageRepository.openAIMetrics(usage, resetCredits)
+        val resetMetric = metrics.first { it.id == UsageMetricPreferences.OPENAI_RESET_CREDITS }
+
+        assertEquals(2, resetMetric.countValue)
+    }
+
+    @Test
+    fun openAIMetricsCountsAvailableCreditsWhenDedicatedCountMissing() {
+        val usage = OpenAIUsageResponse(
+            rateLimitResetCredits = OpenAIResetCreditSummary(applicableAvailableCount = 0),
+        )
+        val resetCredits = OpenAIResetCreditsResponse(
+            credits = listOf(
+                OpenAIResetCredit(id = "reset-1", status = "available"),
+                OpenAIResetCredit(id = "reset-2", status = "used"),
+                OpenAIResetCredit(id = "reset-3", status = "available"),
+            ),
+        )
+
+        val metrics = UsageRepository.openAIMetrics(usage, resetCredits)
+        val resetMetric = metrics.first { it.id == UsageMetricPreferences.OPENAI_RESET_CREDITS }
+
+        assertEquals(2, resetMetric.countValue)
     }
 
     @Test
