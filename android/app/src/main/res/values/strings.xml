@@ -2,13 +2,13 @@
 <resources>
     <string name="app_name">Agent Usage Bar</string>
     <string name="widget_overview_label">Usage Grid (4 × 3)</string>
-    <string name="widget_overview_description">A compact grid of all four provider charts.</string>
+    <string name="widget_overview_description">A responsive four-provider widget that adapts as you resize it.</string>
     <string name="widget_dashboard_label">Usage Dashboard (4 × 4)</string>
-    <string name="widget_dashboard_description">All four provider charts with Settings and Refresh quick actions.</string>
+    <string name="widget_dashboard_description">A responsive four-provider widget with quick actions when space allows.</string>
     <string name="widget_horizontal_label">Usage Row (4 × 1)</string>
-    <string name="widget_horizontal_description">All four provider charts arranged left to right.</string>
-    <string name="widget_vertical_label">Usage Column (1 × 4)</string>
-    <string name="widget_vertical_description">All four provider charts arranged top to bottom.</string>
+    <string name="widget_horizontal_description">Starts as a row and adapts to grid or column layouts when resized.</string>
+    <string name="widget_vertical_label">Usage Column (1 × 3)</string>
+    <string name="widget_vertical_description">Starts as a compact column and adapts to grid or row layouts when resized.</string>
     <string name="widget_provider_label">Provider Usage</string>
     <string name="widget_provider_description">Larger usage detail for one connected provider.</string>
 </resources>

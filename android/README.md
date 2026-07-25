@@ -8,11 +8,16 @@ Kotlin/Jetpack Compose port of Agent Usage Bar with home-screen widgets.
 - Settings for polling, widget provider, primary/secondary stats, appearance,
   notification thresholds, and session tokens
 - Five home-screen widgets:
-  - **Usage Grid (4 × 3)**: compact four-provider grid with larger charts
-  - **Usage Dashboard (4 × 4)**: grid plus Settings and Refresh actions
-  - **Usage Row (4 × 1)**: provider charts arranged left to right
-  - **Usage Column (1 × 4)**: provider charts arranged top to bottom
+  - **Usage Grid (4 × 3)**: four-provider grid with size-aware charts
+  - **Usage Dashboard (4 × 4)**: grid plus Settings and Refresh actions when space allows
+  - **Usage Row (4 × 1)**: starts with provider charts arranged left to right
+  - **Usage Column (1 × 3)**: starts with provider charts arranged top to bottom
   - **Provider Usage** (≈2 × 2): focused detail for the provider chosen in Settings
+- Every overview widget is fully resizable. It automatically switches between a
+  row, a column, and a 2 × 2 grid, scales each orbit to fill its cell, and hides
+  secondary values or dashboard actions when the resized footprint is too small.
+  This includes intermediate launcher sizes such as 2 × 3 and 2 × 4 without
+  requiring separate picker entries.
 - Encrypted local storage for Claude OAuth + OpenAI/Cursor session tokens
 - QR import for selected settings (including widget stats) and connections from
   the macOS app
