@@ -112,4 +112,34 @@ class DeviceSyncCodecTest {
         assertEquals("cursor.total", payload.appearance?.primaryMetric)
         assertEquals("cursor.models", payload.appearance?.secondaryMetric)
     }
+
+    @Test
+    fun acceptsQueuedResyncAfterOriginalPayloadExpiry() {
+        val json = """
+            {"version":1,"issuedAtEpochSeconds":100,"expiresAtEpochSeconds":200}
+        """.trimIndent()
+
+        val payload = DeviceSyncCodec.decodeResyncPayload(json.toByteArray())
+
+        assertEquals(1, payload.version)
+        assertEquals(200, payload.expiresAtEpochSeconds)
+    }
+
+    @Test
+    fun decodesSyncStatusEnvelope() {
+        val json = """
+            {
+              "action":"sync",
+              "issuedAtEpochSeconds":100,
+              "syncID":"sync-123",
+              "syncEnvelope":{"nonce":"n","ciphertext":"c","tag":"t"}
+            }
+        """.trimIndent()
+
+        val command = DeviceSyncCodec.json.decodeFromString<DeviceStatusCommand>(json)
+
+        assertEquals("sync", command.action)
+        assertEquals("sync-123", command.syncID)
+        assertEquals("c", command.syncEnvelope?.ciphertext)
+    }
 }

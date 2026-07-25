@@ -76,6 +76,15 @@ final class DeviceSyncPayloadTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = DeviceSyncStore(directoryURL: directory)
+        let pendingSync = PendingDeviceSync(
+            id: "sync-123",
+            envelope: DeviceEncryptedEnvelope(
+                nonce: "nonce",
+                ciphertext: "ciphertext",
+                tag: "tag"
+            ),
+            requestedAt: Date(timeIntervalSince1970: 1_750_000_100)
+        )
         let device = PairedDevice(
             id: "phone",
             name: "Pixel",
@@ -83,7 +92,9 @@ final class DeviceSyncPayloadTests: XCTestCase {
             pairedAt: Date(timeIntervalSince1970: 1_750_000_000),
             lastSeenAt: nil,
             revokedAt: nil,
-            wipeAcknowledgedAt: nil
+            wipeAcknowledgedAt: nil,
+            pendingSync: pendingSync,
+            syncAcknowledgedAt: Date(timeIntervalSince1970: 1_750_000_200)
         )
 
         try store.saveDevices([device])
@@ -93,5 +104,77 @@ final class DeviceSyncPayloadTests: XCTestCase {
             atPath: store.devicesURL.path
         )[.posixPermissions] as? NSNumber
         XCTAssertEqual(permissions?.intValue, 0o600)
+    }
+
+    func testExistingDeviceLedgerDecodesWithoutSyncFields() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = DeviceSyncStore(directoryURL: directory)
+        let json = """
+        [{
+          "id": "phone",
+          "name": "Pixel",
+          "publicKey": "AQ",
+          "pairedAt": "2025-06-15T15:06:40Z"
+        }]
+        """
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        try Data(json.utf8).write(to: store.devicesURL)
+
+        let device = try XCTUnwrap(store.loadDevices().first)
+
+        XCTAssertEqual(device.id, "phone")
+        XCTAssertNil(device.pendingSync)
+        XCTAssertNil(device.syncAcknowledgedAt)
+    }
+
+    func testResyncEnvelopeUsesTrustedDeviceKeyAndHidesCredentials() throws {
+        let desktopKey = P256.KeyAgreement.PrivateKey()
+        let deviceKey = P256.KeyAgreement.PrivateKey()
+        let desktopSecret = try desktopKey.sharedSecretFromKeyAgreement(
+            with: deviceKey.publicKey
+        )
+        let deviceSecret = try deviceKey.sharedSecretFromKeyAgreement(
+            with: desktopKey.publicKey
+        )
+        let payload = DeviceSyncPayload(
+            connections: DeviceSyncConnections(
+                openAISessionToken: "very-secret-token",
+                cursorSessionToken: nil,
+                elevenLabsAPIKey: nil
+            )
+        )
+        let syncID = "sync-123"
+
+        let envelope = try DeviceSyncCrypto.seal(
+            payload,
+            sharedSecret: desktopSecret,
+            salt: syncID,
+            info: DeviceSyncCrypto.resyncInfo
+        )
+        let encodedEnvelope = try JSONEncoder().encode(envelope)
+        XCTAssertFalse(String(decoding: encodedEnvelope, as: UTF8.self).contains("very-secret-token"))
+
+        let key = DeviceSyncCrypto.key(
+            sharedSecret: deviceSecret,
+            salt: syncID,
+            info: DeviceSyncCrypto.resyncInfo
+        )
+        let nonce = try AES.GCM.Nonce(
+            data: XCTUnwrap(Data(base64URLEncoded: envelope.nonce))
+        )
+        let box = try AES.GCM.SealedBox(
+            nonce: nonce,
+            ciphertext: XCTUnwrap(Data(base64URLEncoded: envelope.ciphertext)),
+            tag: XCTUnwrap(Data(base64URLEncoded: envelope.tag))
+        )
+        let decrypted = try AES.GCM.open(box, using: key)
+        let decoded = try JSONDecoder().decode(DeviceSyncPayload.self, from: decrypted)
+
+        XCTAssertEqual(decoded, payload)
     }
 }

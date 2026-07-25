@@ -107,6 +107,14 @@ struct DevicesSettingsView: View {
                     Text("Removed — credential wipe queued")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                } else if device.pendingSync != nil {
+                    Text("Sync queued — waiting for phone")
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                } else if let syncedAt = device.syncAcknowledgedAt {
+                    Text("Last synced \(syncedAt.formatted(.relative(presentation: .named)))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 } else if let lastSeen = device.lastSeenAt {
                     Text("Last seen \(lastSeen.formatted(.relative(presentation: .named)))")
                         .font(.caption)
@@ -127,8 +135,15 @@ struct DevicesSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Button("Remove", role: .destructive) {
-                    deviceToRemove = device
+                HStack(spacing: 8) {
+                    Button(device.pendingSync == nil ? "Sync" : "Sync Queued") {
+                        queueSync(to: device)
+                    }
+                    .disabled(device.pendingSync != nil)
+
+                    Button("Remove", role: .destructive) {
+                        deviceToRemove = device
+                    }
                 }
             }
         }
@@ -137,6 +152,49 @@ struct DevicesSettingsView: View {
 
     private func wipeWasDelivered(to device: PairedDevice) -> Bool {
         device.wipeAcknowledgedAt != nil
+    }
+
+    private func queueSync(to device: PairedDevice) {
+        let credentials = connectedService.deviceSyncCredentials()
+        let payload = DeviceSyncPayload(
+            general: DeviceSyncGeneral(pollingMinutes: service.pollingMinutes),
+            appearance: DeviceSyncAppearance(
+                preferredProvider: UserDefaults.standard.string(
+                    forKey: UsagePresentationDefaults.menuBarProviderKey
+                ) ?? UsagePresentationDefaults.menuBarProvider.rawValue,
+                menuBarStyle: UserDefaults.standard.string(
+                    forKey: UsagePresentationDefaults.menuBarStyleKey
+                ) ?? UsagePresentationDefaults.menuBarStyle.rawValue,
+                primaryMetric: UserDefaults.standard.string(
+                    forKey: UsagePresentationDefaults.menuBarPrimaryMetricKey
+                ) ?? UsagePresentationMetrics.claudeFiveHourID,
+                secondaryMetric: UserDefaults.standard.string(
+                    forKey: UsagePresentationDefaults.menuBarSecondaryMetricKey
+                ) ?? UsagePresentationMetrics.claudeSevenDayID,
+                detailStyle: UserDefaults.standard.string(
+                    forKey: UsagePresentationDefaults.detailStyleKey
+                ) ?? UsagePresentationDefaults.detailStyle.rawValue,
+                textSize: UserDefaults.standard.string(
+                    forKey: UsagePresentationDefaults.textSizeKey
+                ) ?? UsagePresentationDefaults.textSize.rawValue
+            ),
+            notifications: DeviceSyncNotifications(
+                claudeSession: notificationService.claudeSessionThreshold,
+                claudeSevenDay: notificationService.claudeSevenDayThreshold,
+                claudeFable: notificationService.claudeFableThreshold,
+                openAIWeekly: notificationService.openAIWeeklyThreshold,
+                openAIResetCredits: notificationService.openAIResetCreditsThreshold,
+                cursorAPI: notificationService.cursorAPIThreshold,
+                cursorAuto: notificationService.cursorAutoThreshold,
+                cursorCredit: notificationService.cursorCreditThreshold
+            ),
+            connections: DeviceSyncConnections(
+                openAISessionToken: credentials.openAISessionToken,
+                cursorSessionToken: credentials.cursorSessionToken,
+                elevenLabsAPIKey: credentials.elevenLabsAPIKey
+            )
+        )
+        deviceSyncManager.queueSync(payload, for: device)
     }
 }
 

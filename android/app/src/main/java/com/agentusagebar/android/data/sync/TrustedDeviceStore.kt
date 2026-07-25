@@ -72,6 +72,31 @@ class TrustedDeviceStore(context: Context) {
         prefs.edit().putString(KEY_DEVICES, json.encodeToString(devices)).apply()
     }
 
+    fun updateCredentialHashes(
+        desktopID: String,
+        connections: DeviceSyncConnections?,
+    ) {
+        if (connections == null) return
+        val devices = load().map {
+            if (it.desktopID == desktopID) {
+                it.copy(
+                    openAITokenHash = DeviceSyncCodec.credentialHash(
+                        connections.openAISessionToken,
+                    ) ?: it.openAITokenHash,
+                    cursorTokenHash = DeviceSyncCodec.credentialHash(
+                        connections.cursorSessionToken,
+                    ) ?: it.cursorTokenHash,
+                    elevenLabsKeyHash = DeviceSyncCodec.credentialHash(
+                        connections.elevenLabsAPIKey,
+                    ) ?: it.elevenLabsKeyHash,
+                )
+            } else {
+                it
+            }
+        }
+        prefs.edit().putString(KEY_DEVICES, json.encodeToString(devices)).apply()
+    }
+
     companion object {
         fun androidDeviceName(): String {
             val manufacturer = Build.MANUFACTURER

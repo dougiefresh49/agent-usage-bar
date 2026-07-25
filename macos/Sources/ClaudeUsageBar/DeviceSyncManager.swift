@@ -1,6 +1,12 @@
 import CryptoKit
 import Foundation
 
+struct PendingDeviceSync: Codable, Equatable {
+    let id: String
+    let envelope: DeviceEncryptedEnvelope
+    let requestedAt: Date
+}
+
 struct PairedDevice: Codable, Identifiable, Equatable {
     let id: String
     var name: String
@@ -9,6 +15,8 @@ struct PairedDevice: Codable, Identifiable, Equatable {
     var lastSeenAt: Date?
     var revokedAt: Date?
     var wipeAcknowledgedAt: Date?
+    var pendingSync: PendingDeviceSync? = nil
+    var syncAcknowledgedAt: Date? = nil
 
     var isRevoked: Bool { revokedAt != nil }
 
@@ -142,6 +150,38 @@ final class DeviceSyncManager: ObservableObject {
         persistDevices()
     }
 
+    func queueSync(_ payload: DeviceSyncPayload, for device: PairedDevice) {
+        guard let index = devices.firstIndex(where: {
+            $0.id == device.id && !$0.isRevoked
+        }),
+        let publicKey = Data(base64URLEncoded: devices[index].publicKey) else {
+            serverMessage = DeviceSyncError.unknownDevice.localizedDescription
+            return
+        }
+        do {
+            let syncID = UUID().uuidString.lowercased()
+            let secret = try DeviceSyncCrypto.sharedSecret(
+                desktopPrivateKey: privateKey,
+                devicePublicKey: publicKey
+            )
+            let envelope = try DeviceSyncCrypto.seal(
+                payload,
+                sharedSecret: secret,
+                salt: syncID,
+                info: DeviceSyncCrypto.resyncInfo
+            )
+            devices[index].pendingSync = PendingDeviceSync(
+                id: syncID,
+                envelope: envelope,
+                requestedAt: Date()
+            )
+            serverMessage = nil
+            persistDevices()
+        } catch {
+            serverMessage = "Could not encrypt settings for \(device.name)."
+        }
+    }
+
     func forgetDevice(_ device: PairedDevice) {
         devices.removeAll { $0.id == device.id }
         persistDevices()
@@ -157,6 +197,8 @@ final class DeviceSyncManager: ObservableObject {
             return handleStatus(request)
         case ("POST", "/v2/status/ack"):
             return handleWipeAcknowledgement(request)
+        case ("POST", "/v2/status/sync-ack"):
+            return handleSyncAcknowledgement(request)
         default:
             return LocalHTTPResponse(status: 404, body: Data())
         }
@@ -305,10 +347,29 @@ final class DeviceSyncManager: ObservableObject {
                 return .json(["error": "Device proof is invalid."], status: 404)
             }
             devices[index].lastSeenAt = Date()
-            let command = DeviceStatusCommand(
-                action: devices[index].isRevoked ? "wipe" : "none",
-                issuedAtEpochSeconds: Int64(Date().timeIntervalSince1970)
-            )
+            let command: DeviceStatusCommand
+            if devices[index].isRevoked {
+                command = DeviceStatusCommand(
+                    action: "wipe",
+                    issuedAtEpochSeconds: Int64(Date().timeIntervalSince1970),
+                    syncID: nil,
+                    syncEnvelope: nil
+                )
+            } else if let pendingSync = devices[index].pendingSync {
+                command = DeviceStatusCommand(
+                    action: "sync",
+                    issuedAtEpochSeconds: Int64(Date().timeIntervalSince1970),
+                    syncID: pendingSync.id,
+                    syncEnvelope: pendingSync.envelope
+                )
+            } else {
+                command = DeviceStatusCommand(
+                    action: "none",
+                    issuedAtEpochSeconds: Int64(Date().timeIntervalSince1970),
+                    syncID: nil,
+                    syncEnvelope: nil
+                )
+            }
             let envelope = try DeviceSyncCrypto.seal(
                 command,
                 sharedSecret: secret,
@@ -350,6 +411,41 @@ final class DeviceSyncManager: ObservableObject {
         }
         devices[index].lastSeenAt = Date()
         devices[index].wipeAcknowledgedAt = Date()
+        persistDevices()
+        return .json(["status": "acknowledged"])
+    }
+
+    private func handleSyncAcknowledgement(_ request: LocalHTTPRequest) -> LocalHTTPResponse {
+        guard let acknowledgement = try? JSONDecoder().decode(
+            DeviceSyncAcknowledgement.self,
+            from: request.body
+        ),
+        acknowledgement.desktopID == desktopID,
+        abs(Int64(Date().timeIntervalSince1970) - acknowledgement.timestamp) <= 60,
+        let index = devices.firstIndex(where: {
+            $0.id == acknowledgement.deviceID
+                && $0.pendingSync?.id == acknowledgement.syncID
+                && !$0.isRevoked
+        }),
+        let publicKey = Data(base64URLEncoded: devices[index].publicKey),
+        let secret = try? DeviceSyncCrypto.sharedSecret(
+            desktopPrivateKey: privateKey,
+            devicePublicKey: publicKey
+        ) else {
+            return .json(["error": "Unknown device sync acknowledgement."], status: 404)
+        }
+        let expectedProof = DeviceSyncCrypto.authenticationProof(
+            sharedSecret: secret,
+            salt: desktopID,
+            info: DeviceSyncCrypto.statusInfo,
+            message: "sync-ack:\(desktopID):\(acknowledgement.deviceID):\(acknowledgement.syncID):\(acknowledgement.timestamp)"
+        )
+        guard acknowledgement.proof == expectedProof else {
+            return .json(["error": "Sync acknowledgement proof is invalid."], status: 404)
+        }
+        devices[index].lastSeenAt = Date()
+        devices[index].pendingSync = nil
+        devices[index].syncAcknowledgedAt = Date()
         persistDevices()
         return .json(["status": "acknowledged"])
     }
