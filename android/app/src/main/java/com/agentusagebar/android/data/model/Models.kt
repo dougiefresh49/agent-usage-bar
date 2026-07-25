@@ -102,6 +102,14 @@ data class OpenAIUsageResponse(
     @SerialName("plan_type") val planType: String? = null,
     @SerialName("rate_limit") val rateLimit: OpenAIRateLimit? = null,
     @SerialName("additional_rate_limits") val additionalRateLimits: List<OpenAIAdditionalRateLimit>? = null,
+    @SerialName("rate_limit_reset_credits")
+    val rateLimitResetCredits: OpenAIResetCreditSummary? = null,
+)
+
+@Serializable
+data class OpenAIResetCreditSummary(
+    @SerialName("available_count") val availableCount: Int? = null,
+    @SerialName("applicable_available_count") val applicableAvailableCount: Int? = null,
 )
 
 @Serializable
@@ -202,6 +210,84 @@ enum class UsageTextSize(val displayName: String, val overviewColumns: Int) {
     COMPACT("Compact", 2),
     COMFORTABLE("Comfortable", 2),
     LARGE("Large", 2),
+}
+
+object UsageMetricPreferences {
+    const val CLAUDE_FIVE_HOUR = "claude.5h"
+    const val CLAUDE_SEVEN_DAY = "claude.7d"
+    const val CLAUDE_OPUS = "claude.opus"
+    const val CLAUDE_SONNET = "claude.sonnet"
+    const val CLAUDE_EXTRA = "claude.extra"
+    const val OPENAI_PRIMARY = "openai.primary"
+    const val OPENAI_SECONDARY = "openai.secondary"
+    const val OPENAI_RESET_CREDITS = "openai.resetCredits"
+    const val CURSOR_MODELS = "cursor.models"
+    const val CURSOR_API = "cursor.api"
+    const val CURSOR_TOTAL = "cursor.total"
+    const val ELEVENLABS_CREDITS = "elevenlabs.credits"
+    const val ELEVENLABS_REMAINING = "elevenlabs.remaining"
+
+    fun defaults(provider: UsageProvider): Pair<String, String> = when (provider) {
+        UsageProvider.CLAUDE -> CLAUDE_FIVE_HOUR to CLAUDE_SEVEN_DAY
+        UsageProvider.OPENAI -> OPENAI_PRIMARY to OPENAI_RESET_CREDITS
+        UsageProvider.CURSOR -> CURSOR_MODELS to CURSOR_API
+        UsageProvider.ELEVENLABS -> ELEVENLABS_CREDITS to ELEVENLABS_REMAINING
+    }
+
+    fun options(
+        provider: UsageProvider,
+        available: List<UsageMetric>,
+    ): List<UsageMetric> = available.ifEmpty {
+        when (provider) {
+            UsageProvider.CLAUDE -> listOf(
+                UsageMetric(CLAUDE_FIVE_HOUR, "5-Hour Window"),
+                UsageMetric(CLAUDE_SEVEN_DAY, "7-Day Window"),
+            )
+            UsageProvider.OPENAI -> listOf(
+                UsageMetric(OPENAI_PRIMARY, "Primary Window"),
+                UsageMetric(OPENAI_RESET_CREDITS, "Reset Credits"),
+            )
+            UsageProvider.CURSOR -> listOf(
+                UsageMetric(CURSOR_MODELS, "First-Party Models"),
+                UsageMetric(CURSOR_API, "API"),
+                UsageMetric(CURSOR_TOTAL, "Total Plan Usage"),
+            )
+            UsageProvider.ELEVENLABS -> listOf(
+                UsageMetric(ELEVENLABS_CREDITS, "Credits Used"),
+                UsageMetric(ELEVENLABS_REMAINING, "Credits Remaining"),
+            )
+        }
+    }
+
+    fun resolvedPair(
+        provider: UsageProvider,
+        primaryID: String,
+        secondaryID: String,
+        available: List<UsageMetric>,
+    ): List<UsageMetric> {
+        if (available.isEmpty()) return emptyList()
+        val defaults = defaults(provider)
+        val primary = available.firstOrNull { it.id == primaryID }
+            ?: available.firstOrNull { it.id == defaults.first }
+            ?: available.first()
+        val secondary = available.firstOrNull {
+            it.id == secondaryID && it.id != primary.id
+        } ?: available.firstOrNull {
+            it.id == defaults.second && it.id != primary.id
+        } ?: available.firstOrNull { it.id != primary.id }
+        return listOfNotNull(primary, secondary)
+    }
+
+    fun orderedMetrics(
+        provider: UsageProvider,
+        primaryID: String,
+        secondaryID: String,
+        available: List<UsageMetric>,
+    ): List<UsageMetric> {
+        val pair = resolvedPair(provider, primaryID, secondaryID, available)
+        val selectedIDs = pair.mapTo(mutableSetOf()) { it.id }
+        return pair + available.filterNot { it.id in selectedIDs }
+    }
 }
 
 data class UsageMetric(

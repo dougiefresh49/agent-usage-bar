@@ -39,6 +39,7 @@ import com.agentusagebar.android.data.credentials.SettingsStore
 import com.agentusagebar.android.data.model.DetailVisualizationStyle
 import com.agentusagebar.android.data.model.ProviderUsageState
 import com.agentusagebar.android.data.model.UsageMetric
+import com.agentusagebar.android.data.model.UsageMetricPreferences
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.ui.components.compactRemainingTime
 import com.agentusagebar.android.ui.components.countdownProgress
@@ -66,10 +67,16 @@ class OverviewWidget : GlanceAppWidget() {
         // Always read the persisted snapshot so all four providers render even if
         // the activity process is cold.
         val providers = WidgetSnapshotStore.load(context)
-        val style = SettingsStore(context).settings.first().detailStyle
+        val settings = SettingsStore(context).settings.first()
         provideContent {
             GlanceTheme {
-                OverviewWidgetContent(providers = providers, style = style)
+                OverviewWidgetContent(
+                    providers = providers,
+                    style = settings.detailStyle,
+                    preferredProvider = settings.widgetProvider,
+                    primaryMetric = settings.primaryMetric,
+                    secondaryMetric = settings.secondaryMetric,
+                )
             }
         }
     }
@@ -81,9 +88,17 @@ class ProviderWidget : GlanceAppWidget() {
         val providers = WidgetSnapshotStore.load(context)
         val state = providers[settings.widgetProvider]
             ?: ProviderUsageState(settings.widgetProvider, false)
+        val orderedState = state.copy(
+            metrics = UsageMetricPreferences.orderedMetrics(
+                provider = state.provider,
+                primaryID = settings.primaryMetric,
+                secondaryID = settings.secondaryMetric,
+                available = state.metrics,
+            ),
+        )
         provideContent {
             GlanceTheme {
-                ProviderWidgetContent(state = state, style = settings.detailStyle)
+                ProviderWidgetContent(state = orderedState, style = settings.detailStyle)
             }
         }
     }
@@ -93,6 +108,9 @@ class ProviderWidget : GlanceAppWidget() {
 private fun OverviewWidgetContent(
     providers: Map<UsageProvider, ProviderUsageState>,
     style: DetailVisualizationStyle,
+    preferredProvider: UsageProvider,
+    primaryMetric: String,
+    secondaryMetric: String,
 ) {
     val claude = providers[UsageProvider.CLAUDE] ?: ProviderUsageState(UsageProvider.CLAUDE, false)
     val openAI = providers[UsageProvider.OPENAI] ?: ProviderUsageState(UsageProvider.OPENAI, false)
@@ -122,18 +140,46 @@ private fun OverviewWidgetContent(
             modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OverviewCell(claude, style, GlanceModifier.defaultWeight().fillMaxHeight())
+            OverviewCell(
+                claude,
+                style,
+                preferredProvider,
+                primaryMetric,
+                secondaryMetric,
+                GlanceModifier.defaultWeight().fillMaxHeight(),
+            )
             Spacer(GlanceModifier.width(10.dp))
-            OverviewCell(openAI, style, GlanceModifier.defaultWeight().fillMaxHeight())
+            OverviewCell(
+                openAI,
+                style,
+                preferredProvider,
+                primaryMetric,
+                secondaryMetric,
+                GlanceModifier.defaultWeight().fillMaxHeight(),
+            )
         }
         Spacer(GlanceModifier.height(6.dp))
         Row(
             modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OverviewCell(cursor, style, GlanceModifier.defaultWeight().fillMaxHeight())
+            OverviewCell(
+                cursor,
+                style,
+                preferredProvider,
+                primaryMetric,
+                secondaryMetric,
+                GlanceModifier.defaultWeight().fillMaxHeight(),
+            )
             Spacer(GlanceModifier.width(10.dp))
-            OverviewCell(eleven, style, GlanceModifier.defaultWeight().fillMaxHeight())
+            OverviewCell(
+                eleven,
+                style,
+                preferredProvider,
+                primaryMetric,
+                secondaryMetric,
+                GlanceModifier.defaultWeight().fillMaxHeight(),
+            )
         }
     }
 }
@@ -142,11 +188,28 @@ private fun OverviewWidgetContent(
 private fun OverviewCell(
     state: ProviderUsageState,
     style: DetailVisualizationStyle,
+    preferredProvider: UsageProvider,
+    primaryMetric: String,
+    secondaryMetric: String,
     modifier: GlanceModifier,
 ) {
-    val primary = state.metrics.firstOrNull { it.percentUsed != null } ?: state.metrics.firstOrNull()
-    val secondary = state.metrics.filter { it.percentUsed != null }.getOrNull(1)
-        ?: state.metrics.getOrNull(1)
+    val pair = if (state.provider == preferredProvider) {
+        UsageMetricPreferences.resolvedPair(
+            provider = state.provider,
+            primaryID = primaryMetric,
+            secondaryID = secondaryMetric,
+            available = state.metrics,
+        )
+    } else {
+        UsageMetricPreferences.resolvedPair(
+            provider = state.provider,
+            primaryID = "",
+            secondaryID = "",
+            available = state.metrics,
+        )
+    }
+    val primary = pair.getOrNull(0)
+    val secondary = pair.getOrNull(1)
     val value = when {
         !state.isConfigured -> "Connect"
         primary == null -> "…"
@@ -338,14 +401,16 @@ private fun MetricLine(metric: UsageMetric, compact: Boolean) {
 }
 
 private fun shortMetricLabel(metric: UsageMetric): String = when (metric.id) {
-    "five_hour" -> "5h"
-    "seven_day" -> "7d"
-    "models" -> "Models"
-    "api" -> "API"
-    "primary" -> "Primary"
-    "secondary" -> "Secondary"
-    "credits" -> "Used"
-    "remaining" -> "Left"
+    UsageMetricPreferences.CLAUDE_FIVE_HOUR -> "5h"
+    UsageMetricPreferences.CLAUDE_SEVEN_DAY -> "7d"
+    UsageMetricPreferences.CURSOR_MODELS -> "Models"
+    UsageMetricPreferences.CURSOR_API -> "API"
+    UsageMetricPreferences.CURSOR_TOTAL -> "Total"
+    UsageMetricPreferences.OPENAI_PRIMARY -> "Primary"
+    UsageMetricPreferences.OPENAI_SECONDARY -> "Secondary"
+    UsageMetricPreferences.OPENAI_RESET_CREDITS -> "Resets"
+    UsageMetricPreferences.ELEVENLABS_CREDITS -> "Used"
+    UsageMetricPreferences.ELEVENLABS_REMAINING -> "Left"
     else -> metric.label
         .replace(" Window", "")
         .replace(" (7 day)", "")

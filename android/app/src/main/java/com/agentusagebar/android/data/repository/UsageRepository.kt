@@ -11,6 +11,7 @@ import com.agentusagebar.android.data.model.ElevenLabsSubscriptionResponse
 import com.agentusagebar.android.data.model.OpenAIUsageResponse
 import com.agentusagebar.android.data.model.ProviderUsageState
 import com.agentusagebar.android.data.model.UsageMetric
+import com.agentusagebar.android.data.model.UsageMetricPreferences
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.data.network.UsageApiClient
 import com.agentusagebar.android.data.sync.DevicePairingClient
@@ -218,8 +219,20 @@ class UsageRepository(
         publishWidgets()
     }
 
-    suspend fun setDetailStyle(style: com.agentusagebar.android.data.model.DetailVisualizationStyle) =
+    suspend fun setPrimaryMetric(metricID: String) {
+        settingsStore.setPrimaryMetric(metricID)
+        publishWidgets()
+    }
+
+    suspend fun setSecondaryMetric(metricID: String) {
+        settingsStore.setSecondaryMetric(metricID)
+        publishWidgets()
+    }
+
+    suspend fun setDetailStyle(style: com.agentusagebar.android.data.model.DetailVisualizationStyle) {
         settingsStore.setDetailStyle(style)
+        publishWidgets()
+    }
 
     suspend fun setTextSize(size: com.agentusagebar.android.data.model.UsageTextSize) =
         settingsStore.setTextSize(size)
@@ -428,14 +441,14 @@ class UsageRepository(
         fun claudeMetrics(usage: ClaudeUsageResponse): List<UsageMetric> {
             val metrics = mutableListOf<UsageMetric>()
             metrics += UsageMetric(
-                id = "five_hour",
+                id = UsageMetricPreferences.CLAUDE_FIVE_HOUR,
                 label = "5-Hour Window",
                 percentUsed = usage.fiveHour?.utilization,
                 resetsAtEpochMs = parseIso(usage.fiveHour?.resetsAt),
                 resetIntervalMs = FIVE_HOURS_MS,
             )
             metrics += UsageMetric(
-                id = "seven_day",
+                id = UsageMetricPreferences.CLAUDE_SEVEN_DAY,
                 label = "7-Day Window",
                 percentUsed = usage.sevenDay?.utilization,
                 resetsAtEpochMs = parseIso(usage.sevenDay?.resetsAt),
@@ -443,7 +456,7 @@ class UsageRepository(
             )
             usage.sevenDayOpus?.utilization?.let {
                 metrics += UsageMetric(
-                    id = "seven_day_opus",
+                    id = UsageMetricPreferences.CLAUDE_OPUS,
                     label = "Opus (7 day)",
                     percentUsed = it,
                     resetsAtEpochMs = parseIso(usage.sevenDayOpus.resetsAt),
@@ -452,7 +465,7 @@ class UsageRepository(
             }
             usage.sevenDaySonnet?.utilization?.let {
                 metrics += UsageMetric(
-                    id = "seven_day_sonnet",
+                    id = UsageMetricPreferences.CLAUDE_SONNET,
                     label = "Sonnet (7 day)",
                     percentUsed = it,
                     resetsAtEpochMs = parseIso(usage.sevenDaySonnet.resetsAt),
@@ -475,7 +488,9 @@ class UsageRepository(
                         else -> null
                     }
                     metrics += UsageMetric(
-                        id = "limit_${limit.kind}_$model",
+                        id = "claude.limit.${
+                            listOfNotNull(limit.kind, model, limit.resetsAt).joinToString(":")
+                        }",
                         label = label,
                         percentUsed = limit.percent,
                         resetsAtEpochMs = parseIso(limit.resetsAt),
@@ -487,7 +502,7 @@ class UsageRepository(
                 val used = extra.usedCreditsAmount
                 val limit = extra.monthlyLimitAmount
                 metrics += UsageMetric(
-                    id = "extra_usage",
+                    id = UsageMetricPreferences.CLAUDE_EXTRA,
                     label = "Extra Usage",
                     percentUsed = extra.utilization,
                     detail = if (used != null && limit != null) {
@@ -504,15 +519,21 @@ class UsageRepository(
             val metrics = mutableListOf<UsageMetric>()
             val primary = usage.rateLimit?.primaryWindow
             metrics += UsageMetric(
-                id = "primary",
+                id = UsageMetricPreferences.OPENAI_PRIMARY,
                 label = windowLabel(primary?.limitWindowSeconds, "Primary Window"),
                 percentUsed = primary?.usedPercent,
                 resetsAtEpochMs = primary?.resetAt?.times(1000)?.toLong(),
                 resetIntervalMs = primary?.limitWindowSeconds?.times(1000)?.toLong(),
             )
+            metrics += UsageMetric(
+                id = UsageMetricPreferences.OPENAI_RESET_CREDITS,
+                label = "Reset Credits",
+                countValue = usage.rateLimitResetCredits?.applicableAvailableCount
+                    ?: usage.rateLimitResetCredits?.availableCount,
+            )
             usage.rateLimit?.secondaryWindow?.let { secondary ->
                 metrics += UsageMetric(
-                    id = "secondary",
+                    id = UsageMetricPreferences.OPENAI_SECONDARY,
                     label = windowLabel(secondary.limitWindowSeconds, "Secondary Window"),
                     percentUsed = secondary.usedPercent,
                     resetsAtEpochMs = secondary.resetAt?.times(1000)?.toLong(),
@@ -536,19 +557,26 @@ class UsageRepository(
             val resetAt = usage.billingCycleEnd?.toDoubleOrNull()?.toLong()
             val metrics = mutableListOf(
                 UsageMetric(
-                    id = "models",
+                    id = UsageMetricPreferences.CURSOR_MODELS,
                     label = "First-Party Models",
                     percentUsed = usage.planUsage?.autoPercentUsed,
                     resetsAtEpochMs = resetAt,
                     resetIntervalMs = THIRTY_DAYS_MS,
                 ),
                 UsageMetric(
-                    id = "api",
+                    id = UsageMetricPreferences.CURSOR_API,
                     label = "API",
                     percentUsed = usage.planUsage?.apiPercentUsed,
                     resetsAtEpochMs = resetAt,
                     resetIntervalMs = THIRTY_DAYS_MS,
                 ),
+            )
+            metrics += UsageMetric(
+                id = UsageMetricPreferences.CURSOR_TOTAL,
+                label = "Total Plan Usage",
+                percentUsed = usage.planUsage?.totalPercentUsed,
+                resetsAtEpochMs = resetAt,
+                resetIntervalMs = THIRTY_DAYS_MS,
             )
             val spend = usage.spendLimitUsage
             if (spend?.spent != null && spend.individualLimit != null) {
@@ -600,14 +628,14 @@ class UsageRepository(
         fun elevenLabsMetrics(usage: ElevenLabsSubscriptionResponse): List<UsageMetric> {
             return listOf(
                 UsageMetric(
-                    id = "credits",
+                    id = UsageMetricPreferences.ELEVENLABS_CREDITS,
                     label = "Credits Used",
                     percentUsed = usage.utilization,
                     resetsAtEpochMs = usage.nextCharacterCountResetUnix?.times(1000)?.toLong(),
                     resetIntervalMs = billingIntervalMs(usage.characterRefreshPeriod),
                 ),
                 UsageMetric(
-                    id = "remaining",
+                    id = UsageMetricPreferences.ELEVENLABS_REMAINING,
                     label = "Credits Remaining",
                     countValue = usage.creditsRemaining,
                     detail = usage.characterLimit?.let { limit ->

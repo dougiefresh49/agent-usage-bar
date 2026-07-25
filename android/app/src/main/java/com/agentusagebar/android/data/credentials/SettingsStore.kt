@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.agentusagebar.android.data.model.DetailVisualizationStyle
+import com.agentusagebar.android.data.model.UsageMetricPreferences
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.data.model.UsageTextSize
 import com.agentusagebar.android.data.sync.DeviceSyncPayload
@@ -23,6 +24,8 @@ data class AppSettings(
     val pollingMinutes: Int = 30,
     val setupComplete: Boolean = false,
     val widgetProvider: UsageProvider = UsageProvider.CLAUDE,
+    val primaryMetric: String = UsageMetricPreferences.CLAUDE_FIVE_HOUR,
+    val secondaryMetric: String = UsageMetricPreferences.CLAUDE_SEVEN_DAY,
     val detailStyle: DetailVisualizationStyle = DetailVisualizationStyle.BARS,
     val textSize: UsageTextSize = UsageTextSize.COMFORTABLE,
     val claudeSessionThreshold: Int = 80,
@@ -37,12 +40,16 @@ data class AppSettings(
 
 class SettingsStore(private val context: Context) {
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { prefs ->
+        val widgetProvider = prefs[KEY_WIDGET_PROVIDER]
+            ?.let { runCatching { UsageProvider.valueOf(it) }.getOrNull() }
+            ?: UsageProvider.CLAUDE
+        val metricDefaults = UsageMetricPreferences.defaults(widgetProvider)
         AppSettings(
             pollingMinutes = prefs[KEY_POLLING]?.takeIf { it in POLLING_OPTIONS } ?: 30,
             setupComplete = prefs[KEY_SETUP] ?: false,
-            widgetProvider = prefs[KEY_WIDGET_PROVIDER]
-                ?.let { runCatching { UsageProvider.valueOf(it) }.getOrNull() }
-                ?: UsageProvider.CLAUDE,
+            widgetProvider = widgetProvider,
+            primaryMetric = prefs[KEY_PRIMARY_METRIC] ?: metricDefaults.first,
+            secondaryMetric = prefs[KEY_SECONDARY_METRIC] ?: metricDefaults.second,
             detailStyle = prefs[KEY_DETAIL_STYLE]
                 ?.let { runCatching { DetailVisualizationStyle.valueOf(it) }.getOrNull() }
                 ?: DetailVisualizationStyle.BARS,
@@ -69,7 +76,31 @@ class SettingsStore(private val context: Context) {
     }
 
     suspend fun setWidgetProvider(provider: UsageProvider) {
-        context.settingsDataStore.edit { it[KEY_WIDGET_PROVIDER] = provider.name }
+        val defaults = UsageMetricPreferences.defaults(provider)
+        context.settingsDataStore.edit {
+            it[KEY_WIDGET_PROVIDER] = provider.name
+            it[KEY_PRIMARY_METRIC] = defaults.first
+            it[KEY_SECONDARY_METRIC] = defaults.second
+        }
+    }
+
+    suspend fun setPrimaryMetric(metricID: String) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[KEY_PRIMARY_METRIC] = metricID
+            if (prefs[KEY_SECONDARY_METRIC] == metricID) {
+                val provider = prefs[KEY_WIDGET_PROVIDER]
+                    ?.let { runCatching { UsageProvider.valueOf(it) }.getOrNull() }
+                    ?: UsageProvider.CLAUDE
+                prefs[KEY_SECONDARY_METRIC] = UsageMetricPreferences.defaults(provider)
+                    .let { defaults ->
+                        if (defaults.second != metricID) defaults.second else defaults.first
+                    }
+            }
+        }
+    }
+
+    suspend fun setSecondaryMetric(metricID: String) {
+        context.settingsDataStore.edit { it[KEY_SECONDARY_METRIC] = metricID }
     }
 
     suspend fun setDetailStyle(style: DetailVisualizationStyle) {
@@ -123,6 +154,12 @@ class SettingsStore(private val context: Context) {
                 providerFromMacValue(appearance.preferredProvider)?.let {
                     prefs[KEY_WIDGET_PROVIDER] = it.name
                 }
+                appearance.primaryMetric.takeIf(String::isNotBlank)?.let {
+                    prefs[KEY_PRIMARY_METRIC] = it
+                }
+                appearance.secondaryMetric
+                    .takeIf { it.isNotBlank() && it != appearance.primaryMetric }
+                    ?.let { prefs[KEY_SECONDARY_METRIC] = it }
                 enumValueOrNull<DetailVisualizationStyle>(appearance.detailStyle)?.let {
                     prefs[KEY_DETAIL_STYLE] = it.name
                 }
@@ -161,6 +198,8 @@ class SettingsStore(private val context: Context) {
         private val KEY_POLLING = intPreferencesKey("polling_minutes")
         private val KEY_SETUP = booleanPreferencesKey("setup_complete")
         private val KEY_WIDGET_PROVIDER = stringPreferencesKey("widget_provider")
+        private val KEY_PRIMARY_METRIC = stringPreferencesKey("primary_metric")
+        private val KEY_SECONDARY_METRIC = stringPreferencesKey("secondary_metric")
         private val KEY_DETAIL_STYLE = stringPreferencesKey("detail_style")
         private val KEY_TEXT_SIZE = stringPreferencesKey("text_size")
         private val KEY_CLAUDE_SESSION = intPreferencesKey("threshold_claude_session")
