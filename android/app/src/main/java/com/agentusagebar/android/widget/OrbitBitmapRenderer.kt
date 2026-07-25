@@ -11,7 +11,6 @@ object OrbitBitmapRenderer {
     private val trackColor = 0xFF3A3845.toInt()
     private val primaryColor = 0xFF5B8CFF.toInt()
     private val secondaryColor = 0xFFFF9F0A.toInt()
-    private val bgColor = 0x001C1B1F // transparent so widget bg shows through
     private val centerWell = 0xFF2A2833.toInt()
     private val drainFill = 0xFF5B8CFF.toInt()
     private val textColor = 0xFFFFFFFF.toInt()
@@ -28,18 +27,24 @@ object OrbitBitmapRenderer {
         // Transparent outside the rings — Glance widget bg shows through.
         canvas.drawColor(0x00000000)
 
-        val stroke = sizePx * 0.085f
+        val container = min(sizePx.toFloat(), sizePx.toFloat())
+        // Match macOS / Compose OrbitRings proportions in a 120pt frame.
+        val scale = container / 120f
+        val stroke = 8f * scale
+        val hasSecondary = secondaryPercent != null
+        val outerDiameter = (if (hasSecondary) 112f else 106f) * scale
+        val innerDiameter = 84f * scale
+        val centerDiameter = 58f * scale
         val cx = sizePx / 2f
         val cy = sizePx / 2f
-        val hasSecondary = secondaryPercent != null
 
-        fun ring(progress: Float, color: Int, inset: Float) {
+        fun ring(progress: Float, color: Int, diameter: Float) {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE
                 strokeWidth = stroke
                 strokeCap = Paint.Cap.ROUND
             }
-            val diameter = min(sizePx.toFloat(), sizePx.toFloat()) - inset * 2
+            val inset = (container - diameter) / 2f
             val oval = RectF(inset, inset, inset + diameter, inset + diameter)
             paint.color = trackColor
             canvas.drawArc(oval, -90f, 360f, false, paint)
@@ -51,14 +56,13 @@ object OrbitBitmapRenderer {
 
         val p = ((primaryPercent ?: 0.0) / 100.0).toFloat()
         if (hasSecondary) {
-            ring(((secondaryPercent ?: 0.0) / 100.0).toFloat(), secondaryColor, stroke * 0.55f)
-            ring(p, primaryColor, stroke * 2.55f)
+            ring(((secondaryPercent ?: 0.0) / 100.0).toFloat(), secondaryColor, outerDiameter)
+            ring(p, primaryColor, innerDiameter)
         } else {
-            ring(p, primaryColor, stroke * 0.55f)
+            ring(p, primaryColor, outerDiameter)
         }
 
         // Center well + bottom-up drain (100% = window just started, 0% = about to reset).
-        val centerDiameter = sizePx * (if (hasSecondary) 0.48f else 0.55f)
         val centerLeft = cx - centerDiameter / 2f
         val centerTop = cy - centerDiameter / 2f
         val centerOval = RectF(
