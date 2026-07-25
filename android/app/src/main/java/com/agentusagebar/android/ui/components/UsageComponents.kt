@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import com.agentusagebar.android.data.model.DetailVisualizationStyle
 import com.agentusagebar.android.data.model.ProviderUsageState
 import com.agentusagebar.android.data.model.UsageMetric
+import com.agentusagebar.android.data.model.UsageMetricPreferences
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.data.model.UsageTextSize
 import com.agentusagebar.android.ui.theme.usageColor
@@ -139,14 +140,16 @@ private fun StatusChip(text: String, error: Boolean = false) {
 @Composable
 private fun MiniMetricRow(metric: UsageMetric) {
     val compact = when (metric.id) {
-        "five_hour" -> "5h"
-        "seven_day" -> "7d"
-        "models" -> "Models"
-        "api" -> "API"
-        "primary" -> "Pri"
-        "secondary" -> "Sec"
-        "credits" -> "Used"
-        "remaining" -> "Left"
+        UsageMetricPreferences.CLAUDE_FIVE_HOUR -> "5h"
+        UsageMetricPreferences.CLAUDE_SEVEN_DAY -> "7d"
+        UsageMetricPreferences.CURSOR_MODELS -> "Models"
+        UsageMetricPreferences.CURSOR_API -> "API"
+        UsageMetricPreferences.CURSOR_TOTAL -> "Total"
+        UsageMetricPreferences.OPENAI_PRIMARY -> "Pri"
+        UsageMetricPreferences.OPENAI_SECONDARY -> "Sec"
+        UsageMetricPreferences.OPENAI_RESET_CREDITS -> "Reset"
+        UsageMetricPreferences.ELEVENLABS_CREDITS -> "Used"
+        UsageMetricPreferences.ELEVENLABS_REMAINING -> "Left"
         else -> metric.label.take(6)
     }
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {

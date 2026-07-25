@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -46,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.agentusagebar.android.data.credentials.SettingsStore
 import com.agentusagebar.android.data.model.DetailVisualizationStyle
+import com.agentusagebar.android.data.model.UsageMetricPreferences
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.data.model.UsageTextSize
 import com.agentusagebar.android.ui.usage.ThresholdSlider
@@ -94,6 +96,18 @@ fun SettingsScreen(
     val openAIConnected = snapshot.providers[UsageProvider.OPENAI]?.isConfigured == true
     val cursorConnected = snapshot.providers[UsageProvider.CURSOR]?.isConfigured == true
     val elevenConnected = snapshot.providers[UsageProvider.ELEVENLABS]?.isConfigured == true
+    val metricOptions = UsageMetricPreferences.options(
+        provider = settings.widgetProvider,
+        available = snapshot.providers[settings.widgetProvider]?.metrics.orEmpty(),
+    )
+    val selectedMetrics = UsageMetricPreferences.resolvedPair(
+        provider = settings.widgetProvider,
+        primaryID = settings.primaryMetric,
+        secondaryID = settings.secondaryMetric,
+        available = metricOptions,
+    )
+    val selectedPrimaryMetric = selectedMetrics.getOrNull(0)?.id
+    val selectedSecondaryMetric = selectedMetrics.getOrNull(1)?.id
 
     LaunchedEffect(message) {
         message?.let {
@@ -320,6 +334,43 @@ fun SettingsScreen(
                                 )
                             }
                         }
+
+                        HorizontalDivider()
+                        Text("Primary Stat", style = MaterialTheme.typography.titleMedium)
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            metricOptions.forEach { metric ->
+                                FilterChip(
+                                    selected = selectedPrimaryMetric == metric.id,
+                                    onClick = { viewModel.setPrimaryMetric(metric.id) },
+                                    label = { Text(metric.label) },
+                                )
+                            }
+                        }
+
+                        HorizontalDivider()
+                        Text("Secondary Stat", style = MaterialTheme.typography.titleMedium)
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            metricOptions
+                                .filter { it.id != selectedPrimaryMetric }
+                                .forEach { metric ->
+                                    FilterChip(
+                                        selected = selectedSecondaryMetric == metric.id,
+                                        onClick = { viewModel.setSecondaryMetric(metric.id) },
+                                        label = { Text(metric.label) },
+                                    )
+                                }
+                        }
+                        Text(
+                            "These stats appear first in the home-screen widgets.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
 
                     SettingsTab.Notifications -> {

@@ -174,6 +174,14 @@ class UsageViewModel(
         viewModelScope.launch { repository.setWidgetProvider(provider) }
     }
 
+    fun setPrimaryMetric(metricID: String) {
+        viewModelScope.launch { repository.setPrimaryMetric(metricID) }
+    }
+
+    fun setSecondaryMetric(metricID: String) {
+        viewModelScope.launch { repository.setSecondaryMetric(metricID) }
+    }
+
     fun setDetailStyle(style: com.agentusagebar.android.data.model.DetailVisualizationStyle) {
         viewModelScope.launch { repository.setDetailStyle(style) }
     }
