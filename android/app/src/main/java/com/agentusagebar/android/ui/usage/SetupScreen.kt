@@ -40,15 +40,15 @@ fun SetupScreen(
     ) {
         Text("Welcome", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "Connect providers first, then tweak appearance. Notification thresholds appear in Settings after each connection is added.",
+            "Connect providers first, then tweak appearance. Notification thresholds appear in Settings after each provider is added.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         HorizontalDivider()
-        Text("1. Connections", style = MaterialTheme.typography.titleMedium)
+        Text("1. Providers", style = MaterialTheme.typography.titleMedium)
         Text(
-            "After you continue, use Settings → Connections to sign in with Claude or paste OpenAI / Cursor session tokens. Tokens stay on this phone only.",
+            "After you continue, use Settings → Providers to sign in with Claude or paste OpenAI / Cursor session tokens. Tokens stay on this phone only.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -770,8 +770,13 @@ private struct ProviderHeader: View {
                 .usageFont(.detailHeader)
             Spacer()
             Link(destination: provider.usagePageURL) {
-                Text("Details")
-                    .usageFont(.supporting)
+                HStack(spacing: 3) {
+                    Text("Details")
+                        .underline()
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 8, weight: .semibold))
+                }
+                .usageFont(.supporting)
             }
             .foregroundStyle(.secondary)
             .help("Open \(provider.settingsName) usage page")

@@ -19,8 +19,8 @@ Kotlin/Jetpack Compose port of Agent Usage Bar with home-screen widgets.
   This includes intermediate launcher sizes such as 2 × 3 and 2 × 4 without
   requiring separate picker entries.
 - Encrypted local storage for Claude OAuth + OpenAI/Cursor session tokens
-- QR import for selected settings (including widget stats) and connections from
-  the macOS app
+- QR import for selected settings (including widget stats) and provider
+  credentials from the macOS app
 - Background refresh via WorkManager (every 15 minutes minimum — Android platform limit)
 
 ## Requirements to build
@@ -151,7 +151,7 @@ android/
 ## Importing settings from your Mac
 
 1. On macOS, open **Settings → Devices → Add Device**.
-2. Select polling, appearance, notifications, and any configured connections
+2. Select polling, appearance, notifications, and any configured providers
    you want to copy.
 3. Generate the QR code.
 4. On Android, open **Settings → Devices → Scan QR Code** and scan it.

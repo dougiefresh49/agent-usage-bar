@@ -189,7 +189,7 @@ class UsageRepository(
                 if (result.payload.appearance != null) add("appearance")
                 if (result.payload.notifications != null) add("notifications")
                 result.payload.connections?.count?.takeIf { it > 0 }?.let {
-                    add("$it connection${if (it == 1) "" else "s"}")
+                    add("$it provider credential${if (it == 1) "" else "s"}")
                 }
             }
             "Paired with ${result.trustedDevice.desktopName}; imported ${categories.joinToString()}."
