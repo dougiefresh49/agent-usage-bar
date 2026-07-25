@@ -21,6 +21,7 @@ data class TrustedDesktopDevice(
     val devicePublicKey: String? = null,
     val pairedAtEpochMs: Long,
     val lastCheckedAtEpochMs: Long? = null,
+    val lastSettingsSyncAtEpochMs: Long? = null,
     val revokedAtEpochMs: Long? = null,
     val openAITokenHash: String? = null,
     val cursorTokenHash: String? = null,
@@ -69,6 +70,26 @@ class TrustedDeviceStore(context: Context) {
                 it
             }
         }
+        prefs.edit().putString(KEY_DEVICES, json.encodeToString(devices)).apply()
+    }
+
+    fun markSettingsSynced(desktopID: String) {
+        val now = System.currentTimeMillis()
+        val devices = load().map {
+            if (it.desktopID == desktopID) {
+                it.copy(
+                    lastCheckedAtEpochMs = now,
+                    lastSettingsSyncAtEpochMs = now,
+                )
+            } else {
+                it
+            }
+        }
+        prefs.edit().putString(KEY_DEVICES, json.encodeToString(devices)).apply()
+    }
+
+    fun remove(desktopID: String) {
+        val devices = load().filterNot { it.desktopID == desktopID }
         prefs.edit().putString(KEY_DEVICES, json.encodeToString(devices)).apply()
     }
 

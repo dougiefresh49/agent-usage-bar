@@ -16,6 +16,7 @@ import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.data.network.UsageApiClient
 import com.agentusagebar.android.data.sync.DevicePairingClient
 import com.agentusagebar.android.data.sync.DeviceSyncPayload
+import com.agentusagebar.android.data.sync.TrustedDesktopDevice
 import com.agentusagebar.android.data.sync.TrustedDeviceStore
 import com.agentusagebar.android.widget.WidgetSnapshotStore
 import com.agentusagebar.android.widget.WidgetUpdater
@@ -26,9 +27,22 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+
+enum class DeviceSyncCheckResult {
+    UP_TO_DATE,
+    SETTINGS_APPLIED,
+    UNLINKED_BY_MAC,
+}
+
+data class UnlinkMacResult(
+    val macWasNotified: Boolean,
+    val credentialsRemoved: Boolean,
+)
 
 class UsageRepository(
     context: Context,
@@ -39,6 +53,7 @@ class UsageRepository(
     private val devicePairingClient: DevicePairingClient = DevicePairingClient(trustedDeviceStore),
 ) {
     private val appContext = context.applicationContext
+    private val trustedDeviceMutex = Mutex()
 
     private val _snapshot = MutableStateFlow(
         AppUsageSnapshot(
@@ -72,6 +87,10 @@ class UsageRepository(
 
     private val _awaitingClaudeCode = MutableStateFlow(false)
     val awaitingClaudeCode: StateFlow<Boolean> = _awaitingClaudeCode.asStateFlow()
+
+    private val _trustedDevices = MutableStateFlow(activeTrustedDevices())
+    val trustedDevices: StateFlow<List<TrustedDesktopDevice>> =
+        _trustedDevices.asStateFlow()
 
     val settings = settingsStore.settings
 
@@ -160,6 +179,7 @@ class UsageRepository(
             val result = devicePairingClient.pair(rawValue, onWaitingForApproval)
             applyImportedPayload(result.payload)
             trustedDeviceStore.save(result.trustedDevice)
+            publishTrustedDevices()
             refreshConfiguredFlags()
             refreshAll()
 
@@ -195,53 +215,121 @@ class UsageRepository(
         settingsStore.applyDeviceSync(payload)
     }
 
+    suspend fun checkForSync(desktopID: String): Result<DeviceSyncCheckResult> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                trustedDeviceMutex.withLock {
+                    val device = trustedDeviceStore.load()
+                        .firstOrNull {
+                            it.desktopID == desktopID && it.revokedAtEpochMs == null
+                        }
+                        ?: error("This Mac is no longer linked.")
+                    checkTrustedDevice(device)
+                }
+            }.also {
+                publishTrustedDevices()
+                refreshConfiguredFlags()
+            }
+        }
+
+    suspend fun unlinkMac(
+        desktopID: String,
+        removeImportedCredentials: Boolean,
+    ): Result<UnlinkMacResult> = withContext(Dispatchers.IO) {
+        runCatching {
+            trustedDeviceMutex.withLock {
+                val device = trustedDeviceStore.load()
+                    .firstOrNull { it.desktopID == desktopID }
+                    ?: error("This Mac is no longer linked.")
+                val macWasNotified = runCatching {
+                    devicePairingClient.unlink(device)
+                }.isSuccess
+                val credentialsRemoved = removeImportedCredentials &&
+                    credentialsStore.wipeCredentialsImportedFrom(device)
+                trustedDeviceStore.remove(desktopID)
+                publishTrustedDevices()
+                refreshConfiguredFlags()
+                publishWidgets()
+                UnlinkMacResult(
+                    macWasNotified = macWasNotified,
+                    credentialsRemoved = credentialsRemoved,
+                )
+            }
+        }
+    }
+
+    private suspend fun checkTrustedDevice(
+        device: TrustedDesktopDevice,
+    ): DeviceSyncCheckResult {
+        val command = devicePairingClient.checkStatus(device)
+        val now = System.currentTimeMillis() / 1_000
+        require(kotlin.math.abs(now - command.issuedAtEpochSeconds) <= 60) {
+            "The Mac returned a stale device command."
+        }
+        trustedDeviceStore.markChecked(device.desktopID, revoked = false)
+
+        return when (command.action) {
+            "wipe" -> {
+                credentialsStore.wipeCredentialsImportedFrom(device)
+                devicePairingClient.acknowledgeWipe(device)
+                trustedDeviceStore.markChecked(device.desktopID, revoked = true)
+                DeviceSyncCheckResult.UNLINKED_BY_MAC
+            }
+
+            "sync" -> {
+                val syncID = requireNotNull(command.syncID) {
+                    "The Mac sent an invalid sync command."
+                }
+                val envelope = requireNotNull(command.syncEnvelope) {
+                    "The Mac sent no settings to sync."
+                }
+                val payload = devicePairingClient.openSyncPayload(
+                    device,
+                    syncID,
+                    envelope,
+                )
+                applyImportedPayload(payload)
+                trustedDeviceStore.updateCredentialHashes(
+                    device.desktopID,
+                    payload.connections,
+                )
+                trustedDeviceStore.markSettingsSynced(device.desktopID)
+                // This must remain after decrypting and applying the payload.
+                try {
+                    devicePairingClient.acknowledgeSync(device, syncID)
+                } catch (error: Exception) {
+                    throw IllegalStateException(
+                        "Settings were applied, but the Mac could not confirm the acknowledgement. The same update may be offered again.",
+                        error,
+                    )
+                }
+                DeviceSyncCheckResult.SETTINGS_APPLIED
+            }
+
+            "none" -> DeviceSyncCheckResult.UP_TO_DATE
+            else -> error("The Mac returned an unsupported device command.")
+        }
+    }
+
     private suspend fun checkTrustedDevices() {
+        trustedDeviceMutex.withLock {
+            trustedDeviceStore.load()
+                .filter { it.revokedAtEpochMs == null }
+                .forEach { device ->
+                    runCatching { checkTrustedDevice(device) }
+                }
+            publishTrustedDevices()
+            refreshConfiguredFlags()
+        }
+    }
+
+    private fun activeTrustedDevices(): List<TrustedDesktopDevice> =
         trustedDeviceStore.load()
             .filter { it.revokedAtEpochMs == null }
-            .forEach { device ->
-                runCatching {
-                    val command = devicePairingClient.checkStatus(device)
-                    val now = System.currentTimeMillis() / 1_000
-                    require(kotlin.math.abs(now - command.issuedAtEpochSeconds) <= 60) {
-                        "The Mac returned a stale device command."
-                    }
+            .sortedByDescending { it.pairedAtEpochMs }
 
-                    when (command.action) {
-                        "wipe" -> {
-                            credentialsStore.wipeCredentialsImportedFrom(device)
-                            devicePairingClient.acknowledgeWipe(device)
-                            trustedDeviceStore.markChecked(device.desktopID, revoked = true)
-                        }
-
-                        "sync" -> {
-                            val syncID = requireNotNull(command.syncID) {
-                                "The Mac sent an invalid sync command."
-                            }
-                            val envelope = requireNotNull(command.syncEnvelope) {
-                                "The Mac sent no settings to sync."
-                            }
-                            val payload = devicePairingClient.openSyncPayload(
-                                device,
-                                syncID,
-                                envelope,
-                            )
-                            applyImportedPayload(payload)
-                            trustedDeviceStore.updateCredentialHashes(
-                                device.desktopID,
-                                payload.connections,
-                            )
-                            devicePairingClient.acknowledgeSync(device, syncID)
-                            trustedDeviceStore.markChecked(device.desktopID, revoked = false)
-                        }
-
-                        else -> trustedDeviceStore.markChecked(
-                            device.desktopID,
-                            revoked = false,
-                        )
-                    }
-                }
-            }
-        refreshConfiguredFlags()
+    private fun publishTrustedDevices() {
+        _trustedDevices.value = activeTrustedDevices()
     }
 
     suspend fun setPollingMinutes(minutes: Int) = settingsStore.setPollingMinutes(minutes)

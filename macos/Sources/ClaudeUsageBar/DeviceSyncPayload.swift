@@ -148,6 +148,13 @@ struct DeviceSyncAcknowledgement: Codable {
     let proof: String
 }
 
+struct DeviceUnlinkRequest: Codable {
+    let desktopID: String
+    let deviceID: String
+    let timestamp: Int64
+    let proof: String
+}
+
 enum DeviceSyncCrypto {
     static let pairingInfo = Data("agentusagebar-device-pair-v2".utf8)
     static let statusInfo = Data("agentusagebar-device-status-v2".utf8)

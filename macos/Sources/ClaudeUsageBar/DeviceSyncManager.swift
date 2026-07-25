@@ -199,6 +199,8 @@ final class DeviceSyncManager: ObservableObject {
             return handleWipeAcknowledgement(request)
         case ("POST", "/v2/status/sync-ack"):
             return handleSyncAcknowledgement(request)
+        case ("POST", "/v2/unlink"):
+            return handleUnlink(request)
         default:
             return LocalHTTPResponse(status: 404, body: Data())
         }
@@ -448,6 +450,35 @@ final class DeviceSyncManager: ObservableObject {
         devices[index].syncAcknowledgedAt = Date()
         persistDevices()
         return .json(["status": "acknowledged"])
+    }
+
+    private func handleUnlink(_ request: LocalHTTPRequest) -> LocalHTTPResponse {
+        guard let unlink = try? JSONDecoder().decode(
+            DeviceUnlinkRequest.self,
+            from: request.body
+        ),
+        unlink.desktopID == desktopID,
+        abs(Int64(Date().timeIntervalSince1970) - unlink.timestamp) <= 60,
+        let index = devices.firstIndex(where: { $0.id == unlink.deviceID }),
+        let publicKey = Data(base64URLEncoded: devices[index].publicKey),
+        let secret = try? DeviceSyncCrypto.sharedSecret(
+            desktopPrivateKey: privateKey,
+            devicePublicKey: publicKey
+        ) else {
+            return .json(["error": "Unknown device unlink request."], status: 404)
+        }
+        let expectedProof = DeviceSyncCrypto.authenticationProof(
+            sharedSecret: secret,
+            salt: desktopID,
+            info: DeviceSyncCrypto.statusInfo,
+            message: "unlink:\(desktopID):\(unlink.deviceID):\(unlink.timestamp)"
+        )
+        guard unlink.proof == expectedProof else {
+            return .json(["error": "Unlink proof is invalid."], status: 404)
+        }
+        devices.remove(at: index)
+        persistDevices()
+        return .json(["status": "unlinked"])
     }
 
     private func persistDevices() {
