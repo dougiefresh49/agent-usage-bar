@@ -611,9 +611,11 @@ class UsageRepository(
                         else -> null
                     }
                     metrics += UsageMetric(
-                        id = "claude.limit.${
-                            listOfNotNull(limit.kind, model, limit.resetsAt).joinToString(":")
-                        }",
+                        id = UsageMetricPreferences.claudeLimitMetricId(
+                            kind = limit.kind,
+                            modelDisplayName = model,
+                            group = limit.group,
+                        ),
                         label = label,
                         percentUsed = limit.percent,
                         resetsAtEpochMs = parseIso(limit.resetsAt),

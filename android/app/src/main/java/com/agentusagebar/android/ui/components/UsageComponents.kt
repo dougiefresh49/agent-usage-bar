@@ -50,6 +50,9 @@ fun ProviderOverviewGrid(
     selected: UsageProvider,
     onSelect: (UsageProvider) -> Unit,
     columns: Int = 2,
+    preferredProvider: UsageProvider = UsageProvider.CLAUDE,
+    primaryMetric: String = "",
+    secondaryMetric: String = "",
 ) {
     val entries = UsageProvider.entries
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -64,6 +67,8 @@ fun ProviderOverviewGrid(
                         state = state,
                         selected = selected == provider,
                         onClick = { onSelect(provider) },
+                        primaryMetric = if (provider == preferredProvider) primaryMetric else "",
+                        secondaryMetric = if (provider == preferredProvider) secondaryMetric else "",
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -80,6 +85,8 @@ private fun ProviderSummaryCard(
     state: ProviderUsageState,
     selected: Boolean,
     onClick: () -> Unit,
+    primaryMetric: String,
+    secondaryMetric: String,
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(12.dp)
@@ -87,6 +94,12 @@ private fun ProviderSummaryCard(
     else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
     val background = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
     else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    val summaryMetrics = UsageMetricPreferences.resolvedPair(
+        provider = state.provider,
+        primaryID = primaryMetric,
+        secondaryID = secondaryMetric,
+        available = state.metrics,
+    )
 
     Column(
         modifier = modifier
@@ -110,7 +123,7 @@ private fun ProviderSummaryCard(
             state.metrics.all { it.percentUsed == null && it.countValue == null } && state.error != null ->
                 StatusChip("Check account", error = true)
             state.metrics.all { it.percentUsed == null && it.countValue == null } -> StatusChip("Loading…")
-            else -> state.metrics.take(2).forEach { MiniMetricRow(it) }
+            else -> summaryMetrics.take(2).forEach { MiniMetricRow(it) }
         }
     }
 }
@@ -177,22 +190,37 @@ private fun MiniMetricRow(metric: UsageMetric) {
 fun ProviderDetailSection(
     metrics: List<UsageMetric>,
     style: DetailVisualizationStyle,
+    provider: UsageProvider,
+    primaryMetric: String = "",
+    secondaryMetric: String = "",
 ) {
+    val ordered = UsageMetricPreferences.orderedMetrics(
+        provider = provider,
+        primaryID = primaryMetric,
+        secondaryID = secondaryMetric,
+        available = metrics,
+    )
     when (style) {
         DetailVisualizationStyle.ORBIT -> {
-            val ringMetrics = metrics.filter { it.percentUsed != null }.take(2)
-            val legendMetrics = orbitLegendMetrics(metrics)
+            val pair = UsageMetricPreferences.resolvedPair(
+                provider = provider,
+                primaryID = primaryMetric,
+                secondaryID = secondaryMetric,
+                available = metrics,
+            )
+            val ringMetrics = pair.filter { it.percentUsed != null }.take(2)
+            val legendMetrics = orbitLegendMetrics(pair.ifEmpty { ordered })
             if (ringMetrics.isNotEmpty()) {
                 OrbitUsageBlock(ringMetrics = ringMetrics, legendMetrics = legendMetrics)
                 Spacer(modifier = Modifier.height(12.dp))
             }
             val shownIds = (ringMetrics + legendMetrics).map { it.id }.toSet()
-            metrics.filter { it.id !in shownIds }.forEach { metric ->
+            ordered.filter { it.id !in shownIds }.forEach { metric ->
                 UsageMetricRow(metric, style = DetailVisualizationStyle.BARS)
                 Spacer(modifier = Modifier.height(8.dp))
             }
         }
-        else -> metrics.forEach { metric ->
+        else -> ordered.forEach { metric ->
             UsageMetricRow(metric, style = style)
             Spacer(modifier = Modifier.height(8.dp))
         }
@@ -200,10 +228,15 @@ fun ProviderDetailSection(
 }
 
 /**
- * Legend next to the orbit. Prefer a count metric (e.g. OpenAI reset credits) as the
- * second entry when present — matching macOS detail pairing — otherwise the second percent ring.
+ * Legend next to the orbit. Prefer the resolved preference pair when provided; otherwise
+ * fall back to first percent metric + count metric (e.g. OpenAI reset credits).
  */
 fun orbitLegendMetrics(metrics: List<UsageMetric>): List<UsageMetric> {
+    if (metrics.isEmpty()) return emptyList()
+    val preferred = metrics.take(2)
+    if (preferred.size == 2 || preferred.any { it.countValue != null }) {
+        return preferred
+    }
     val percentMetrics = metrics.filter { it.percentUsed != null }
     val primary = percentMetrics.firstOrNull() ?: return metrics.take(2)
     val countMetric = metrics.firstOrNull { it.countValue != null }

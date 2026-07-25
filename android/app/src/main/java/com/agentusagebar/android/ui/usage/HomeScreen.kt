@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.agentusagebar.android.data.model.UsageMetricPreferences
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.ui.components.ProviderDetailSection
 import com.agentusagebar.android.ui.components.ProviderOverviewGrid
@@ -150,6 +151,9 @@ private fun HomeScreen(
                 selected = selected,
                 onSelect = viewModel::selectProvider,
                 columns = appSettings.textSize.overviewColumns,
+                preferredProvider = appSettings.widgetProvider,
+                primaryMetric = appSettings.primaryMetric,
+                secondaryMetric = appSettings.secondaryMetric,
             )
 
             HorizontalDivider()
@@ -237,9 +241,22 @@ private fun HomeScreen(
                 }
 
                 else -> {
+                    val usesPreferredStats = selected == appSettings.widgetProvider
+                    val defaults = UsageMetricPreferences.defaults(selected)
                     ProviderDetailSection(
                         metrics = selectedState.metrics,
                         style = appSettings.detailStyle,
+                        provider = selected,
+                        primaryMetric = if (usesPreferredStats) {
+                            appSettings.primaryMetric
+                        } else {
+                            defaults.first
+                        },
+                        secondaryMetric = if (usesPreferredStats) {
+                            appSettings.secondaryMetric
+                        } else {
+                            defaults.second
+                        },
                     )
                 }
             }

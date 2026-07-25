@@ -296,11 +296,11 @@ object UsageMetricPreferences {
     ): List<UsageMetric> {
         if (available.isEmpty()) return emptyList()
         val defaults = defaults(provider)
-        val primary = available.firstOrNull { it.id == primaryID }
+        val primary = available.firstOrNull { metricIdMatches(primaryID, it.id) }
             ?: available.firstOrNull { it.id == defaults.first }
             ?: available.first()
         val secondary = available.firstOrNull {
-            it.id == secondaryID && it.id != primary.id
+            metricIdMatches(secondaryID, it.id) && it.id != primary.id
         } ?: available.firstOrNull {
             it.id == defaults.second && it.id != primary.id
         } ?: available.firstOrNull { it.id != primary.id }
@@ -316,6 +316,33 @@ object UsageMetricPreferences {
         val pair = resolvedPair(provider, primaryID, secondaryID, available)
         val selectedIDs = pair.mapTo(mutableSetOf()) { it.id }
         return pair + available.filterNot { it.id in selectedIDs }
+    }
+
+    /**
+     * Stable id for Claude scoped model limits (e.g. Fable). Must not include
+     * [ClaudeUsageLimit.resetsAt] — that timestamp changes every window and would
+     * make saved primary/secondary preferences look like they reset to defaults.
+     */
+    fun claudeLimitMetricId(kind: String, modelDisplayName: String, group: String?): String {
+        val safeGroup = group?.takeIf { it.isNotBlank() } ?: "ungrouped"
+        return "claude.limit.$kind:$modelDisplayName:$safeGroup"
+    }
+
+    /**
+     * Match stored preference ids to live metrics. Legacy Claude limit ids appended
+     * `resetsAt` as the final segment; treat kind+model as the stable identity.
+     */
+    fun metricIdMatches(storedID: String, metricID: String): Boolean {
+        if (storedID.isBlank()) return false
+        if (storedID == metricID) return true
+        val prefix = "claude.limit."
+        if (!storedID.startsWith(prefix) || !metricID.startsWith(prefix)) return false
+        val storedParts = storedID.removePrefix(prefix).split(':')
+        val metricParts = metricID.removePrefix(prefix).split(':')
+        return storedParts.size >= 2 &&
+            metricParts.size >= 2 &&
+            storedParts[0] == metricParts[0] &&
+            storedParts[1] == metricParts[1]
     }
 }
 
