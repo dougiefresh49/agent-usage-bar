@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
@@ -11,6 +12,7 @@ import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
 import androidx.glance.Image
 import androidx.glance.ImageProvider
+import androidx.glance.LocalSize
 import androidx.glance.action.Action
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionStartActivity
@@ -19,6 +21,7 @@ import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.LinearProgressIndicator
+import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity as actionStartActivityIntent
@@ -57,6 +60,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlin.math.min
 
 private val WidgetBg = Color(0xFF1C1B1F)
 private val WidgetFg = Color(0xFFFFFFFF)
@@ -70,16 +74,80 @@ private val OrbitOrange = Color(0xFFFF9F0A)
 
 private val widgetScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-enum class OverviewLayout {
-    COMPACT_GRID,
-    DASHBOARD,
+internal enum class ResponsiveOverviewLayout {
     HORIZONTAL,
     VERTICAL,
+    GRID,
+}
+
+internal data class ResponsiveOverviewSpec(
+    val layout: ResponsiveOverviewLayout,
+    val chartSizeDp: Float,
+    val labelFontSizeSp: Float,
+    val showSecondaryMetrics: Boolean,
+    val showActions: Boolean,
+)
+
+internal fun responsiveOverviewSpec(
+    widthDp: Float,
+    heightDp: Float,
+    actionsAvailable: Boolean,
+): ResponsiveOverviewSpec {
+    val width = widthDp.coerceAtLeast(1f)
+    val height = heightDp.coerceAtLeast(1f)
+    val layout = when {
+        height <= 105f || width / height >= 2.25f -> ResponsiveOverviewLayout.HORIZONTAL
+        width <= 100f && height / width >= 1.35f -> ResponsiveOverviewLayout.VERTICAL
+        else -> ResponsiveOverviewLayout.GRID
+    }
+    val showActions = actionsAvailable &&
+        layout == ResponsiveOverviewLayout.GRID &&
+        width >= 220f &&
+        height >= 230f
+    val outerPadding = 6f
+    val itemGap = 2f
+    val captionHeight = 14f
+    val actionSpace = if (showActions) 46f else 0f
+    val contentWidth = (width - outerPadding).coerceAtLeast(1f)
+    val contentHeight = (height - outerPadding - actionSpace).coerceAtLeast(1f)
+    val cellWidth: Float
+    val cellHeight: Float
+    when (layout) {
+        ResponsiveOverviewLayout.HORIZONTAL -> {
+            cellWidth = (contentWidth - itemGap * 3f) / 4f
+            cellHeight = contentHeight
+        }
+        ResponsiveOverviewLayout.VERTICAL -> {
+            cellWidth = contentWidth
+            cellHeight = (contentHeight - itemGap * 3f) / 4f
+        }
+        ResponsiveOverviewLayout.GRID -> {
+            cellWidth = (contentWidth - itemGap) / 2f
+            cellHeight = (contentHeight - itemGap) / 2f
+        }
+    }
+    val chartLimit = if (layout == ResponsiveOverviewLayout.GRID) 160f else 120f
+    val chartSize = min(cellWidth, cellHeight - captionHeight)
+        .coerceIn(24f, chartLimit)
+    return ResponsiveOverviewSpec(
+        layout = layout,
+        chartSizeDp = chartSize,
+        labelFontSizeSp = when {
+            chartSize < 38f -> 7f
+            chartSize < 52f -> 8f
+            chartSize < 72f -> 9f
+            else -> 10f
+        },
+        showSecondaryMetrics = layout == ResponsiveOverviewLayout.GRID && cellWidth >= 108f,
+        showActions = showActions,
+    )
 }
 
 abstract class SnapshotOverviewWidget(
-    private val layout: OverviewLayout,
+    private val actionsAvailable: Boolean = false,
 ) : GlanceAppWidget() {
+    override val sizeMode: SizeMode = SizeMode.Exact
+
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         // Always read the persisted snapshot so all four providers render even if
         // the activity process is cold.
@@ -98,7 +166,8 @@ abstract class SnapshotOverviewWidget(
                     preferredProvider = settings.widgetProvider,
                     primaryMetric = settings.primaryMetric,
                     secondaryMetric = settings.secondaryMetric,
-                    layout = layout,
+                    size = LocalSize.current,
+                    actionsAvailable = actionsAvailable,
                     openAppAction = openAppAction,
                     openSettingsAction = openSettingsAction,
                 )
@@ -107,13 +176,13 @@ abstract class SnapshotOverviewWidget(
     }
 }
 
-class OverviewWidget : SnapshotOverviewWidget(OverviewLayout.COMPACT_GRID)
+class OverviewWidget : SnapshotOverviewWidget()
 
-class DashboardWidget : SnapshotOverviewWidget(OverviewLayout.DASHBOARD)
+class DashboardWidget : SnapshotOverviewWidget(actionsAvailable = true)
 
-class HorizontalWidget : SnapshotOverviewWidget(OverviewLayout.HORIZONTAL)
+class HorizontalWidget : SnapshotOverviewWidget()
 
-class VerticalWidget : SnapshotOverviewWidget(OverviewLayout.VERTICAL)
+class VerticalWidget : SnapshotOverviewWidget()
 
 class ProviderWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
@@ -144,7 +213,8 @@ private fun OverviewWidgetContent(
     preferredProvider: UsageProvider,
     primaryMetric: String,
     secondaryMetric: String,
-    layout: OverviewLayout,
+    size: DpSize,
+    actionsAvailable: Boolean,
     openAppAction: Action,
     openSettingsAction: Action,
 ) {
@@ -154,37 +224,34 @@ private fun OverviewWidgetContent(
         UsageProvider.CURSOR,
         UsageProvider.ELEVENLABS,
     ).map { providers[it] ?: ProviderUsageState(it, false) }
+    val spec = responsiveOverviewSpec(
+        widthDp = size.width.value,
+        heightDp = size.height.value,
+        actionsAvailable = actionsAvailable,
+    )
 
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
             .cornerRadius(20.dp)
             .background(ColorProvider(WidgetBg))
-            .padding(
-                horizontal = if (layout == OverviewLayout.VERTICAL) 4.dp else 10.dp,
-                vertical = if (
-                    layout == OverviewLayout.HORIZONTAL || layout == OverviewLayout.VERTICAL
-                ) {
-                    4.dp
-                } else {
-                    8.dp
-                },
-            )
+            .padding(3.dp)
             .clickable(openAppAction),
     ) {
-        when (layout) {
-            OverviewLayout.COMPACT_GRID,
-            OverviewLayout.DASHBOARD,
-            -> OverviewGrid(
+        when (spec.layout) {
+            ResponsiveOverviewLayout.GRID -> OverviewGrid(
                 states = states,
                 style = style,
                 preferredProvider = preferredProvider,
                 primaryMetric = primaryMetric,
                 secondaryMetric = secondaryMetric,
+                chartSizeDp = spec.chartSizeDp,
+                labelFontSizeSp = spec.labelFontSizeSp,
+                showSecondaryMetrics = spec.showSecondaryMetrics,
                 modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
             )
 
-            OverviewLayout.HORIZONTAL -> Row(
+            ResponsiveOverviewLayout.HORIZONTAL -> Row(
                 modifier = GlanceModifier.fillMaxSize(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -195,13 +262,15 @@ private fun OverviewWidgetContent(
                         preferredProvider,
                         primaryMetric,
                         secondaryMetric,
-                        GlanceModifier.defaultWeight().fillMaxHeight(),
+                        chartSizeDp = spec.chartSizeDp,
+                        labelFontSizeSp = spec.labelFontSizeSp,
+                        modifier = GlanceModifier.defaultWeight().fillMaxHeight(),
                     )
-                    if (index != states.lastIndex) Spacer(GlanceModifier.width(4.dp))
+                    if (index != states.lastIndex) Spacer(GlanceModifier.width(2.dp))
                 }
             }
 
-            OverviewLayout.VERTICAL -> Column(
+            ResponsiveOverviewLayout.VERTICAL -> Column(
                 modifier = GlanceModifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -212,15 +281,17 @@ private fun OverviewWidgetContent(
                         preferredProvider,
                         primaryMetric,
                         secondaryMetric,
-                        GlanceModifier.defaultWeight().fillMaxWidth(),
+                        chartSizeDp = spec.chartSizeDp,
+                        labelFontSizeSp = spec.labelFontSizeSp,
+                        modifier = GlanceModifier.defaultWeight().fillMaxWidth(),
                     )
-                    if (index != states.lastIndex) Spacer(GlanceModifier.height(4.dp))
+                    if (index != states.lastIndex) Spacer(GlanceModifier.height(2.dp))
                 }
             }
         }
 
-        if (layout == OverviewLayout.DASHBOARD) {
-            Spacer(GlanceModifier.height(8.dp))
+        if (spec.showActions) {
+            Spacer(GlanceModifier.height(4.dp))
             QuickActions(
                 openSettingsAction = openSettingsAction,
                 refreshAction = actionRunCallback<RefreshWidgetAction>(),
@@ -236,6 +307,9 @@ private fun OverviewGrid(
     preferredProvider: UsageProvider,
     primaryMetric: String,
     secondaryMetric: String,
+    chartSizeDp: Float,
+    labelFontSizeSp: Float,
+    showSecondaryMetrics: Boolean,
     modifier: GlanceModifier,
 ) {
     Column(modifier = modifier) {
@@ -250,12 +324,15 @@ private fun OverviewGrid(
                     preferredProvider,
                     primaryMetric,
                     secondaryMetric,
+                    chartSizeDp,
+                    labelFontSizeSp,
+                    showSecondaryMetrics,
                     GlanceModifier.defaultWeight().fillMaxHeight(),
                 )
-                if (index == 0) Spacer(GlanceModifier.width(8.dp))
+                if (index == 0) Spacer(GlanceModifier.width(2.dp))
             }
         }
-        Spacer(GlanceModifier.height(4.dp))
+        Spacer(GlanceModifier.height(2.dp))
         Row(
             modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
             verticalAlignment = Alignment.CenterVertically,
@@ -267,9 +344,12 @@ private fun OverviewGrid(
                     preferredProvider,
                     primaryMetric,
                     secondaryMetric,
+                    chartSizeDp,
+                    labelFontSizeSp,
+                    showSecondaryMetrics,
                     GlanceModifier.defaultWeight().fillMaxHeight(),
                 )
-                if (index == 0) Spacer(GlanceModifier.width(8.dp))
+                if (index == 0) Spacer(GlanceModifier.width(2.dp))
             }
         }
     }
@@ -282,6 +362,9 @@ private fun OverviewCell(
     preferredProvider: UsageProvider,
     primaryMetric: String,
     secondaryMetric: String,
+    chartSizeDp: Float,
+    labelFontSizeSp: Float,
+    showSecondaryMetrics: Boolean,
     modifier: GlanceModifier,
 ) {
     val pair = overviewMetricPair(
@@ -301,7 +384,7 @@ private fun OverviewCell(
             val label = compactRemainingTime(primary.resetsAtEpochMs) ?: "—"
             val countdown = countdownProgress(primary.resetsAtEpochMs, primary.resetIntervalMs)
             val bitmap = OrbitBitmapRenderer.render(
-                sizePx = 280,
+                sizePx = orbitBitmapSize(chartSizeDp),
                 primaryPercent = primary.percentUsed,
                 secondaryPercent = secondary?.percentUsed,
                 centerLabel = label.take(7),
@@ -310,19 +393,33 @@ private fun OverviewCell(
             Image(
                 provider = ImageProvider(bitmap),
                 contentDescription = state.provider.shortName,
-                modifier = GlanceModifier.size(80.dp),
+                modifier = GlanceModifier.size(chartSizeDp.dp),
+            )
+            ProviderValueRow(
+                state = state,
+                primary = primary,
+                secondary = secondary,
+                fontSizeSp = labelFontSizeSp,
+                includeSecondary = showSecondaryMetrics,
+            )
+        } else {
+            ProviderValueRow(
+                state = state,
+                primary = primary,
+                secondary = secondary,
+                fontSizeSp = labelFontSizeSp,
+                includeSecondary = showSecondaryMetrics,
             )
             Spacer(GlanceModifier.height(2.dp))
-            ProviderValueRow(state, primary, secondary)
-        } else {
-            ProviderValueRow(state, primary, secondary)
-            Spacer(GlanceModifier.height(5.dp))
             UsageBarGlance(primary?.percentUsed)
-            secondary?.let {
-                Spacer(GlanceModifier.height(3.dp))
+            secondary?.takeIf { showSecondaryMetrics }?.let {
+                Spacer(GlanceModifier.height(2.dp))
                 Text(
                     text = it.displayValue,
-                    style = TextStyle(color = ColorProvider(WidgetMuted), fontSize = 10.sp),
+                    style = TextStyle(
+                        color = ColorProvider(WidgetMuted),
+                        fontSize = labelFontSizeSp.sp,
+                    ),
                     maxLines = 1,
                 )
             }
@@ -335,6 +432,8 @@ private fun ProviderValueRow(
     state: ProviderUsageState,
     primary: UsageMetric?,
     secondary: UsageMetric?,
+    fontSizeSp: Float,
+    includeSecondary: Boolean,
 ) {
     val value = when {
         !state.isConfigured -> "Connect"
@@ -342,7 +441,9 @@ private fun ProviderValueRow(
         else -> listOfNotNull(
             primary.displayValue,
             secondary
-                ?.takeIf { it.percentUsed != null || it.countValue != null }
+                ?.takeIf {
+                    includeSecondary && (it.percentUsed != null || it.countValue != null)
+                }
                 ?.displayValue,
         ).joinToString(" · ")
     }
@@ -352,7 +453,10 @@ private fun ProviderValueRow(
     ) {
         Text(
             text = state.provider.shortName,
-            style = TextStyle(color = ColorProvider(WidgetMuted), fontSize = 10.sp),
+            style = TextStyle(
+                color = ColorProvider(WidgetMuted),
+                fontSize = fontSizeSp.sp,
+            ),
             maxLines = 1,
             modifier = GlanceModifier.defaultWeight(),
         )
@@ -360,7 +464,7 @@ private fun ProviderValueRow(
             text = value,
             style = TextStyle(
                 color = ColorProvider(WidgetFg),
-                fontSize = 10.sp,
+                fontSize = fontSizeSp.sp,
                 fontWeight = FontWeight.Medium,
             ),
             maxLines = 1,
@@ -375,6 +479,8 @@ private fun StripOverviewCell(
     preferredProvider: UsageProvider,
     primaryMetric: String,
     secondaryMetric: String,
+    chartSizeDp: Float,
+    labelFontSizeSp: Float,
     modifier: GlanceModifier,
 ) {
     val pair = overviewMetricPair(state, preferredProvider, primaryMetric, secondaryMetric)
@@ -389,7 +495,7 @@ private fun StripOverviewCell(
         if (style == DetailVisualizationStyle.ORBIT && primary?.percentUsed != null) {
             val label = compactRemainingTime(primary.resetsAtEpochMs) ?: "—"
             val bitmap = OrbitBitmapRenderer.render(
-                sizePx = 180,
+                sizePx = orbitBitmapSize(chartSizeDp),
                 primaryPercent = primary.percentUsed,
                 secondaryPercent = secondary?.percentUsed,
                 centerLabel = label.take(6),
@@ -401,28 +507,35 @@ private fun StripOverviewCell(
             Image(
                 provider = ImageProvider(bitmap),
                 contentDescription = state.provider.shortName,
-                modifier = GlanceModifier.size(46.dp),
+                modifier = GlanceModifier.size(chartSizeDp.dp),
             )
         } else {
             Text(
                 text = primary?.displayValue ?: if (state.isConfigured) "…" else "Connect",
                 style = TextStyle(
                     color = ColorProvider(WidgetFg),
-                    fontSize = 11.sp,
+                    fontSize = labelFontSizeSp.sp,
                     fontWeight = FontWeight.Medium,
                 ),
                 maxLines = 1,
             )
-            Spacer(GlanceModifier.height(3.dp))
+            Spacer(GlanceModifier.height(2.dp))
             UsageBarGlance(primary?.percentUsed)
-            Spacer(GlanceModifier.height(3.dp))
+            Spacer(GlanceModifier.height(2.dp))
         }
         Text(
             text = stripCaption(state, primary),
-            style = TextStyle(color = ColorProvider(WidgetMuted), fontSize = 9.sp),
+            style = TextStyle(
+                color = ColorProvider(WidgetMuted),
+                fontSize = labelFontSizeSp.sp,
+            ),
             maxLines = 1,
         )
     }
+}
+
+private fun orbitBitmapSize(chartSizeDp: Float): Int {
+    return (chartSizeDp * 4f).toInt().coerceIn(128, 640)
 }
 
 private fun overviewMetricPair(
