@@ -118,6 +118,8 @@ data class DeviceEncryptedEnvelope(
 data class DeviceStatusCommand(
     val action: String,
     val issuedAtEpochSeconds: Long,
+    val syncID: String? = null,
+    val syncEnvelope: DeviceEncryptedEnvelope? = null,
 )
 
 @Serializable
@@ -128,9 +130,19 @@ data class DeviceWipeAcknowledgement(
     val proof: String,
 )
 
+@Serializable
+data class DeviceSyncAcknowledgement(
+    val desktopID: String,
+    val deviceID: String,
+    val syncID: String,
+    val timestamp: Long,
+    val proof: String,
+)
+
 object DeviceSyncCodec {
     const val PAIRING_INFO = "agentusagebar-device-pair-v2"
     const val STATUS_INFO = "agentusagebar-device-status-v2"
+    const val RESYNC_INFO = "agentusagebar-device-resync-v1"
     const val CURRENT_PAIRING_VERSION = 2
     const val CURRENT_PAYLOAD_VERSION = 1
 
@@ -173,6 +185,16 @@ object DeviceSyncCodec {
         }
         require(payload.expiresAtEpochSeconds >= nowSeconds) {
             "The pairing transfer expired. Generate a new code on your Mac."
+        }
+        return payload
+    }
+
+    fun decodeResyncPayload(data: ByteArray): DeviceSyncPayload {
+        val payload = runCatching {
+            json.decodeFromString<DeviceSyncPayload>(data.toString(Charsets.UTF_8))
+        }.getOrElse { throw IllegalArgumentException("The synced settings are damaged.") }
+        require(payload.version == CURRENT_PAYLOAD_VERSION) {
+            "Update Agent Usage Bar to import these settings."
         }
         return payload
     }
