@@ -182,3 +182,19 @@ cd android && python3 -m http.server 8765
 3. Open the downloaded APK → Install (allow “Install unknown apps” for Chrome/Files if prompted).
 
 There is no silent OTA for a local debug build unless you add something like Firebase App Distribution later.
+
+### C. Install signed GitHub releases
+
+Tag-driven Android releases publish `AgentUsageBar.apk` on the repository's
+GitHub Releases page. Every release is signed with the same private release key,
+so installing a newer APK updates an existing release installation in place as
+long as its `versionCode` is higher.
+
+The local debug app uses `com.agentusagebar.android.debug`, while the signed
+release app uses `com.agentusagebar.android`. The first signed release therefore
+installs alongside an existing debug build. Configure or pair the release app
+once, then remove the debug app when it is no longer needed.
+
+The release keystore and passwords are stored only as GitHub Actions secrets.
+Never commit `.jks`, `.keystore`, or `.p12` files to the repository. Losing the
+release keystore prevents publishing compatible updates to existing installs.

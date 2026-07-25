@@ -21,3 +21,6 @@ android/captures/
 *.apk
 *.ap_
 *.dex
+*.jks
+*.keystore
+*.p12
