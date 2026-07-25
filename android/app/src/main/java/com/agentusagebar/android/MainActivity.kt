@@ -17,15 +17,27 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val initialDestination = if (intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false)) {
+            "settings"
+        } else {
+            "home"
+        }
         setContent {
             AgentUsageBarTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val viewModel: UsageViewModel = viewModel(
                         factory = UsageViewModelFactory(AgentUsageBarApp.instance.repository),
                     )
-                    UsageApp(viewModel = viewModel)
+                    UsageApp(
+                        viewModel = viewModel,
+                        initialDestination = initialDestination,
+                    )
                 }
             }
         }
+    }
+
+    companion object {
+        const val EXTRA_OPEN_SETTINGS = "com.agentusagebar.android.extra.OPEN_SETTINGS"
     }
 }

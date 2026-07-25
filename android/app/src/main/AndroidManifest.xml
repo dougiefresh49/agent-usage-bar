@@ -43,6 +43,42 @@
         </receiver>
 
         <receiver
+            android:name=".widget.DashboardWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_dashboard_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/dashboard_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.HorizontalWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_horizontal_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/horizontal_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.VerticalWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_vertical_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/vertical_widget_info" />
+        </receiver>
+
+        <receiver
             android:name=".widget.ProviderWidgetReceiver"
             android:exported="true"
             android:label="@string/widget_provider_label">
