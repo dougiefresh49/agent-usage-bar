@@ -262,7 +262,7 @@ private struct AddDeviceSheet: View {
                 Toggle("Notification thresholds", isOn: $syncNotifications)
             }
 
-            Section("Connections") {
+            Section("Providers") {
                 connectionToggle(
                     "OpenAI / Codex session",
                     isOn: $syncOpenAI,

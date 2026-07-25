@@ -3,7 +3,7 @@ import ServiceManagement
 
 private enum SettingsTab: Hashable {
     case general
-    case connections
+    case providers
     case appearance
     case notifications
     case devices
@@ -38,9 +38,9 @@ struct SettingsWindowContent: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
                 .tag(SettingsTab.general)
 
-            connectionsTab
-                .tabItem { Label("Connections", systemImage: "link") }
-                .tag(SettingsTab.connections)
+            providersTab
+                .tabItem { Label("Providers", systemImage: "cpu") }
+                .tag(SettingsTab.providers)
 
             appearanceTab
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
@@ -156,9 +156,9 @@ struct SettingsWindowContent: View {
         .formStyle(.grouped)
     }
 
-    // MARK: - Connections
+    // MARK: - Providers
 
-    private var connectionsTab: some View {
+    private var providersTab: some View {
         Form {
             Section("OpenAI / Codex") {
                 Text("Use the bearer token from the Authorization header of a ChatGPT usage request. OpenAI API keys do not expose ChatGPT subscription limits.")
@@ -272,7 +272,7 @@ struct SettingsWindowContent: View {
                 && !connectedService.isOpenAIConfigured
                 && !connectedService.isCursorConfigured {
                 Section {
-                    Text("Connect a provider in Connections to configure alert thresholds.")
+                    Text("Connect a provider in Providers to configure alert thresholds.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

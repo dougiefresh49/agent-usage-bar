@@ -16,10 +16,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Devices
-import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -75,7 +75,7 @@ import java.time.format.FormatStyle
 
 private enum class SettingsTab(val title: String, val icon: ImageVector) {
     General("General", Icons.Outlined.Settings),
-    Connections("Connections", Icons.Outlined.Link),
+    Providers("Providers", Icons.Outlined.SmartToy),
     Appearance("Appearance", Icons.Outlined.Palette),
     Notifications("Notifications", Icons.Outlined.Notifications),
     Devices("Devices", Icons.Outlined.Devices),
@@ -241,7 +241,7 @@ fun SettingsScreen(
                         )
                     }
 
-                    SettingsTab.Connections -> {
+                    SettingsTab.Providers -> {
                         Text("OpenAI / Codex", style = MaterialTheme.typography.titleMedium)
                         Text(
                             "Paste the bearer token from the Authorization header of a ChatGPT usage request.",
@@ -458,7 +458,7 @@ fun SettingsScreen(
 
                         if (!claudeConnected && !openAIConnected && !cursorConnected && !elevenConnected) {
                             Text(
-                                "Connect a provider in the Connections tab to configure alerts.",
+                                "Connect a provider in the Providers tab to configure alerts.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -568,7 +568,7 @@ fun SettingsScreen(
                             }
                         }
                         Text(
-                            "Imported connection secrets are saved in Android's encrypted app storage. Claude sign-in stays device-specific.",
+                            "Imported provider credentials are saved in Android's encrypted app storage. Claude sign-in stays device-specific.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

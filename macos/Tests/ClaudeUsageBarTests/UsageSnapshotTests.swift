@@ -87,6 +87,36 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(metrics.first?.percentUsed, 28)
     }
 
+    func testInactiveClaudeSessionClearsResetBeforeWidgetSnapshot() {
+        let previous = UsageResponse(
+            fiveHour: UsageBucket(
+                utilization: 28,
+                resetsAt: "2026-03-05T18:00:00Z"
+            ),
+            sevenDay: nil,
+            sevenDayOpus: nil,
+            sevenDaySonnet: nil,
+            extraUsage: nil
+        )
+        let current = UsageResponse(
+            fiveHour: UsageBucket(utilization: 0, resetsAt: nil),
+            sevenDay: nil,
+            sevenDayOpus: nil,
+            sevenDaySonnet: nil,
+            extraUsage: nil
+        )
+
+        let reconciled = current.reconciled(
+            with: previous,
+            now: Date(timeIntervalSince1970: 1_772_731_000)
+        )
+        let metrics = UsageSnapshotStore.claudeMetrics(for: reconciled)
+
+        XCTAssertEqual(metrics.first?.id, "five_hour")
+        XCTAssertEqual(metrics.first?.percentUsed, 0)
+        XCTAssertNil(metrics.first?.resetsAt)
+    }
+
     func testMirrorsSnapshotAndAppearancePreferencesForWidget() throws {
         let widgetDirectory = directory.appendingPathComponent("Widget")
         defaults.set("elevenLabs", forKey: UsagePresentationDefaults.menuBarProviderKey)

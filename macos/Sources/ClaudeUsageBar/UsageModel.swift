@@ -38,6 +38,7 @@ struct UsageResponse: Codable {
             fiveHour: fiveHour?.reconciled(
                 with: previous?.fiveHour,
                 resetInterval: 5 * 60 * 60,
+                allowsResetRollover: false,
                 now: now
             ),
             sevenDay: sevenDay?.reconciled(
@@ -135,9 +136,20 @@ struct UsageBucket: Codable {
         Self.parseResetDate(from: resetsAt)
     }
 
-    func reconciled(with previous: UsageBucket?, resetInterval: TimeInterval, now: Date) -> UsageBucket {
+    func reconciled(
+        with previous: UsageBucket?,
+        resetInterval: TimeInterval,
+        allowsResetRollover: Bool = true,
+        now: Date
+    ) -> UsageBucket {
         guard resetsAtDate == nil else { return self }
         guard let previousDate = previous?.resetsAtDate else { return self }
+
+        if !allowsResetRollover {
+            guard utilization.map({ $0 > 0 }) == true, previousDate > now else {
+                return self
+            }
+        }
 
         let resolvedDate = Self.nextResetDate(
             from: previousDate,
