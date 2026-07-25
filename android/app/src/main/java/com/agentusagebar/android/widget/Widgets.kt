@@ -447,10 +447,10 @@ private fun ProviderValueRow(
                 ?.displayValue,
         ).joinToString(" · ")
     }
-    Row(
-        modifier = GlanceModifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    // Keep the name + value as a compact centered group under the chart.
+    // Filling the cell width (and weighting the name) pushes values to the
+    // outer edges as the widget grows, which clips on the right column.
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = state.provider.shortName,
             style = TextStyle(
@@ -458,8 +458,8 @@ private fun ProviderValueRow(
                 fontSize = fontSizeSp.sp,
             ),
             maxLines = 1,
-            modifier = GlanceModifier.defaultWeight(),
         )
+        Spacer(GlanceModifier.width(4.dp))
         Text(
             text = value,
             style = TextStyle(
