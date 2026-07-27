@@ -307,6 +307,16 @@ object UsageMetricPreferences {
         return listOfNotNull(primary, secondary)
     }
 
+    fun resolvedMetric(
+        storedID: String,
+        fallbackID: String,
+        available: List<UsageMetric>,
+    ): UsageMetric? {
+        return available.firstOrNull { metricIdMatches(storedID, it.id) }
+            ?: available.firstOrNull { it.id == fallbackID }
+            ?: available.firstOrNull()
+    }
+
     fun orderedMetrics(
         provider: UsageProvider,
         primaryID: String,

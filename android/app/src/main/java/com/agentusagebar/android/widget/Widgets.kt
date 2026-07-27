@@ -166,6 +166,8 @@ abstract class SnapshotOverviewWidget(
                     preferredProvider = settings.widgetProvider,
                     primaryMetric = settings.primaryMetric,
                     secondaryMetric = settings.secondaryMetric,
+                    claudeOrbitCenterMetric = settings.claudeWidgetOrbitCenterMetric,
+                    claudeDisplayMetric = settings.claudeWidgetDisplayMetric,
                     size = LocalSize.current,
                     actionsAvailable = actionsAvailable,
                     openAppAction = openAppAction,
@@ -200,7 +202,11 @@ class ProviderWidget : GlanceAppWidget() {
         )
         provideContent {
             GlanceTheme {
-                ProviderWidgetContent(state = orderedState, style = settings.detailStyle)
+                ProviderWidgetContent(
+                    state = orderedState,
+                    style = settings.detailStyle,
+                    claudeOrbitCenterMetric = settings.claudeWidgetOrbitCenterMetric,
+                )
             }
         }
     }
@@ -213,6 +219,8 @@ private fun OverviewWidgetContent(
     preferredProvider: UsageProvider,
     primaryMetric: String,
     secondaryMetric: String,
+    claudeOrbitCenterMetric: String,
+    claudeDisplayMetric: String,
     size: DpSize,
     actionsAvailable: Boolean,
     openAppAction: Action,
@@ -245,6 +253,8 @@ private fun OverviewWidgetContent(
                 preferredProvider = preferredProvider,
                 primaryMetric = primaryMetric,
                 secondaryMetric = secondaryMetric,
+                claudeOrbitCenterMetric = claudeOrbitCenterMetric,
+                claudeDisplayMetric = claudeDisplayMetric,
                 chartSizeDp = spec.chartSizeDp,
                 labelFontSizeSp = spec.labelFontSizeSp,
                 showSecondaryMetrics = spec.showSecondaryMetrics,
@@ -262,6 +272,8 @@ private fun OverviewWidgetContent(
                         preferredProvider,
                         primaryMetric,
                         secondaryMetric,
+                        claudeOrbitCenterMetric,
+                        claudeDisplayMetric,
                         chartSizeDp = spec.chartSizeDp,
                         labelFontSizeSp = spec.labelFontSizeSp,
                         modifier = GlanceModifier.defaultWeight().fillMaxHeight(),
@@ -281,6 +293,8 @@ private fun OverviewWidgetContent(
                         preferredProvider,
                         primaryMetric,
                         secondaryMetric,
+                        claudeOrbitCenterMetric,
+                        claudeDisplayMetric,
                         chartSizeDp = spec.chartSizeDp,
                         labelFontSizeSp = spec.labelFontSizeSp,
                         modifier = GlanceModifier.defaultWeight().fillMaxWidth(),
@@ -307,6 +321,8 @@ private fun OverviewGrid(
     preferredProvider: UsageProvider,
     primaryMetric: String,
     secondaryMetric: String,
+    claudeOrbitCenterMetric: String,
+    claudeDisplayMetric: String,
     chartSizeDp: Float,
     labelFontSizeSp: Float,
     showSecondaryMetrics: Boolean,
@@ -324,6 +340,8 @@ private fun OverviewGrid(
                     preferredProvider,
                     primaryMetric,
                     secondaryMetric,
+                    claudeOrbitCenterMetric,
+                    claudeDisplayMetric,
                     chartSizeDp,
                     labelFontSizeSp,
                     showSecondaryMetrics,
@@ -344,6 +362,8 @@ private fun OverviewGrid(
                     preferredProvider,
                     primaryMetric,
                     secondaryMetric,
+                    claudeOrbitCenterMetric,
+                    claudeDisplayMetric,
                     chartSizeDp,
                     labelFontSizeSp,
                     showSecondaryMetrics,
@@ -362,6 +382,8 @@ private fun OverviewCell(
     preferredProvider: UsageProvider,
     primaryMetric: String,
     secondaryMetric: String,
+    claudeOrbitCenterMetric: String,
+    claudeDisplayMetric: String,
     chartSizeDp: Float,
     labelFontSizeSp: Float,
     showSecondaryMetrics: Boolean,
@@ -375,14 +397,28 @@ private fun OverviewCell(
     )
     val primary = pair.getOrNull(0)
     val secondary = pair.getOrNull(1)
+    val orbitCenter = claudeWidgetMetric(
+        state = state,
+        metricID = claudeOrbitCenterMetric,
+        fallback = primary,
+    )
+    val displayMetric = claudeWidgetMetric(
+        state = state,
+        metricID = claudeDisplayMetric,
+        fallback = primary,
+    )
+    val displaySecondary = secondary?.takeIf { it.id != displayMetric?.id }
     Column(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         if (style == DetailVisualizationStyle.ORBIT && primary?.percentUsed != null) {
-            val label = compactRemainingTime(primary.resetsAtEpochMs) ?: "—"
-            val countdown = countdownProgress(primary.resetsAtEpochMs, primary.resetIntervalMs)
+            val label = compactRemainingTime(orbitCenter?.resetsAtEpochMs) ?: "—"
+            val countdown = countdownProgress(
+                orbitCenter?.resetsAtEpochMs,
+                orbitCenter?.resetIntervalMs,
+            )
             val bitmap = OrbitBitmapRenderer.render(
                 sizePx = orbitBitmapSize(chartSizeDp),
                 primaryPercent = primary.percentUsed,
@@ -397,8 +433,8 @@ private fun OverviewCell(
             )
             ProviderValueRow(
                 state = state,
-                primary = primary,
-                secondary = secondary,
+                primary = displayMetric,
+                secondary = displaySecondary,
                 fontSizeSp = labelFontSizeSp,
                 includeSecondary = showSecondaryMetrics,
             )
@@ -479,6 +515,8 @@ private fun StripOverviewCell(
     preferredProvider: UsageProvider,
     primaryMetric: String,
     secondaryMetric: String,
+    claudeOrbitCenterMetric: String,
+    claudeDisplayMetric: String,
     chartSizeDp: Float,
     labelFontSizeSp: Float,
     modifier: GlanceModifier,
@@ -486,6 +524,16 @@ private fun StripOverviewCell(
     val pair = overviewMetricPair(state, preferredProvider, primaryMetric, secondaryMetric)
     val primary = pair.getOrNull(0)
     val secondary = pair.getOrNull(1)
+    val orbitCenter = claudeWidgetMetric(
+        state = state,
+        metricID = claudeOrbitCenterMetric,
+        fallback = primary,
+    )
+    val displayMetric = claudeWidgetMetric(
+        state = state,
+        metricID = claudeDisplayMetric,
+        fallback = primary,
+    )
 
     Column(
         modifier = modifier,
@@ -493,15 +541,15 @@ private fun StripOverviewCell(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         if (style == DetailVisualizationStyle.ORBIT && primary?.percentUsed != null) {
-            val label = compactRemainingTime(primary.resetsAtEpochMs) ?: "—"
+            val label = compactRemainingTime(orbitCenter?.resetsAtEpochMs) ?: "—"
             val bitmap = OrbitBitmapRenderer.render(
                 sizePx = orbitBitmapSize(chartSizeDp),
                 primaryPercent = primary.percentUsed,
                 secondaryPercent = secondary?.percentUsed,
                 centerLabel = label.take(6),
                 countdownFraction = countdownProgress(
-                    primary.resetsAtEpochMs,
-                    primary.resetIntervalMs,
+                    orbitCenter?.resetsAtEpochMs,
+                    orbitCenter?.resetIntervalMs,
                 ),
             )
             Image(
@@ -524,7 +572,10 @@ private fun StripOverviewCell(
             Spacer(GlanceModifier.height(2.dp))
         }
         Text(
-            text = stripCaption(state, primary),
+            text = stripCaption(
+                state,
+                if (style == DetailVisualizationStyle.ORBIT) displayMetric else primary,
+            ),
             style = TextStyle(
                 color = ColorProvider(WidgetMuted),
                 fontSize = labelFontSizeSp.sp,
@@ -550,6 +601,19 @@ private fun overviewMetricPair(
         secondaryID = if (state.provider == preferredProvider) secondaryMetric else "",
         available = state.metrics,
     )
+}
+
+internal fun claudeWidgetMetric(
+    state: ProviderUsageState,
+    metricID: String,
+    fallback: UsageMetric?,
+): UsageMetric? {
+    if (state.provider != UsageProvider.CLAUDE) return fallback
+    return UsageMetricPreferences.resolvedMetric(
+        storedID = metricID,
+        fallbackID = UsageMetricPreferences.CLAUDE_FIVE_HOUR,
+        available = state.metrics,
+    ) ?: fallback
 }
 
 private fun stripCaption(state: ProviderUsageState, primary: UsageMetric?): String {
@@ -627,6 +691,7 @@ private fun QuickAction(
 private fun ProviderWidgetContent(
     state: ProviderUsageState,
     style: DetailVisualizationStyle,
+    claudeOrbitCenterMetric: String,
 ) {
     Column(
         modifier = GlanceModifier
@@ -663,8 +728,16 @@ private fun ProviderWidgetContent(
                 val legendMetrics = orbitLegendMetrics(state.metrics)
                 val primary = ringMetrics.getOrNull(0)
                 val secondary = ringMetrics.getOrNull(1)
-                val center = compactRemainingTime(primary?.resetsAtEpochMs) ?: "—"
-                val countdown = countdownProgress(primary?.resetsAtEpochMs, primary?.resetIntervalMs)
+                val orbitCenter = claudeWidgetMetric(
+                    state = state,
+                    metricID = claudeOrbitCenterMetric,
+                    fallback = primary,
+                )
+                val center = compactRemainingTime(orbitCenter?.resetsAtEpochMs) ?: "—"
+                val countdown = countdownProgress(
+                    orbitCenter?.resetsAtEpochMs,
+                    orbitCenter?.resetIntervalMs,
+                )
                 val bitmap = OrbitBitmapRenderer.render(
                     sizePx = 320,
                     primaryPercent = primary?.percentUsed,

@@ -350,6 +350,16 @@ class UsageRepository(
         publishWidgets()
     }
 
+    suspend fun setClaudeWidgetOrbitCenterMetric(metricID: String) {
+        settingsStore.setClaudeWidgetOrbitCenterMetric(metricID)
+        publishWidgets()
+    }
+
+    suspend fun setClaudeWidgetDisplayMetric(metricID: String) {
+        settingsStore.setClaudeWidgetDisplayMetric(metricID)
+        publishWidgets()
+    }
+
     suspend fun setDetailStyle(style: com.agentusagebar.android.data.model.DetailVisualizationStyle) {
         settingsStore.setDetailStyle(style)
         publishWidgets()
