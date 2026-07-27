@@ -1,8 +1,8 @@
-name: Version bump
+name: Version bump macOS
 
 on:
   workflow_run:
-    workflows: [Build]
+    workflows: [Build macOS]
     types: [completed]
     branches: [main]
 
@@ -12,18 +12,18 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: version-bump-main
+  group: version-bump-macos-main
   cancel-in-progress: false
 
 jobs:
   bump:
-    name: Create version tag
+    name: Create macOS version tag
     if: >
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
@@ -56,25 +56,10 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Skip empty release window
+      - name: Skip empty or cross-platform release window
         id: guard
         if: steps.tip.outputs.skip != 'true' && steps.pr.outputs.skip != 'true'
-        run: |
-          LAST_TAG="$(git tag --list 'v*' --sort=-v:refname | head -n 1 || true)"
-          if [ -z "$LAST_TAG" ]; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "No existing version tags; continuing."
-            exit 0
-          fi
-
-          COMMITS="$(git log "${LAST_TAG}..HEAD" --oneline | wc -l | tr -d ' ')"
-          if [ "$COMMITS" = "0" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "No commits since ${LAST_TAG}; skipping tag."
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Found ${COMMITS} commit(s) since ${LAST_TAG}."
-          fi
+        run: bash scripts/platform-changes.sh macos
 
       - name: Resolve bump type
         id: resolve
@@ -84,6 +69,7 @@ jobs:
           steps.guard.outputs.skip != 'true'
         run: bash scripts/resolve-bump.sh
         env:
+          PLATFORM: macos
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: Create tag and dispatch release
@@ -99,6 +85,11 @@ jobs:
         run: |
           if [ -z "${NEW_VERSION:-}" ]; then
             echo "::error::resolve-bump.sh did not produce new_version"
+            exit 1
+          fi
+
+          if [[ "$NEW_VERSION" == *-android ]]; then
+            echo "::error::macOS bump produced Android tag ${NEW_VERSION}"
             exit 1
           fi
 

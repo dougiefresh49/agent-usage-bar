@@ -105,7 +105,7 @@ struct PopoverView: View {
 
     @ViewBuilder
     private var claudeView: some View {
-        ProviderHeader(name: "Claude", systemImage: "sparkles")
+        ProviderHeader(provider: .claude)
 
         if service.isAuthenticated {
             let metrics = presentationMetrics(for: .claude)
@@ -762,17 +762,24 @@ private struct UsageOrbitView: View {
 }
 
 private struct ProviderHeader: View {
-    let name: String
-    let systemImage: String
+    let provider: UsageProvider
 
     var body: some View {
         HStack {
-            Label(name, systemImage: systemImage)
+            Label(provider.settingsName, systemImage: provider.systemImage)
                 .usageFont(.detailHeader)
             Spacer()
-            Text("Details")
+            Link(destination: provider.usagePageURL) {
+                HStack(spacing: 3) {
+                    Text("Details")
+                        .underline()
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 8, weight: .semibold))
+                }
                 .usageFont(.supporting)
-                .foregroundStyle(.tertiary)
+            }
+            .foregroundStyle(.secondary)
+            .help("Open \(provider.settingsName) usage page")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -784,7 +791,7 @@ private struct OpenAIUsageView: View {
     let metrics: [UsagePresentationMetric]
 
     var body: some View {
-        ProviderHeader(name: "OpenAI / Codex", systemImage: "circle.hexagongrid")
+        ProviderHeader(provider: .openAI)
 
         if !service.isOpenAIConfigured {
             configurePrompt("Add a ChatGPT session token in Settings.")
@@ -855,7 +862,7 @@ private struct CursorUsageView: View {
     let metrics: [UsagePresentationMetric]
 
     var body: some View {
-        ProviderHeader(name: "Cursor", systemImage: "cursorarrow.rays")
+        ProviderHeader(provider: .cursor)
 
         if !service.isCursorConfigured {
             configurePrompt("Add a Cursor session token in Settings.")
@@ -907,7 +914,7 @@ private struct ElevenLabsUsageView: View {
     let metrics: [UsagePresentationMetric]
 
     var body: some View {
-        ProviderHeader(name: "ElevenLabs", systemImage: "waveform")
+        ProviderHeader(provider: .elevenLabs)
 
         if !service.isElevenLabsConfigured {
             configurePrompt("Add an ElevenLabs API key in Settings.")

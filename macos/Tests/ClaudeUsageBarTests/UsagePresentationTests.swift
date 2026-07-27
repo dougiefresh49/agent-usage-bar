@@ -3,6 +3,25 @@ import XCTest
 
 @MainActor
 final class UsagePresentationTests: XCTestCase {
+    func testProviderUsagePageURLs() {
+        XCTAssertEqual(
+            UsageProvider.claude.usagePageURL.absoluteString,
+            "https://claude.ai/new#settings/usage"
+        )
+        XCTAssertEqual(
+            UsageProvider.openAI.usagePageURL.absoluteString,
+            "https://chatgpt.com/#settings/Usage"
+        )
+        XCTAssertEqual(
+            UsageProvider.cursor.usagePageURL.absoluteString,
+            "https://cursor.com/dashboard/spending"
+        )
+        XCTAssertEqual(
+            UsageProvider.elevenLabs.usagePageURL.absoluteString,
+            "https://elevenlabs.io/app/subscription/"
+        )
+    }
+
     func testUsageTextSizeDefaultsToComfortableAndLargeUsesTwoColumns() {
         XCTAssertEqual(UsagePresentationDefaults.textSize, .comfortable)
         XCTAssertEqual(UsageTextSize.compact.overviewColumnCount, 3)

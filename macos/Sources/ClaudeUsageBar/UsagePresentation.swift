@@ -34,6 +34,19 @@ enum UsageProvider: String, CaseIterable, Identifiable {
         case .elevenLabs: return "waveform"
         }
     }
+
+    var usagePageURL: URL {
+        switch self {
+        case .claude:
+            return URL(string: "https://claude.ai/new#settings/usage")!
+        case .openAI:
+            return URL(string: "https://chatgpt.com/#settings/Usage")!
+        case .cursor:
+            return URL(string: "https://cursor.com/dashboard/spending")!
+        case .elevenLabs:
+            return URL(string: "https://elevenlabs.io/app/subscription/")!
+        }
+    }
 }
 
 enum MenuBarVisualizationStyle: String, CaseIterable, Identifiable {

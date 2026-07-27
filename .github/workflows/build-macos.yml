@@ -1,0 +1,50 @@
+name: Build macOS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'macos/**'
+      - 'scripts/resolve-bump.sh'
+      - 'scripts/platform-changes.sh'
+      - 'Makefile'
+      - '.github/workflows/build-macos.yml'
+      - '.github/workflows/bump-macos.yml'
+      - '.github/workflows/release.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'macos/**'
+      - 'scripts/resolve-bump.sh'
+      - 'scripts/platform-changes.sh'
+      - 'Makefile'
+      - '.github/workflows/build-macos.yml'
+      - '.github/workflows/bump-macos.yml'
+      - '.github/workflows/release.yml'
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build release binary
+        run: cd macos && swift build -c release
+
+      - name: Run tests
+        run: cd macos && swift test
+
+      - name: Build app archives
+        run: make release-artifacts
+
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: AgentUsageBar.zip
+          path: macos/AgentUsageBar.zip
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: AgentUsageBar.dmg
+          path: macos/AgentUsageBar.dmg

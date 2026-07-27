@@ -3,14 +3,17 @@ import ServiceManagement
 
 private enum SettingsTab: Hashable {
     case general
-    case connections
+    case providers
+    case appearance
     case notifications
+    case devices
 }
 
 struct SettingsWindowContent: View {
     @ObservedObject var service: UsageService
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var connectedService: ConnectedUsageService
+    @ObservedObject var deviceSyncManager: DeviceSyncManager
     @State private var selectedTab: SettingsTab = .general
     @State private var openAIToken = ""
     @State private var cursorToken = ""
@@ -35,13 +38,26 @@ struct SettingsWindowContent: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
                 .tag(SettingsTab.general)
 
-            connectionsTab
-                .tabItem { Label("Connections", systemImage: "link") }
-                .tag(SettingsTab.connections)
+            providersTab
+                .tabItem { Label("Providers", systemImage: "cpu") }
+                .tag(SettingsTab.providers)
+
+            appearanceTab
+                .tabItem { Label("Appearance", systemImage: "paintpalette") }
+                .tag(SettingsTab.appearance)
 
             notificationsTab
                 .tabItem { Label("Notifications", systemImage: "bell") }
                 .tag(SettingsTab.notifications)
+
+            DevicesSettingsView(
+                service: service,
+                notificationService: notificationService,
+                connectedService: connectedService,
+                deviceSyncManager: deviceSyncManager
+            )
+            .tabItem { Label("Devices", systemImage: "laptopcomputer.and.iphone") }
+            .tag(SettingsTab.devices)
         }
         .frame(width: 520, height: 560)
         .onAppear {
@@ -70,6 +86,17 @@ struct SettingsWindowContent: View {
                 }
             }
 
+            Section("About") {
+                LabeledContent("Version", value: appVersionString)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - Appearance
+
+    private var appearanceTab: some View {
+        Form {
             Section("Appearance") {
                 Picker("Preferred Provider", selection: menuBarProviderBinding) {
                     ForEach(UsageProvider.allCases) { provider in
@@ -125,17 +152,13 @@ struct SettingsWindowContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
-            Section("About") {
-                LabeledContent("Version", value: appVersionString)
-            }
         }
         .formStyle(.grouped)
     }
 
-    // MARK: - Connections
+    // MARK: - Providers
 
-    private var connectionsTab: some View {
+    private var providersTab: some View {
         Form {
             Section("OpenAI / Codex") {
                 Text("Use the bearer token from the Authorization header of a ChatGPT usage request. OpenAI API keys do not expose ChatGPT subscription limits.")
@@ -245,53 +268,69 @@ struct SettingsWindowContent: View {
 
     private var notificationsTab: some View {
         Form {
-            Section("Claude") {
-                ThresholdSlider(
-                    label: "Session usage",
-                    value: notificationService.claudeSessionThreshold,
-                    onChange: { notificationService.setClaudeSessionThreshold($0) }
-                )
-                ThresholdSlider(
-                    label: "Seven-day usage",
-                    value: notificationService.claudeSevenDayThreshold,
-                    onChange: { notificationService.setClaudeSevenDayThreshold($0) }
-                )
-                ThresholdSlider(
-                    label: "Fable usage",
-                    value: notificationService.claudeFableThreshold,
-                    onChange: { notificationService.setClaudeFableThreshold($0) }
-                )
+            if !service.isAuthenticated
+                && !connectedService.isOpenAIConfigured
+                && !connectedService.isCursorConfigured {
+                Section {
+                    Text("Connect a provider in Providers to configure alert thresholds.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            Section("Codex") {
-                ThresholdSlider(
-                    label: "Weekly usage limits",
-                    value: notificationService.openAIWeeklyThreshold,
-                    onChange: { notificationService.setOpenAIWeeklyThreshold($0) }
-                )
-                CountThresholdSlider(
-                    label: "Reset credits",
-                    value: notificationService.openAIResetCreditsThreshold,
-                    onChange: { notificationService.setOpenAIResetCreditsThreshold($0) }
-                )
+            if service.isAuthenticated {
+                Section("Claude") {
+                    ThresholdSlider(
+                        label: "Session usage",
+                        value: notificationService.claudeSessionThreshold,
+                        onChange: { notificationService.setClaudeSessionThreshold($0) }
+                    )
+                    ThresholdSlider(
+                        label: "Seven-day usage",
+                        value: notificationService.claudeSevenDayThreshold,
+                        onChange: { notificationService.setClaudeSevenDayThreshold($0) }
+                    )
+                    ThresholdSlider(
+                        label: "Fable usage",
+                        value: notificationService.claudeFableThreshold,
+                        onChange: { notificationService.setClaudeFableThreshold($0) }
+                    )
+                }
             }
 
-            Section("Cursor") {
-                ThresholdSlider(
-                    label: "API usage",
-                    value: notificationService.cursorAPIThreshold,
-                    onChange: { notificationService.setCursorAPIThreshold($0) }
-                )
-                ThresholdSlider(
-                    label: "Auto usage",
-                    value: notificationService.cursorAutoThreshold,
-                    onChange: { notificationService.setCursorAutoThreshold($0) }
-                )
-                ThresholdSlider(
-                    label: "Credit",
-                    value: notificationService.cursorCreditThreshold,
-                    onChange: { notificationService.setCursorCreditThreshold($0) }
-                )
+            if connectedService.isOpenAIConfigured {
+                Section("Codex") {
+                    ThresholdSlider(
+                        label: "Weekly usage limits",
+                        value: notificationService.openAIWeeklyThreshold,
+                        onChange: { notificationService.setOpenAIWeeklyThreshold($0) }
+                    )
+                    CountThresholdSlider(
+                        label: "Reset credits",
+                        value: notificationService.openAIResetCreditsThreshold,
+                        onChange: { notificationService.setOpenAIResetCreditsThreshold($0) }
+                    )
+                }
+            }
+
+            if connectedService.isCursorConfigured {
+                Section("Cursor") {
+                    ThresholdSlider(
+                        label: "API usage",
+                        value: notificationService.cursorAPIThreshold,
+                        onChange: { notificationService.setCursorAPIThreshold($0) }
+                    )
+                    ThresholdSlider(
+                        label: "Auto usage",
+                        value: notificationService.cursorAutoThreshold,
+                        onChange: { notificationService.setCursorAutoThreshold($0) }
+                    )
+                    ThresholdSlider(
+                        label: "Credit",
+                        value: notificationService.cursorCreditThreshold,
+                        onChange: { notificationService.setCursorCreditThreshold($0) }
+                    )
+                }
             }
         }
         .formStyle(.grouped)

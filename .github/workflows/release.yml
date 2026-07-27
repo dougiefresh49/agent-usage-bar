@@ -2,7 +2,9 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
+      - '!v*-android'
   # Allow Version bump (and manual runs) to start Release. Tag pushes made with
   # GITHUB_TOKEN do not trigger workflow runs, so bump dispatches this explicitly.
   workflow_dispatch:
@@ -13,6 +15,8 @@ concurrency:
 
 jobs:
   release:
+    # Android tags use the same v* glob (v0.1.0-android); keep Sparkle releases macOS-only.
+    if: ${{ !endsWith(github.ref_name, '-android') }}
     runs-on: macos-14
     permissions:
       contents: write
@@ -22,11 +26,11 @@ jobs:
       REPOSITORY_NAME: ${{ github.event.repository.name }}
       ENABLE_SPARKLE_UPDATES: ${{ vars.ENABLE_SPARKLE_UPDATES }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure GitHub Pages
         if: env.ENABLE_SPARKLE_UPDATES == 'true'
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Build release app bundle
         run: |
@@ -88,7 +92,7 @@ jobs:
           PY
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             macos/AgentUsageBar.zip
@@ -117,12 +121,14 @@ jobs:
 
       - name: Upload appcast for GitHub Pages
         if: env.ENABLE_SPARKLE_UPDATES == 'true'
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: dist/site
 
   deploy_appcast:
-    if: vars.ENABLE_SPARKLE_UPDATES == 'true'
+    if: >
+      vars.ENABLE_SPARKLE_UPDATES == 'true' &&
+      !endsWith(github.ref_name, '-android')
     needs: release
     runs-on: ubuntu-latest
     permissions:
@@ -134,4 +140,4 @@ jobs:
     steps:
       - name: Deploy appcast
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

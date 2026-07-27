@@ -33,6 +33,8 @@
     </array>
     <key>LSUIElement</key>
     <true/>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Agent Usage Bar uses your local network to pair and securely sync settings with your Android devices.</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>SUEnableAutomaticChecks</key>
