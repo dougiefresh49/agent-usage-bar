@@ -7,6 +7,17 @@ struct ThresholdAlert: Equatable {
     let valueText: String
 }
 
+/// Keep foreground alerts in Notification Center after their banner disappears.
+///
+/// Menu bar apps can remain active while their popover is open. In that state,
+/// `willPresent` controls every destination explicitly; omitting `.list` makes
+/// the alert transient and easy to miss.
+let foregroundNotificationPresentationOptions: UNNotificationPresentationOptions = [
+    .banner,
+    .list,
+    .sound,
+]
+
 /// Pure logic: returns an alert when a percentage metric crosses its threshold.
 func crossedPercentageThreshold(
     threshold: Int,
@@ -49,7 +60,7 @@ private class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        completionHandler(foregroundNotificationPresentationOptions)
     }
 }
 
