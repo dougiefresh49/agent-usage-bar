@@ -130,6 +130,23 @@ fun SettingsScreen(
     )
     val selectedPrimaryMetric = selectedMetrics.getOrNull(0)?.id
     val selectedSecondaryMetric = selectedMetrics.getOrNull(1)?.id
+    val claudeOrbitCenterOptions = metricOptions.filter {
+        it.resetsAtEpochMs != null ||
+            it.id == UsageMetricPreferences.CLAUDE_FIVE_HOUR ||
+            it.id == UsageMetricPreferences.CLAUDE_SEVEN_DAY
+    }
+    val claudeDisplayOptions = metricOptions.filter { it.percentUsed != null }
+        .ifEmpty { metricOptions }
+    val selectedClaudeOrbitCenterMetric = UsageMetricPreferences.resolvedMetric(
+        storedID = settings.claudeWidgetOrbitCenterMetric,
+        fallbackID = UsageMetricPreferences.CLAUDE_FIVE_HOUR,
+        available = claudeOrbitCenterOptions,
+    )?.id
+    val selectedClaudeDisplayMetric = UsageMetricPreferences.resolvedMetric(
+        storedID = settings.claudeWidgetDisplayMetric,
+        fallbackID = UsageMetricPreferences.CLAUDE_FIVE_HOUR,
+        available = claudeDisplayOptions,
+    )?.id
 
     LaunchedEffect(message) {
         message?.let {
@@ -443,10 +460,62 @@ fun SettingsScreen(
                                 }
                         }
                         Text(
-                            "These stats drive the preferred provider’s overview card, detail chart orbits, and home-screen widgets.",
+                            "These stats drive the preferred provider’s overview card, detail chart orbits, and widget rings.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+
+                        if (settings.widgetProvider == UsageProvider.CLAUDE) {
+                            HorizontalDivider()
+                            Text(
+                                "Claude Widget Orbit Center",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                "Choose which Claude reset countdown appears in the center of widget orbits.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                claudeOrbitCenterOptions.forEach { metric ->
+                                    FilterChip(
+                                        selected = selectedClaudeOrbitCenterMetric == metric.id,
+                                        onClick = {
+                                            viewModel.setClaudeWidgetOrbitCenterMetric(metric.id)
+                                        },
+                                        label = { Text(metric.label) },
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider()
+                            Text(
+                                "Claude Widget Percentage",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                "Choose which Claude usage percentage appears beneath its widget orbit.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                claudeDisplayOptions.forEach { metric ->
+                                    FilterChip(
+                                        selected = selectedClaudeDisplayMetric == metric.id,
+                                        onClick = {
+                                            viewModel.setClaudeWidgetDisplayMetric(metric.id)
+                                        },
+                                        label = { Text(metric.label) },
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     SettingsTab.Notifications -> {

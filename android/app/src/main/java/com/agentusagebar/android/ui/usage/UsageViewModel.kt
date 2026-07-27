@@ -288,6 +288,14 @@ class UsageViewModel(
         viewModelScope.launch { repository.setSecondaryMetric(metricID) }
     }
 
+    fun setClaudeWidgetOrbitCenterMetric(metricID: String) {
+        viewModelScope.launch { repository.setClaudeWidgetOrbitCenterMetric(metricID) }
+    }
+
+    fun setClaudeWidgetDisplayMetric(metricID: String) {
+        viewModelScope.launch { repository.setClaudeWidgetDisplayMetric(metricID) }
+    }
+
     fun setDetailStyle(style: com.agentusagebar.android.data.model.DetailVisualizationStyle) {
         viewModelScope.launch { repository.setDetailStyle(style) }
     }

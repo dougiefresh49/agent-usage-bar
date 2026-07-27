@@ -26,6 +26,8 @@ data class AppSettings(
     val widgetProvider: UsageProvider = UsageProvider.CLAUDE,
     val primaryMetric: String = UsageMetricPreferences.CLAUDE_FIVE_HOUR,
     val secondaryMetric: String = UsageMetricPreferences.CLAUDE_SEVEN_DAY,
+    val claudeWidgetOrbitCenterMetric: String = UsageMetricPreferences.CLAUDE_FIVE_HOUR,
+    val claudeWidgetDisplayMetric: String = UsageMetricPreferences.CLAUDE_FIVE_HOUR,
     val detailStyle: DetailVisualizationStyle = DetailVisualizationStyle.BARS,
     val textSize: UsageTextSize = UsageTextSize.COMFORTABLE,
     val claudeSessionThreshold: Int = 80,
@@ -44,12 +46,17 @@ class SettingsStore(private val context: Context) {
             ?.let { enumValueOrNull<UsageProvider>(it) }
             ?: UsageProvider.CLAUDE
         val metricDefaults = UsageMetricPreferences.defaults(widgetProvider)
+        val primaryMetric = prefs[KEY_PRIMARY_METRIC] ?: metricDefaults.first
         AppSettings(
             pollingMinutes = prefs[KEY_POLLING]?.takeIf { it in POLLING_OPTIONS } ?: 30,
             setupComplete = prefs[KEY_SETUP] ?: false,
             widgetProvider = widgetProvider,
-            primaryMetric = prefs[KEY_PRIMARY_METRIC] ?: metricDefaults.first,
+            primaryMetric = primaryMetric,
             secondaryMetric = prefs[KEY_SECONDARY_METRIC] ?: metricDefaults.second,
+            claudeWidgetOrbitCenterMetric = prefs[KEY_CLAUDE_WIDGET_ORBIT_CENTER]
+                ?: primaryMetric,
+            claudeWidgetDisplayMetric = prefs[KEY_CLAUDE_WIDGET_DISPLAY]
+                ?: primaryMetric,
             detailStyle = prefs[KEY_DETAIL_STYLE]
                 ?.let { enumValueOrNull<DetailVisualizationStyle>(it) }
                 ?: DetailVisualizationStyle.BARS,
@@ -101,6 +108,14 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setSecondaryMetric(metricID: String) {
         context.settingsDataStore.edit { it[KEY_SECONDARY_METRIC] = metricID }
+    }
+
+    suspend fun setClaudeWidgetOrbitCenterMetric(metricID: String) {
+        context.settingsDataStore.edit { it[KEY_CLAUDE_WIDGET_ORBIT_CENTER] = metricID }
+    }
+
+    suspend fun setClaudeWidgetDisplayMetric(metricID: String) {
+        context.settingsDataStore.edit { it[KEY_CLAUDE_WIDGET_DISPLAY] = metricID }
     }
 
     suspend fun setDetailStyle(style: DetailVisualizationStyle) {
@@ -200,6 +215,10 @@ class SettingsStore(private val context: Context) {
         private val KEY_WIDGET_PROVIDER = stringPreferencesKey("widget_provider")
         private val KEY_PRIMARY_METRIC = stringPreferencesKey("primary_metric")
         private val KEY_SECONDARY_METRIC = stringPreferencesKey("secondary_metric")
+        private val KEY_CLAUDE_WIDGET_ORBIT_CENTER =
+            stringPreferencesKey("claude_widget_orbit_center_metric")
+        private val KEY_CLAUDE_WIDGET_DISPLAY =
+            stringPreferencesKey("claude_widget_display_metric")
         private val KEY_DETAIL_STYLE = stringPreferencesKey("detail_style")
         private val KEY_TEXT_SIZE = stringPreferencesKey("text_size")
         private val KEY_CLAUDE_SESSION = intPreferencesKey("threshold_claude_session")
