@@ -2,6 +2,12 @@ import XCTest
 @testable import AgentUsageBar
 
 final class NotificationServiceTests: XCTestCase {
+    func testForegroundNotificationsRemainInNotificationCenter() {
+        XCTAssertTrue(foregroundNotificationPresentationOptions.contains(.banner))
+        XCTAssertTrue(foregroundNotificationPresentationOptions.contains(.list))
+        XCTAssertTrue(foregroundNotificationPresentationOptions.contains(.sound))
+    }
+
     func testNoAlertsWhenOff() {
         let alert = crossedPercentageThreshold(
             threshold: 0,
