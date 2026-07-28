@@ -152,6 +152,15 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(reloadCount, 1)
     }
 
+    func testReloadKindsMatchEveryWidgetConfiguration() {
+        XCTAssertEqual(UsageSnapshotStore.widgetKinds, [
+            "com.local.AgentUsageBar.Widget.ProviderDetails",
+            "com.local.AgentUsageBar.Widget.ProviderSnapshot",
+            "com.local.AgentUsageBar.Widget.ProviderGrid",
+            "com.local.AgentUsageBar.Widget.Overview",
+        ])
+    }
+
     func testOpenAIMetricsIncludeResetCreditCount() {
         let usage = OpenAIUsageResponse(
             email: nil,
