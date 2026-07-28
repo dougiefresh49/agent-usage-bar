@@ -61,6 +61,16 @@ final class UsageSnapshotStore {
 
     nonisolated static let widgetBundleIdentifier = "com.local.AgentUsageBar.Widget"
 
+    /// WidgetKit identifies each configured widget by its configuration kind.
+    /// Reload the concrete kinds instead of relying on `reloadAllTimelines()`,
+    /// which may not discover ad-hoc signed embedded extensions on macOS.
+    nonisolated static let widgetKinds = [
+        "com.local.AgentUsageBar.Widget.ProviderDetails",
+        "com.local.AgentUsageBar.Widget.ProviderSnapshot",
+        "com.local.AgentUsageBar.Widget.ProviderGrid",
+        "com.local.AgentUsageBar.Widget.Overview",
+    ]
+
     /// Widget extensions are sandboxed. The menu app is not, so it can mirror the
     /// snapshot into the extension's own Application Support container without
     /// requiring an App Group entitlement or a registered developer team.
@@ -94,7 +104,11 @@ final class UsageSnapshotStore {
         self.defaults = defaults
         self.reloadWidgets = reloadWidgets
             ?? (directory == nil
-                ? { WidgetCenter.shared.reloadAllTimelines() }
+                ? {
+                    for kind in UsageSnapshotStore.widgetKinds {
+                        WidgetCenter.shared.reloadTimelines(ofKind: kind)
+                    }
+                }
                 : {})
         if let data = try? Data(contentsOf: fileURL),
            let snapshot = try? Self.makeDecoder().decode(UsageSnapshot.self, from: data) {
