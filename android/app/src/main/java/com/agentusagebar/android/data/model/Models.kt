@@ -258,7 +258,7 @@ object UsageMetricPreferences {
 
     fun defaults(provider: UsageProvider): Pair<String, String> = when (provider) {
         UsageProvider.CLAUDE -> CLAUDE_FIVE_HOUR to CLAUDE_SEVEN_DAY
-        UsageProvider.OPENAI -> OPENAI_PRIMARY to OPENAI_RESET_CREDITS
+        UsageProvider.OPENAI -> OPENAI_PRIMARY to OPENAI_SECONDARY
         UsageProvider.CURSOR -> CURSOR_MODELS to CURSOR_API
         UsageProvider.ELEVENLABS -> ELEVENLABS_CREDITS to ELEVENLABS_REMAINING
     }
@@ -274,6 +274,7 @@ object UsageMetricPreferences {
             )
             UsageProvider.OPENAI -> listOf(
                 UsageMetric(OPENAI_PRIMARY, "Primary Window"),
+                UsageMetric(OPENAI_SECONDARY, "Secondary Window"),
                 UsageMetric(OPENAI_RESET_CREDITS, "Reset Credits"),
             )
             UsageProvider.CURSOR -> listOf(

@@ -318,7 +318,7 @@ private enum WidgetMetricSelection {
             let fallback = metrics.first(where: { $0.id == "seven_day" })
             return [primary, modelMetric ?? fallback].compactMap { $0 }
         case .openai:
-            preferredIDs = ["primary", "reset_credits", "secondary"]
+            preferredIDs = ["primary", "secondary", "reset_credits"]
         case .cursor:
             preferredIDs = ["models", "api", "total"]
         case .elevenlabs:

@@ -88,9 +88,14 @@ final class UsagePresentationTests: XCTestCase {
         )
     }
 
-    func testOpenAIDetailPairUsesWeeklyUsageAndNumericResetCredits() {
-        let weekly = percentageMetric(
+    func testOpenAIDetailPairPairsSessionAndWeeklyWindows() {
+        let session = percentageMetric(
             id: UsagePresentationMetrics.openAIPrimaryID,
+            label: "5-Hour Window",
+            value: 12
+        )
+        let weekly = percentageMetric(
+            id: UsagePresentationMetrics.openAISecondaryID,
             label: "7-Day Window",
             value: 37
         )
@@ -102,22 +107,70 @@ final class UsagePresentationTests: XCTestCase {
             resetDate: nil,
             resetInterval: nil
         )
-        let secondary = percentageMetric(
-            id: UsagePresentationMetrics.openAISecondaryID,
-            label: "Secondary",
-            value: 8
+
+        let pair = UsagePresentationMetrics.detailPair(
+            for: .openAI,
+            available: [session, weekly, resets]
+        )
+
+        XCTAssertEqual(pair.map(\.id), [session.id, weekly.id])
+        XCTAssertNotNil(pair[1].normalizedProgress)
+    }
+
+    func testOpenAIDetailPairFallsBackToResetCreditsWithoutWeeklyWindow() {
+        let session = percentageMetric(
+            id: UsagePresentationMetrics.openAIPrimaryID,
+            label: "5-Hour Window",
+            value: 12
+        )
+        let resets = UsagePresentationMetric(
+            id: UsagePresentationMetrics.openAIResetCreditsID,
+            label: "Reset Credits",
+            shortLabel: "R",
+            kind: .count(2),
+            resetDate: nil,
+            resetInterval: nil
         )
 
         let pair = UsagePresentationMetrics.detailPair(
             for: .openAI,
-            available: [weekly, resets, secondary]
+            available: [session, resets]
         )
 
-        XCTAssertEqual(pair.map(\.id), [weekly.id, resets.id])
+        XCTAssertEqual(pair.map(\.id), [session.id, resets.id])
         XCTAssertEqual(pair[1].valueText, "2")
         XCTAssertEqual(pair[1].accessibilityValue, "2 available")
         XCTAssertTrue(pair[1].isCount)
         XCTAssertNil(pair[1].normalizedProgress)
+    }
+
+    func testOpenAIDefaultsPreferWeeklyWindowOverResetCredits() {
+        let session = percentageMetric(
+            id: UsagePresentationMetrics.openAIPrimaryID,
+            label: "5-Hour Window",
+            value: 12
+        )
+        let weekly = percentageMetric(
+            id: UsagePresentationMetrics.openAISecondaryID,
+            label: "7-Day Window",
+            value: 37
+        )
+        let resets = UsagePresentationMetric(
+            id: UsagePresentationMetrics.openAIResetCreditsID,
+            label: "Reset Credits",
+            shortLabel: "R",
+            kind: .count(2),
+            resetDate: nil,
+            resetInterval: nil
+        )
+
+        let defaults = UsagePresentationMetrics.defaults(
+            for: .openAI,
+            available: [session, weekly, resets]
+        )
+
+        XCTAssertEqual(defaults.primary, session.id)
+        XCTAssertEqual(defaults.secondary, weekly.id)
     }
 
     func testResolvedPairFallsBackToProviderDefaultsWithoutDuplicates() {

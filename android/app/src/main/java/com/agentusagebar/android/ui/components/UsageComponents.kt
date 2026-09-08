@@ -158,8 +158,8 @@ private fun MiniMetricRow(metric: UsageMetric) {
         UsageMetricPreferences.CURSOR_MODELS -> "Models"
         UsageMetricPreferences.CURSOR_API -> "API"
         UsageMetricPreferences.CURSOR_TOTAL -> "Total"
-        UsageMetricPreferences.OPENAI_PRIMARY -> "Pri"
-        UsageMetricPreferences.OPENAI_SECONDARY -> "Sec"
+        UsageMetricPreferences.OPENAI_PRIMARY -> compactWindowLabel(metric.resetIntervalMs) ?: "Pri"
+        UsageMetricPreferences.OPENAI_SECONDARY -> compactWindowLabel(metric.resetIntervalMs) ?: "Sec"
         UsageMetricPreferences.OPENAI_RESET_CREDITS -> "Reset"
         UsageMetricPreferences.ELEVENLABS_CREDITS -> "Used"
         UsageMetricPreferences.ELEVENLABS_REMAINING -> "Left"
@@ -468,6 +468,17 @@ fun countdownProgress(
     if (resetsAtEpochMs == null || resetIntervalMs == null || resetIntervalMs <= 0L) return 0f
     val remaining = (resetsAtEpochMs - nowMs).toDouble()
     return (remaining / resetIntervalMs.toDouble()).toFloat().coerceIn(0f, 1f)
+}
+
+/** Compact window label from its length (e.g. "5h", "7d"); null when unknown. */
+fun compactWindowLabel(intervalMs: Long?): String? {
+    if (intervalMs == null || intervalMs <= 0) return null
+    val hours = intervalMs / (60L * 60L * 1000L)
+    return when {
+        hours > 0 && hours % 24 == 0L -> "${hours / 24}d"
+        hours > 0 -> "${hours}h"
+        else -> null
+    }
 }
 
 /** Compact remaining-time label for orbit centers (e.g. "5d", "2h 10m", "45m"). */

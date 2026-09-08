@@ -75,6 +75,15 @@ struct OpenAIRateLimit: Codable, Equatable {
     let primaryWindow: OpenAIUsageWindow?
     let secondaryWindow: OpenAIUsageWindow?
 
+    /// The longest reported window. Codex now reports a 5-hour session window as
+    /// `primary_window` and the weekly limit as `secondary_window`, so weekly
+    /// notifications must not assume the primary window is the weekly one.
+    var weeklyWindow: OpenAIUsageWindow? {
+        [primaryWindow, secondaryWindow]
+            .compactMap { $0 }
+            .max { ($0.limitWindowSeconds ?? 0) < ($1.limitWindowSeconds ?? 0) }
+    }
+
     enum CodingKeys: String, CodingKey {
         case allowed
         case limitReached = "limit_reached"

@@ -221,7 +221,7 @@ enum UsagePresentationMetrics {
         case .claude:
             preferred = [claudeFiveHourID, claudeSevenDayID]
         case .openAI:
-            preferred = [openAIPrimaryID, openAIResetCreditsID, openAISecondaryID]
+            preferred = [openAIPrimaryID, openAISecondaryID, openAIResetCreditsID]
         case .cursor:
             preferred = [cursorModelsID, cursorAPIID, cursorTotalID]
         case .elevenLabs:
@@ -270,10 +270,12 @@ enum UsagePresentationMetrics {
             let fallback = metrics.first(where: { $0.id == claudeSevenDayID })
             return compactPair(primary: primary, secondary: modelSpecific ?? fallback)
         case .openAI:
+            // Codex now has a 5-hour session window plus a weekly window, so the
+            // orbit pairs both like Claude; reset credits stay as a row below.
             return compactPair(
                 primary: metrics.first(where: { $0.id == openAIPrimaryID }),
-                secondary: metrics.first(where: { $0.id == openAIResetCreditsID })
-                    ?? metrics.first(where: { $0.id == openAISecondaryID })
+                secondary: metrics.first(where: { $0.id == openAISecondaryID })
+                    ?? metrics.first(where: { $0.id == openAIResetCreditsID })
             )
         case .cursor:
             return compactPair(
@@ -424,14 +426,6 @@ enum UsagePresentationMetrics {
                 percent: primary?.usedPercent,
                 resetDate: primary?.resetDate,
                 resetInterval: primary?.limitWindowSeconds
-            ),
-            UsagePresentationMetric(
-                id: openAIResetCreditsID,
-                label: "Reset Credits",
-                shortLabel: "R",
-                kind: .count(count),
-                resetDate: nil,
-                resetInterval: nil
             )
         ]
 
@@ -447,6 +441,17 @@ enum UsagePresentationMetrics {
                 )
             )
         }
+
+        metrics.append(
+            UsagePresentationMetric(
+                id: openAIResetCreditsID,
+                label: "Reset Credits",
+                shortLabel: "R",
+                kind: .count(count),
+                resetDate: nil,
+                resetInterval: nil
+            )
+        )
         return metrics
     }
 
