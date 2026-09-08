@@ -136,6 +136,45 @@ final class ConnectedUsageModelTests: XCTestCase {
         XCTAssertNotNil(usage.nextResetDate)
         XCTAssertEqual(usage.voiceSlotsUsed, 3)
     }
+
+    func testWeeklyWindowPicksLongestWindowRegardlessOfOrder() throws {
+        let data = Data(
+            """
+            {
+              "rate_limit": {
+                "primary_window": {
+                  "used_percent": 4,
+                  "limit_window_seconds": 18000
+                },
+                "secondary_window": {
+                  "used_percent": 32,
+                  "limit_window_seconds": 604800
+                }
+              }
+            }
+            """.utf8
+        )
+
+        let usage = try JSONDecoder().decode(OpenAIUsageResponse.self, from: data)
+
+        XCTAssertEqual(usage.rateLimit?.weeklyWindow?.usedPercent, 32)
+    }
+
+    func testWeeklyWindowFallsBackToPrimaryWhenLengthsAreUnknown() throws {
+        let data = Data(
+            """
+            {
+              "rate_limit": {
+                "primary_window": { "used_percent": 70 }
+              }
+            }
+            """.utf8
+        )
+
+        let usage = try JSONDecoder().decode(OpenAIUsageResponse.self, from: data)
+
+        XCTAssertEqual(usage.rateLimit?.weeklyWindow?.usedPercent, 70)
+    }
 }
 
 final class ConnectedServiceCredentialsTests: XCTestCase {

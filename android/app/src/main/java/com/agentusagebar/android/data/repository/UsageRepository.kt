@@ -663,6 +663,18 @@ class UsageRepository(
                 resetsAtEpochMs = primary?.resetAt?.times(1000)?.toLong(),
                 resetIntervalMs = primary?.limitWindowSeconds?.times(1000)?.toLong(),
             )
+            // Codex reports the 5-hour session as the primary window and the weekly
+            // limit as the secondary window; keep them adjacent so the orbit pairs
+            // them like Claude and reset credits fall to a row below.
+            usage.rateLimit?.secondaryWindow?.let { secondary ->
+                metrics += UsageMetric(
+                    id = UsageMetricPreferences.OPENAI_SECONDARY,
+                    label = windowLabel(secondary.limitWindowSeconds, "Secondary Window"),
+                    percentUsed = secondary.usedPercent,
+                    resetsAtEpochMs = secondary.resetAt?.times(1000)?.toLong(),
+                    resetIntervalMs = secondary.limitWindowSeconds?.times(1000)?.toLong(),
+                )
+            }
             // Prefer the dedicated reset-credits endpoint. The usage summary often
             // reports applicable_available_count: 0 even when credits are available.
             val resetCreditsCount = resetCredits?.availableCreditsCount
@@ -673,15 +685,6 @@ class UsageRepository(
                 label = "Reset Credits",
                 countValue = resetCreditsCount,
             )
-            usage.rateLimit?.secondaryWindow?.let { secondary ->
-                metrics += UsageMetric(
-                    id = UsageMetricPreferences.OPENAI_SECONDARY,
-                    label = windowLabel(secondary.limitWindowSeconds, "Secondary Window"),
-                    percentUsed = secondary.usedPercent,
-                    resetsAtEpochMs = secondary.resetAt?.times(1000)?.toLong(),
-                    resetIntervalMs = secondary.limitWindowSeconds?.times(1000)?.toLong(),
-                )
-            }
             usage.additionalRateLimits.orEmpty().forEach { additional ->
                 val window = additional.rateLimit?.primaryWindow ?: return@forEach
                 metrics += UsageMetric(

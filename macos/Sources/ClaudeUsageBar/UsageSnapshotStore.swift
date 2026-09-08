@@ -269,6 +269,16 @@ extension UsageSnapshotStore {
                 resetInterval: primary.limitWindowSeconds
             ))
         }
+        if let secondary = usage.rateLimit?.secondaryWindow {
+            metrics.append(UsageSnapshotMetric(
+                id: "secondary",
+                label: windowLabel(secondary.limitWindowSeconds, fallback: "Secondary window"),
+                shortLabel: compactWindowLabel(secondary.limitWindowSeconds, fallback: "2nd"),
+                percentUsed: secondary.usedPercent,
+                resetsAt: secondary.resetDate,
+                resetInterval: secondary.limitWindowSeconds
+            ))
+        }
         let availableResetCredits = resetCredits?.availableCount
             ?? resetCredits.map { $0.credits.filter(\.isAvailable).count }
             ?? usage.rateLimitResetCredits?.applicableAvailableCount
@@ -281,16 +291,6 @@ extension UsageSnapshotStore {
             count: availableResetCredits,
             resetsAt: nil
         ))
-        if let secondary = usage.rateLimit?.secondaryWindow {
-            metrics.append(UsageSnapshotMetric(
-                id: "secondary",
-                label: windowLabel(secondary.limitWindowSeconds, fallback: "Secondary window"),
-                shortLabel: compactWindowLabel(secondary.limitWindowSeconds, fallback: "2nd"),
-                percentUsed: secondary.usedPercent,
-                resetsAt: secondary.resetDate,
-                resetInterval: secondary.limitWindowSeconds
-            ))
-        }
         return metrics
     }
 

@@ -7,6 +7,8 @@ import com.agentusagebar.android.data.model.OpenAIResetCreditsResponse
 import com.agentusagebar.android.data.model.OpenAIUsageResponse
 import com.agentusagebar.android.data.model.OpenAIUsageWindow
 import com.agentusagebar.android.data.model.UsageMetricPreferences
+import com.agentusagebar.android.data.model.UsageProvider
+import com.agentusagebar.android.ui.components.compactWindowLabel
 import com.agentusagebar.android.ui.components.orbitLegendMetrics
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -42,6 +44,36 @@ class OpenAIMetricsTest {
             ),
             metrics.map { it.id }.take(2),
         )
+    }
+
+    @Test
+    fun openAIMetricsOrdersWeeklyWindowBeforeResetCredits() {
+        val usage = OpenAIUsageResponse(
+            rateLimit = OpenAIRateLimit(
+                primaryWindow = OpenAIUsageWindow(
+                    usedPercent = 4.0,
+                    limitWindowSeconds = 18_000.0,
+                ),
+                secondaryWindow = OpenAIUsageWindow(
+                    usedPercent = 32.0,
+                    limitWindowSeconds = 604_800.0,
+                ),
+            ),
+            rateLimitResetCredits = OpenAIResetCreditSummary(availableCount = 3),
+        )
+
+        val metrics = UsageRepository.openAIMetrics(usage)
+
+        assertEquals(
+            listOf(
+                UsageMetricPreferences.OPENAI_PRIMARY,
+                UsageMetricPreferences.OPENAI_SECONDARY,
+                UsageMetricPreferences.OPENAI_RESET_CREDITS,
+            ),
+            metrics.map { it.id },
+        )
+        assertEquals("5-Hour Window", metrics[0].label)
+        assertEquals("7-Day Window", metrics[1].label)
     }
 
     @Test
@@ -91,7 +123,7 @@ class OpenAIMetricsTest {
     }
 
     @Test
-    fun orbitLegendPrefersResetCreditsOverSecondaryPercentRing() {
+    fun orbitPairsSessionAndWeeklyWindowsByDefault() {
         val usage = OpenAIUsageResponse(
             rateLimit = OpenAIRateLimit(
                 primaryWindow = OpenAIUsageWindow(usedPercent = 69.0),
@@ -100,7 +132,42 @@ class OpenAIMetricsTest {
             rateLimitResetCredits = OpenAIResetCreditSummary(availableCount = 3),
         )
         val metrics = UsageRepository.openAIMetrics(usage)
-        val legend = orbitLegendMetrics(metrics)
+        val defaults = UsageMetricPreferences.defaults(UsageProvider.OPENAI)
+        val pair = UsageMetricPreferences.resolvedPair(
+            provider = UsageProvider.OPENAI,
+            primaryID = defaults.first,
+            secondaryID = defaults.second,
+            available = metrics,
+        )
+        val legend = orbitLegendMetrics(pair)
+
+        assertEquals(
+            listOf(
+                UsageMetricPreferences.OPENAI_PRIMARY,
+                UsageMetricPreferences.OPENAI_SECONDARY,
+            ),
+            legend.map { it.id },
+        )
+        assertEquals(40.0, legend[1].percentUsed)
+    }
+
+    @Test
+    fun orbitFallsBackToResetCreditsWhenWeeklyWindowMissing() {
+        val usage = OpenAIUsageResponse(
+            rateLimit = OpenAIRateLimit(
+                primaryWindow = OpenAIUsageWindow(usedPercent = 69.0),
+            ),
+            rateLimitResetCredits = OpenAIResetCreditSummary(availableCount = 3),
+        )
+        val metrics = UsageRepository.openAIMetrics(usage)
+        val defaults = UsageMetricPreferences.defaults(UsageProvider.OPENAI)
+        val pair = UsageMetricPreferences.resolvedPair(
+            provider = UsageProvider.OPENAI,
+            primaryID = defaults.first,
+            secondaryID = defaults.second,
+            available = metrics,
+        )
+        val legend = orbitLegendMetrics(pair)
 
         assertEquals(
             listOf(
@@ -110,5 +177,15 @@ class OpenAIMetricsTest {
             legend.map { it.id },
         )
         assertEquals(3, legend[1].countValue)
+    }
+}
+
+class CompactWindowLabelTest {
+    @Test
+    fun compactWindowLabelDerivesHoursAndDays() {
+        assertEquals("5h", compactWindowLabel(5L * 60L * 60L * 1000L))
+        assertEquals("7d", compactWindowLabel(7L * 24L * 60L * 60L * 1000L))
+        assertNull(compactWindowLabel(null))
+        assertNull(compactWindowLabel(0L))
     }
 }

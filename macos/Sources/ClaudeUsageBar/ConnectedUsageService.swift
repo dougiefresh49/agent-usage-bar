@@ -231,7 +231,7 @@ final class ConnectedUsageService: ObservableObject {
             ?? openAIUsage?.rateLimitResetCredits?.applicableAvailableCount
             ?? openAIUsage?.rateLimitResetCredits?.availableCount
         notificationService?.checkOpenAI(
-            weeklyPercent: openAIUsage?.rateLimit?.primaryWindow?.usedPercent,
+            weeklyPercent: openAIUsage?.rateLimit?.weeklyWindow?.usedPercent,
             resetCreditsRemaining: resetCreditsRemaining
         )
     }
