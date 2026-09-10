@@ -1,5 +1,6 @@
 package com.agentusagebar.android.data.sync
 
+import com.agentusagebar.android.data.model.ConnectedCredentials
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.math.BigInteger
@@ -58,11 +59,42 @@ data class DeviceSyncConnections(
     val openAISessionToken: String? = null,
     val cursorSessionToken: String? = null,
     val elevenLabsAPIKey: String? = null,
+    val codexAccessToken: String? = null,
+    val codexAccountId: String? = null,
+    val cursorAccessToken: String? = null,
 ) {
     val count: Int
-        get() = listOf(openAISessionToken, cursorSessionToken, elevenLabsAPIKey)
-            .count { !it.isNullOrBlank() }
+        get() = listOf(
+            openAISessionToken,
+            cursorSessionToken,
+            elevenLabsAPIKey,
+            codexAccessToken,
+            codexAccountId,
+            cursorAccessToken,
+        ).count { !it.isNullOrBlank() }
 }
+
+/** Present non-blank values overwrite their own keys only; null/blank leaves the current value. */
+fun ConnectedCredentials.mergingImported(imported: DeviceSyncConnections): ConnectedCredentials = copy(
+    openAISessionToken = imported.openAISessionToken
+        ?.takeIf { it.isNotBlank() }
+        ?: openAISessionToken,
+    cursorSessionToken = imported.cursorSessionToken
+        ?.takeIf { it.isNotBlank() }
+        ?: cursorSessionToken,
+    elevenLabsAPIKey = imported.elevenLabsAPIKey
+        ?.takeIf { it.isNotBlank() }
+        ?: elevenLabsAPIKey,
+    codexAccessToken = imported.codexAccessToken
+        ?.takeIf { it.isNotBlank() }
+        ?: codexAccessToken,
+    codexAccountId = imported.codexAccountId
+        ?.takeIf { it.isNotBlank() }
+        ?: codexAccountId,
+    cursorAccessToken = imported.cursorAccessToken
+        ?.takeIf { it.isNotBlank() }
+        ?: cursorAccessToken,
+)
 
 @Serializable
 data class DeviceSyncPayload(
@@ -152,11 +184,17 @@ object DeviceSyncCodec {
     const val STATUS_INFO = "agentusagebar-device-status-v2"
     const val RESYNC_INFO = "agentusagebar-device-resync-v1"
     const val CURRENT_PAIRING_VERSION = 2
-    const val CURRENT_PAYLOAD_VERSION = 1
+    const val CURRENT_PAYLOAD_VERSION = 2
 
     val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+    }
+
+    private fun requireSupportedPayloadVersion(version: Int) {
+        require(version in 1..CURRENT_PAYLOAD_VERSION) {
+            "Update Agent Usage Bar to import these settings."
+        }
     }
 
     fun decodePairingCode(rawValue: String): DevicePairingCode {
@@ -188,9 +226,7 @@ object DeviceSyncCodec {
         val payload = runCatching {
             json.decodeFromString<DeviceSyncPayload>(data.toString(Charsets.UTF_8))
         }.getOrElse { throw IllegalArgumentException("The transferred settings are damaged.") }
-        require(payload.version == CURRENT_PAYLOAD_VERSION) {
-            "Update Agent Usage Bar to import these settings."
-        }
+        requireSupportedPayloadVersion(payload.version)
         require(payload.expiresAtEpochSeconds >= nowSeconds) {
             "The pairing transfer expired. Generate a new code on your Mac."
         }
@@ -201,9 +237,7 @@ object DeviceSyncCodec {
         val payload = runCatching {
             json.decodeFromString<DeviceSyncPayload>(data.toString(Charsets.UTF_8))
         }.getOrElse { throw IllegalArgumentException("The synced settings are damaged.") }
-        require(payload.version == CURRENT_PAYLOAD_VERSION) {
-            "Update Agent Usage Bar to import these settings."
-        }
+        requireSupportedPayloadVersion(payload.version)
         return payload
     }
 

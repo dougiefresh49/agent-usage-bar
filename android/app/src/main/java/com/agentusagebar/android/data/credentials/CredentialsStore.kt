@@ -6,6 +6,8 @@ import androidx.security.crypto.MasterKey
 import com.agentusagebar.android.data.model.ClaudeCredentials
 import com.agentusagebar.android.data.model.ConnectedCredentials
 import com.agentusagebar.android.data.sync.DeviceSyncCodec
+import com.agentusagebar.android.data.sync.DeviceSyncConnections
+import com.agentusagebar.android.data.sync.mergingImported
 import com.agentusagebar.android.data.sync.TrustedDesktopDevice
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -53,6 +55,15 @@ class CredentialsStore(context: Context) {
         prefs.edit().putString(KEY_CONNECTED, json.encodeToString(credentials)).apply()
     }
 
+    /**
+     * Merge synced connection fields. Present non-blank values overwrite their own keys only;
+     * a v1 payload (null v2 fields) leaves existing v2 credentials untouched.
+     */
+    fun applyImportedConnections(imported: DeviceSyncConnections) {
+        val current = loadConnected()
+        saveConnected(current.mergingImported(imported))
+    }
+
     fun wipeCredentialsImportedFrom(device: TrustedDesktopDevice): Boolean {
         val current = loadConnected()
         val updated = current.copy(
@@ -65,6 +76,10 @@ class CredentialsStore(context: Context) {
             elevenLabsAPIKey = current.elevenLabsAPIKey.clearIfMatching(
                 device.elevenLabsKeyHash,
             ),
+            // CLI tokens only arrive via desktop sync; TrustedDesktopDevice has no v2 hashes yet.
+            codexAccessToken = null,
+            codexAccountId = null,
+            cursorAccessToken = null,
         )
         val changed = updated != current
         if (changed) saveConnected(updated)

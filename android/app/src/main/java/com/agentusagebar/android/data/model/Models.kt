@@ -211,11 +211,37 @@ data class ConnectedCredentials(
     val openAISessionToken: String? = null,
     val cursorSessionToken: String? = null,
     val elevenLabsAPIKey: String? = null,
+    val codexAccessToken: String? = null,
+    val codexAccountId: String? = null,
+    val cursorAccessToken: String? = null,
 ) {
     val isEmpty: Boolean
         get() = openAISessionToken.isNullOrBlank()
             && cursorSessionToken.isNullOrBlank()
             && elevenLabsAPIKey.isNullOrBlank()
+            && codexAccessToken.isNullOrBlank()
+            && codexAccountId.isNullOrBlank()
+            && cursorAccessToken.isNullOrBlank()
+
+    /** Phone precedence: CLI token wins over a pasted session token (docs/decisions.md row 1). */
+    val openAIBearer: String?
+        get() = codexAccessToken?.takeIf { it.isNotBlank() }
+            ?: openAISessionToken?.takeIf { it.isNotBlank() }
+
+    val openAIAccountId: String?
+        get() = codexAccountId?.takeIf { it.isNotBlank() }
+
+    val cursorAuth: CursorAuth?
+        get() {
+            cursorAccessToken?.takeIf { it.isNotBlank() }?.let { return CursorAuth.CliToken(it) }
+            cursorSessionToken?.takeIf { it.isNotBlank() }?.let { return CursorAuth.Cookie(it) }
+            return null
+        }
+}
+
+sealed class CursorAuth {
+    data class CliToken(val token: String) : CursorAuth()
+    data class Cookie(val token: String) : CursorAuth()
 }
 
 enum class UsageProvider(
