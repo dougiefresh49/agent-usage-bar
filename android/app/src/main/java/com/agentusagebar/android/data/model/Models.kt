@@ -105,6 +105,83 @@ enum class UsageTextSize(val displayName: String, val overviewColumns: Int) {
     LARGE("Large", 2),
 }
 
+
+enum class UsageFillMode(val displayName: String) {
+    FILL("Fill"),
+    DRAIN("Drain");
+
+    /** Bar/ring fill fraction for a used percent (0..100): used share in Fill, remaining in Drain. */
+    fun barFraction(percentUsed: Double): Float {
+        val used = (percentUsed / 100.0).coerceIn(0.0, 1.0)
+        return when (this) {
+            FILL -> used.toFloat()
+            DRAIN -> (1.0 - used).toFloat()
+        }
+    }
+}
+
+enum class UsagePace {
+    AHEAD,
+    ON_PACE,
+    UNDER;
+
+    val glyph: String
+        get() = when (this) {
+            AHEAD -> "↗"
+            ON_PACE -> "—"
+            UNDER -> "↘"
+        }
+
+    companion object {
+        /**
+         * Elapsed share of the window, 0..1, or null when reset/interval is missing
+         * or interval is not positive.
+         */
+        fun elapsedFraction(
+            resetsAtEpochMs: Long?,
+            resetIntervalMs: Long?,
+            nowMs: Long = System.currentTimeMillis(),
+        ): Double? {
+            if (resetsAtEpochMs == null || resetIntervalMs == null || resetIntervalMs <= 0L) {
+                return null
+            }
+            val remaining = resetsAtEpochMs - nowMs
+            val raw = (resetIntervalMs - remaining).toDouble() / resetIntervalMs.toDouble()
+            return raw.coerceIn(0.0, 1.0)
+        }
+
+        /**
+         * Spending versus even pace. Gap of usedPercent minus elapsed*100:
+         * above +5 is ahead, below -5 is behind, else on pace.
+         */
+        fun evaluate(
+            percentUsed: Double?,
+            resetsAtEpochMs: Long?,
+            resetIntervalMs: Long?,
+            nowMs: Long = System.currentTimeMillis(),
+        ): UsagePace? {
+            val used = percentUsed ?: return null
+            val elapsed = elapsedFraction(resetsAtEpochMs, resetIntervalMs, nowMs) ?: return null
+            val gap = used - elapsed * 100.0
+            return when {
+                gap > 5.0 -> AHEAD
+                gap < -5.0 -> UNDER
+                else -> ON_PACE
+            }
+        }
+    }
+}
+
+/** Drain renames for metrics whose Fill label names the used share. */
+fun metricLabelForMode(metricId: String, label: String, mode: UsageFillMode): String {
+    if (mode != UsageFillMode.DRAIN) return label
+    return when (metricId) {
+        UsageMetricPreferences.ELEVENLABS_CREDITS -> "Credits"
+        UsageMetricPreferences.CURSOR_TOTAL -> "Total Plan"
+        else -> label
+    }
+}
+
 object UsageMetricPreferences {
     const val CLAUDE_FIVE_HOUR = "claude.5h"
     const val CLAUDE_SEVEN_DAY = "claude.7d"
@@ -231,12 +308,27 @@ data class UsageMetric(
     val detail: String? = null,
     val countValue: Int? = null,
 ) {
+    /** Fill-mode value (used percent / count). Kept so missed call sites still compile. */
     val displayValue: String
-        get() = when {
-            percentUsed != null -> "${kotlin.math.round(percentUsed).toInt()}%"
-            countValue != null -> "%,d".format(countValue)
-            else -> "—"
+        get() = displayValue(UsageFillMode.FILL)
+
+    fun displayValue(mode: UsageFillMode): String {
+        // Count metrics are never inverted (OpenAI reset credits, etc.).
+        if (countValue != null) {
+            return "%,d".format(countValue)
         }
+        val used = percentUsed ?: return "—"
+        return when (mode) {
+            UsageFillMode.FILL -> "${kotlin.math.round(used).toInt()}%"
+            UsageFillMode.DRAIN -> {
+                val remaining = (100.0 - used.coerceIn(0.0, 100.0)).let { kotlin.math.round(it).toInt() }
+                "$remaining%"
+            }
+        }
+    }
+
+    fun pace(nowMs: Long = System.currentTimeMillis()): UsagePace? =
+        UsagePace.evaluate(percentUsed, resetsAtEpochMs, resetIntervalMs, nowMs)
 }
 
 data class ProviderUsageState(

@@ -175,6 +175,8 @@ final class DeviceSyncPayloadTests: XCTestCase {
                 secondaryMetric: "seven_day",
                 detailStyle: "orbit",
                 textSize: "medium"
+            ,
+                fillMode: "drain"
             ),
             notifications: DeviceSyncNotifications(
                 claudeSession: 80,
@@ -194,6 +196,7 @@ final class DeviceSyncPayloadTests: XCTestCase {
 
         XCTAssertNil(payload.connections)
         XCTAssertNil(object["connections"])
+        XCTAssertEqual(payload.appearance?.fillMode, "drain")
         XCTAssertEqual(payload.version, 1)
     }
 

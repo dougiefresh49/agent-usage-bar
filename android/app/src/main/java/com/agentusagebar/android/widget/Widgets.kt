@@ -47,6 +47,8 @@ import com.agentusagebar.android.MainActivity
 import com.agentusagebar.android.R
 import com.agentusagebar.android.data.credentials.SettingsStore
 import com.agentusagebar.android.data.model.DetailVisualizationStyle
+import com.agentusagebar.android.data.model.UsageFillMode
+import com.agentusagebar.android.data.model.metricLabelForMode
 import com.agentusagebar.android.data.model.ProviderUsageState
 import com.agentusagebar.android.data.model.UsageMetric
 import com.agentusagebar.android.data.model.UsageMetricPreferences
@@ -163,6 +165,7 @@ abstract class SnapshotOverviewWidget(
                 OverviewWidgetContent(
                     providers = loaded.providers,
                     style = settings.detailStyle,
+                    fillMode = settings.fillMode,
                     preferredProvider = settings.widgetProvider,
                     primaryMetric = settings.primaryMetric,
                     secondaryMetric = settings.secondaryMetric,
@@ -205,6 +208,7 @@ class ProviderWidget : GlanceAppWidget() {
                 ProviderWidgetContent(
                     state = orderedState,
                     style = settings.detailStyle,
+                    fillMode = settings.fillMode,
                     claudeOrbitCenterMetric = settings.claudeWidgetOrbitCenterMetric,
                     cursorRenewsAtEpochMs = loaded.cursorRenewsAtEpochMs,
                 )
@@ -217,6 +221,7 @@ class ProviderWidget : GlanceAppWidget() {
 private fun OverviewWidgetContent(
     providers: Map<UsageProvider, ProviderUsageState>,
     style: DetailVisualizationStyle,
+    fillMode: UsageFillMode,
     preferredProvider: UsageProvider,
     primaryMetric: String,
     secondaryMetric: String,
@@ -251,6 +256,7 @@ private fun OverviewWidgetContent(
             ResponsiveOverviewLayout.GRID -> OverviewGrid(
                 states = states,
                 style = style,
+                fillMode = fillMode,
                 preferredProvider = preferredProvider,
                 primaryMetric = primaryMetric,
                 secondaryMetric = secondaryMetric,
@@ -268,9 +274,10 @@ private fun OverviewWidgetContent(
             ) {
                 states.forEachIndexed { index, state ->
                     StripOverviewCell(
-                        state,
-                        style,
-                        preferredProvider,
+                    state,
+                    style,
+                    fillMode,
+                    preferredProvider,
                         primaryMetric,
                         secondaryMetric,
                         claudeOrbitCenterMetric,
@@ -289,9 +296,10 @@ private fun OverviewWidgetContent(
             ) {
                 states.forEachIndexed { index, state ->
                     StripOverviewCell(
-                        state,
-                        style,
-                        preferredProvider,
+                    state,
+                    style,
+                    fillMode,
+                    preferredProvider,
                         primaryMetric,
                         secondaryMetric,
                         claudeOrbitCenterMetric,
@@ -319,6 +327,7 @@ private fun OverviewWidgetContent(
 private fun OverviewGrid(
     states: List<ProviderUsageState>,
     style: DetailVisualizationStyle,
+    fillMode: UsageFillMode,
     preferredProvider: UsageProvider,
     primaryMetric: String,
     secondaryMetric: String,
@@ -338,6 +347,7 @@ private fun OverviewGrid(
                 OverviewCell(
                     state,
                     style,
+                    fillMode,
                     preferredProvider,
                     primaryMetric,
                     secondaryMetric,
@@ -360,6 +370,7 @@ private fun OverviewGrid(
                 OverviewCell(
                     state,
                     style,
+                    fillMode,
                     preferredProvider,
                     primaryMetric,
                     secondaryMetric,
@@ -380,6 +391,7 @@ private fun OverviewGrid(
 private fun OverviewCell(
     state: ProviderUsageState,
     style: DetailVisualizationStyle,
+    fillMode: UsageFillMode,
     preferredProvider: UsageProvider,
     primaryMetric: String,
     secondaryMetric: String,
@@ -426,6 +438,7 @@ private fun OverviewCell(
                 secondaryPercent = secondary?.percentUsed,
                 centerLabel = label.take(7),
                 countdownFraction = countdown,
+                fillMode = fillMode,
             )
             Image(
                 provider = ImageProvider(bitmap),
@@ -438,6 +451,7 @@ private fun OverviewCell(
                 secondary = displaySecondary,
                 fontSizeSp = labelFontSizeSp,
                 includeSecondary = showSecondaryMetrics,
+                fillMode = fillMode,
             )
         } else {
             ProviderValueRow(
@@ -446,13 +460,14 @@ private fun OverviewCell(
                 secondary = secondary,
                 fontSizeSp = labelFontSizeSp,
                 includeSecondary = showSecondaryMetrics,
+                fillMode = fillMode,
             )
             Spacer(GlanceModifier.height(2.dp))
-            UsageBarGlance(primary?.percentUsed)
+            UsageBarGlance(primary?.percentUsed, fillMode = fillMode)
             secondary?.takeIf { showSecondaryMetrics }?.let {
                 Spacer(GlanceModifier.height(2.dp))
                 Text(
-                    text = it.displayValue,
+                    text = it.displayValue(fillMode),
                     style = TextStyle(
                         color = ColorProvider(WidgetMuted),
                         fontSize = labelFontSizeSp.sp,
@@ -471,17 +486,18 @@ private fun ProviderValueRow(
     secondary: UsageMetric?,
     fontSizeSp: Float,
     includeSecondary: Boolean,
+    fillMode: UsageFillMode,
 ) {
     val value = when {
         !state.isConfigured -> "Connect"
         primary == null -> "…"
         else -> listOfNotNull(
-            primary.displayValue,
+            primary.displayValue(fillMode),
             secondary
                 ?.takeIf {
                     includeSecondary && (it.percentUsed != null || it.countValue != null)
                 }
-                ?.displayValue,
+                ?.displayValue(fillMode),
         ).joinToString(" · ")
     }
     // Keep the name + value as a compact centered group under the chart.
@@ -513,6 +529,7 @@ private fun ProviderValueRow(
 private fun StripOverviewCell(
     state: ProviderUsageState,
     style: DetailVisualizationStyle,
+    fillMode: UsageFillMode,
     preferredProvider: UsageProvider,
     primaryMetric: String,
     secondaryMetric: String,
@@ -552,6 +569,7 @@ private fun StripOverviewCell(
                     orbitCenter?.resetsAtEpochMs,
                     orbitCenter?.resetIntervalMs,
                 ),
+                fillMode = fillMode,
             )
             Image(
                 provider = ImageProvider(bitmap),
@@ -560,7 +578,7 @@ private fun StripOverviewCell(
             )
         } else {
             Text(
-                text = primary?.displayValue ?: if (state.isConfigured) "…" else "Connect",
+                text = primary?.displayValue(fillMode) ?: if (state.isConfigured) "…" else "Connect",
                 style = TextStyle(
                     color = ColorProvider(WidgetFg),
                     fontSize = labelFontSizeSp.sp,
@@ -569,13 +587,14 @@ private fun StripOverviewCell(
                 maxLines = 1,
             )
             Spacer(GlanceModifier.height(2.dp))
-            UsageBarGlance(primary?.percentUsed)
+            UsageBarGlance(primary?.percentUsed, fillMode = fillMode)
             Spacer(GlanceModifier.height(2.dp))
         }
         Text(
             text = stripCaption(
                 state,
                 if (style == DetailVisualizationStyle.ORBIT) displayMetric else primary,
+                fillMode = fillMode,
             ),
             style = TextStyle(
                 color = ColorProvider(WidgetMuted),
@@ -617,11 +636,15 @@ internal fun claudeWidgetMetric(
     ) ?: fallback
 }
 
-private fun stripCaption(state: ProviderUsageState, primary: UsageMetric?): String {
+private fun stripCaption(
+    state: ProviderUsageState,
+    primary: UsageMetric?,
+    fillMode: UsageFillMode,
+): String {
     val value = when {
         !state.isConfigured -> "Connect"
         primary == null -> "…"
-        else -> primary.displayValue
+        else -> primary.displayValue(fillMode)
     }
     return "${state.provider.shortName} $value"
 }
@@ -692,6 +715,7 @@ private fun QuickAction(
 private fun ProviderWidgetContent(
     state: ProviderUsageState,
     style: DetailVisualizationStyle,
+    fillMode: UsageFillMode,
     claudeOrbitCenterMetric: String,
     cursorRenewsAtEpochMs: Long? = null,
 ) {
@@ -755,6 +779,7 @@ private fun ProviderWidgetContent(
                     secondaryPercent = secondary?.percentUsed,
                     centerLabel = center.take(8),
                     countdownFraction = countdown,
+                    fillMode = fillMode,
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Image(
@@ -771,12 +796,12 @@ private fun ProviderWidgetContent(
                                 else -> OrbitOrange
                             }
                             val value = if (metric.countValue != null) {
-                                "${metric.displayValue} available"
+                                "${metric.displayValue(fillMode)} available"
                             } else {
-                                metric.displayValue
+                                metric.displayValue(fillMode)
                             }
                             Text(
-                                text = "● ${shortMetricLabel(metric)} $value",
+                                text = "● ${shortMetricLabel(metric, fillMode)} $value",
                                 style = TextStyle(color = ColorProvider(tint), fontSize = 11.sp),
                                 maxLines = 1,
                             )
@@ -787,12 +812,12 @@ private fun ProviderWidgetContent(
                 val shownIds = (ringMetrics + legendMetrics).map { it.id }.toSet()
                 state.metrics.filter { it.id !in shownIds }.take(2).forEach { metric ->
                     Spacer(GlanceModifier.height(6.dp))
-                    MetricLine(metric, compact = false)
+                    MetricLine(metric, compact = false, fillMode = fillMode)
                 }
             }
             else -> {
                 state.metrics.take(3).forEach { metric ->
-                    MetricLine(metric, compact = false)
+                    MetricLine(metric, compact = false, fillMode = fillMode)
                     Spacer(GlanceModifier.height(8.dp))
                 }
             }
@@ -801,8 +826,12 @@ private fun ProviderWidgetContent(
 }
 
 @Composable
-private fun MetricLine(metric: UsageMetric, compact: Boolean) {
-    val label = if (compact) shortMetricLabel(metric) else metric.label
+private fun MetricLine(metric: UsageMetric, compact: Boolean, fillMode: UsageFillMode) {
+    val label = if (compact) {
+        shortMetricLabel(metric, fillMode)
+    } else {
+        metricLabelForMode(metric.id, metric.label, fillMode)
+    }
     Column(modifier = GlanceModifier.fillMaxWidth()) {
         Row(modifier = GlanceModifier.fillMaxWidth()) {
             Text(
@@ -815,7 +844,7 @@ private fun MetricLine(metric: UsageMetric, compact: Boolean) {
                 modifier = GlanceModifier.defaultWeight(),
             )
             Text(
-                text = metric.displayValue,
+                text = metric.displayValue(fillMode),
                 style = TextStyle(
                     color = ColorProvider(WidgetFg),
                     fontSize = if (compact) 11.sp else 12.sp,
@@ -824,7 +853,7 @@ private fun MetricLine(metric: UsageMetric, compact: Boolean) {
             )
         }
         Spacer(GlanceModifier.height(3.dp))
-        UsageBarGlance(metric.percentUsed)
+        UsageBarGlance(metric.percentUsed, fillMode = fillMode)
         if (!compact) {
             metric.resetsAtEpochMs?.let { reset ->
                 Spacer(GlanceModifier.height(2.dp))
@@ -843,18 +872,23 @@ private fun MetricLine(metric: UsageMetric, compact: Boolean) {
     }
 }
 
-private fun shortMetricLabel(metric: UsageMetric): String = when (metric.id) {
+private fun shortMetricLabel(
+    metric: UsageMetric,
+    fillMode: UsageFillMode = UsageFillMode.DRAIN,
+): String = when (metric.id) {
     UsageMetricPreferences.CLAUDE_FIVE_HOUR -> "5h"
     UsageMetricPreferences.CLAUDE_SEVEN_DAY -> "7d"
     UsageMetricPreferences.CURSOR_MODELS -> "Models"
     UsageMetricPreferences.CURSOR_API -> "API"
-    UsageMetricPreferences.CURSOR_TOTAL -> "Total"
+    UsageMetricPreferences.CURSOR_TOTAL ->
+        if (fillMode == UsageFillMode.DRAIN) "Total Plan" else "Total"
     UsageMetricPreferences.OPENAI_PRIMARY -> "Primary"
     UsageMetricPreferences.OPENAI_SECONDARY -> "Secondary"
     UsageMetricPreferences.OPENAI_RESET_CREDITS -> "Reset Credits"
-    UsageMetricPreferences.ELEVENLABS_CREDITS -> "Used"
+    UsageMetricPreferences.ELEVENLABS_CREDITS ->
+        if (fillMode == UsageFillMode.DRAIN) "Credits" else "Used"
     UsageMetricPreferences.ELEVENLABS_REMAINING -> "Left"
-    else -> metric.label
+    else -> metricLabelForMode(metric.id, metric.label, fillMode)
         .replace(" Window", "")
         .replace(" (7 day)", "")
         .replace(" (session)", "")
@@ -862,11 +896,13 @@ private fun shortMetricLabel(metric: UsageMetric): String = when (metric.id) {
 }
 
 @Composable
-private fun UsageBarGlance(percent: Double?) {
-    val fraction = ((percent ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f)
+private fun UsageBarGlance(percent: Double?, fillMode: UsageFillMode = UsageFillMode.DRAIN) {
+    // Colour still keys off used percent; only the drawn length follows the mode.
+    val usedFraction = ((percent ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f)
+    val fraction = fillMode.barFraction(percent ?: 0.0)
     val fill = when {
-        fraction < 0.60f -> Green
-        fraction < 0.80f -> Yellow
+        usedFraction < 0.60f -> Green
+        usedFraction < 0.80f -> Yellow
         else -> Red
     }
     LinearProgressIndicator(

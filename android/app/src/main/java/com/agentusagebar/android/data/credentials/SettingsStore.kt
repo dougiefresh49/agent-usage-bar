@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.agentusagebar.android.data.model.DetailVisualizationStyle
+import com.agentusagebar.android.data.model.UsageFillMode
 import com.agentusagebar.android.data.model.UsageMetricPreferences
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.data.model.UsageTextSize
@@ -30,6 +31,7 @@ data class AppSettings(
     val claudeWidgetOrbitCenterMetric: String = UsageMetricPreferences.CLAUDE_FIVE_HOUR,
     val claudeWidgetDisplayMetric: String = UsageMetricPreferences.CLAUDE_FIVE_HOUR,
     val detailStyle: DetailVisualizationStyle = DetailVisualizationStyle.BARS,
+    val fillMode: UsageFillMode = UsageFillMode.DRAIN,
     val textSize: UsageTextSize = UsageTextSize.COMFORTABLE,
     val claudeSessionThreshold: Int = 80,
     val claudeSevenDayThreshold: Int = 0,
@@ -61,6 +63,9 @@ class SettingsStore(private val context: Context) {
             detailStyle = prefs[KEY_DETAIL_STYLE]
                 ?.let { enumValueOrNull<DetailVisualizationStyle>(it) }
                 ?: DetailVisualizationStyle.BARS,
+            fillMode = prefs[KEY_FILL_MODE]
+                ?.let { enumValueOrNull<UsageFillMode>(it) }
+                ?: UsageFillMode.DRAIN,
             textSize = prefs[KEY_TEXT_SIZE]
                 ?.let { enumValueOrNull<UsageTextSize>(it) }
                 ?: UsageTextSize.COMFORTABLE,
@@ -132,6 +137,10 @@ class SettingsStore(private val context: Context) {
         context.settingsDataStore.edit { it[KEY_DETAIL_STYLE] = style.name }
     }
 
+    suspend fun setFillMode(mode: UsageFillMode) {
+        context.settingsDataStore.edit { it[KEY_FILL_MODE] = mode.name }
+    }
+
     suspend fun setTextSize(size: UsageTextSize) {
         context.settingsDataStore.edit { it[KEY_TEXT_SIZE] = size.name }
     }
@@ -188,6 +197,11 @@ class SettingsStore(private val context: Context) {
                 enumValueOrNull<DetailVisualizationStyle>(appearance.detailStyle)?.let {
                     prefs[KEY_DETAIL_STYLE] = it.name
                 }
+                appearance.fillMode?.let { raw ->
+                    enumValueOrNull<UsageFillMode>(raw)?.let {
+                        prefs[KEY_FILL_MODE] = it.name
+                    }
+                }
                 enumValueOrNull<UsageTextSize>(appearance.textSize)?.let {
                     prefs[KEY_TEXT_SIZE] = it.name
                 }
@@ -230,6 +244,7 @@ class SettingsStore(private val context: Context) {
         private val KEY_CLAUDE_WIDGET_DISPLAY =
             stringPreferencesKey("claude_widget_display_metric")
         private val KEY_DETAIL_STYLE = stringPreferencesKey("detail_style")
+        private val KEY_FILL_MODE = stringPreferencesKey("usage_fill_mode")
         private val KEY_TEXT_SIZE = stringPreferencesKey("text_size")
         private val KEY_CLAUDE_SESSION = intPreferencesKey("threshold_claude_session")
         private val KEY_CLAUDE_SEVEN_DAY = intPreferencesKey("threshold_claude_seven_day")

@@ -53,6 +53,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.agentusagebar.android.BuildConfig
 import com.agentusagebar.android.data.credentials.SettingsStore
 import com.agentusagebar.android.data.model.DetailVisualizationStyle
+import com.agentusagebar.android.data.model.UsageFillMode
 import com.agentusagebar.android.data.model.UsageMetricPreferences
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.data.model.UsageTextSize
@@ -247,6 +248,23 @@ fun SettingsScreen(
                                     selected = settings.detailStyle == style,
                                     onClick = { viewModel.setDetailStyle(style) },
                                     label = { Text(style.displayName) },
+                                )
+                            }
+                        }
+
+                        HorizontalDivider()
+                        Text("Usage Display", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Fill shows what you have used: bars grow and the headline reads \"31% used\". Drain shows what is left: bars shrink and the headline reads \"69% left\".",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            UsageFillMode.entries.forEach { mode ->
+                                FilterChip(
+                                    selected = settings.fillMode == mode,
+                                    onClick = { viewModel.setFillMode(mode) },
+                                    label = { Text(mode.displayName) },
                                 )
                             }
                         }

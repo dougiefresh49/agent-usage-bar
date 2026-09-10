@@ -242,4 +242,49 @@ class DeviceSyncCodecTest {
         )
         assertEquals("snapshot-body", opened.toString(Charsets.UTF_8))
     }
+
+    @Test
+    fun decodesFillModeWhenPresent() {
+        val json = """
+            {
+              "version": 1,
+              "issuedAtEpochSeconds": 100,
+              "expiresAtEpochSeconds": 300,
+              "appearance": {
+                "preferredProvider": "cursor",
+                "menuBarStyle": "bars",
+                "primaryMetric": "cursor.total",
+                "secondaryMetric": "cursor.models",
+                "detailStyle": "orbit",
+                "textSize": "comfortable",
+                "fillMode": "fill"
+              }
+            }
+        """.trimIndent()
+
+        val payload = DeviceSyncCodec.decodePayload(json.toByteArray(), nowSeconds = 200)
+        assertEquals("fill", payload.appearance?.fillMode)
+    }
+
+    @Test
+    fun missingFillModeDecodesAsNull() {
+        val json = """
+            {
+              "version": 1,
+              "issuedAtEpochSeconds": 100,
+              "expiresAtEpochSeconds": 300,
+              "appearance": {
+                "preferredProvider": "cursor",
+                "menuBarStyle": "bars",
+                "primaryMetric": "cursor.total",
+                "secondaryMetric": "cursor.models",
+                "detailStyle": "orbit",
+                "textSize": "comfortable"
+              }
+            }
+        """.trimIndent()
+
+        val payload = DeviceSyncCodec.decodePayload(json.toByteArray(), nowSeconds = 200)
+        assertNull(payload.appearance?.fillMode)
+    }
 }

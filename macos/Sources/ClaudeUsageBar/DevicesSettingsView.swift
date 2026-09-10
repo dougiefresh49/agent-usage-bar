@@ -160,7 +160,10 @@ struct DevicesSettingsView: View {
                 ) ?? UsagePresentationDefaults.detailStyle.rawValue,
                 textSize: UserDefaults.standard.string(
                     forKey: UsagePresentationDefaults.textSizeKey
-                ) ?? UsagePresentationDefaults.textSize.rawValue
+                ) ?? UsagePresentationDefaults.textSize.rawValue,
+                fillMode: UserDefaults.standard.string(
+                    forKey: UsagePresentationDefaults.fillModeKey
+                ) ?? UsagePresentationDefaults.fillMode.rawValue
             ),
             notifications: DeviceSyncNotifications(
                 claudeSession: notificationService.claudeSessionThreshold,
@@ -388,7 +391,10 @@ private struct AddDeviceSheet: View {
                         ) ?? UsagePresentationDefaults.detailStyle.rawValue,
                         textSize: UserDefaults.standard.string(
                             forKey: UsagePresentationDefaults.textSizeKey
-                        ) ?? UsagePresentationDefaults.textSize.rawValue
+                        ) ?? UsagePresentationDefaults.textSize.rawValue,
+                        fillMode: UserDefaults.standard.string(
+                            forKey: UsagePresentationDefaults.fillModeKey
+                        ) ?? UsagePresentationDefaults.fillMode.rawValue
                     )
                     : nil,
                 notifications: syncNotifications

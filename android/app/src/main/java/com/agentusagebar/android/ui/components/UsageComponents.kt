@@ -34,6 +34,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.agentusagebar.android.data.model.DetailVisualizationStyle
+import com.agentusagebar.android.data.model.UsageFillMode
+import com.agentusagebar.android.data.model.UsagePace
+import com.agentusagebar.android.data.model.metricLabelForMode
 import com.agentusagebar.android.data.model.ProviderUsageState
 import com.agentusagebar.android.data.model.UsageMetric
 import com.agentusagebar.android.data.model.UsageMetricPreferences
@@ -53,6 +56,7 @@ fun ProviderOverviewGrid(
     preferredProvider: UsageProvider = UsageProvider.CLAUDE,
     primaryMetric: String = "",
     secondaryMetric: String = "",
+    fillMode: UsageFillMode = UsageFillMode.DRAIN,
 ) {
     val entries = UsageProvider.entries
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -69,6 +73,7 @@ fun ProviderOverviewGrid(
                         onClick = { onSelect(provider) },
                         primaryMetric = if (provider == preferredProvider) primaryMetric else "",
                         secondaryMetric = if (provider == preferredProvider) secondaryMetric else "",
+                        fillMode = fillMode,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -87,6 +92,7 @@ private fun ProviderSummaryCard(
     onClick: () -> Unit,
     primaryMetric: String,
     secondaryMetric: String,
+    fillMode: UsageFillMode = UsageFillMode.DRAIN,
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(12.dp)
@@ -123,7 +129,7 @@ private fun ProviderSummaryCard(
             state.metrics.all { it.percentUsed == null && it.countValue == null } && state.error != null ->
                 StatusChip("Check account", error = true)
             state.metrics.all { it.percentUsed == null && it.countValue == null } -> StatusChip("Loading…")
-            else -> summaryMetrics.take(2).forEach { MiniMetricRow(it) }
+            else -> summaryMetrics.take(2).forEach { MiniMetricRow(it, fillMode = fillMode) }
         }
     }
 }
@@ -151,7 +157,10 @@ private fun StatusChip(text: String, error: Boolean = false) {
 }
 
 @Composable
-private fun MiniMetricRow(metric: UsageMetric) {
+private fun MiniMetricRow(
+    metric: UsageMetric,
+    fillMode: UsageFillMode = UsageFillMode.DRAIN,
+) {
     val compact = when (metric.id) {
         UsageMetricPreferences.CLAUDE_FIVE_HOUR -> "5h"
         UsageMetricPreferences.CLAUDE_SEVEN_DAY -> "7d"
@@ -161,7 +170,8 @@ private fun MiniMetricRow(metric: UsageMetric) {
         UsageMetricPreferences.OPENAI_PRIMARY -> compactWindowLabel(metric.resetIntervalMs) ?: "Pri"
         UsageMetricPreferences.OPENAI_SECONDARY -> compactWindowLabel(metric.resetIntervalMs) ?: "Sec"
         UsageMetricPreferences.OPENAI_RESET_CREDITS -> "Reset"
-        UsageMetricPreferences.ELEVENLABS_CREDITS -> "Used"
+        UsageMetricPreferences.ELEVENLABS_CREDITS ->
+            if (fillMode == UsageFillMode.DRAIN) "Credits" else "Used"
         UsageMetricPreferences.ELEVENLABS_REMAINING -> "Left"
         else -> metric.label.take(6)
     }
@@ -175,13 +185,18 @@ private fun MiniMetricRow(metric: UsageMetric) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = metric.displayValue,
+                text = metric.displayValue(fillMode),
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
             )
         }
         if (metric.percentUsed != null) {
-            UsageBar(percent = metric.percentUsed, height = 3.dp, style = DetailVisualizationStyle.BARS)
+            UsageBar(
+                percent = metric.percentUsed,
+                height = 3.dp,
+                style = DetailVisualizationStyle.BARS,
+                fillMode = fillMode,
+            )
         }
     }
 }
@@ -193,6 +208,7 @@ fun ProviderDetailSection(
     provider: UsageProvider,
     primaryMetric: String = "",
     secondaryMetric: String = "",
+    fillMode: UsageFillMode = UsageFillMode.DRAIN,
 ) {
     val ordered = UsageMetricPreferences.orderedMetrics(
         provider = provider,
@@ -211,19 +227,31 @@ fun ProviderDetailSection(
             val ringMetrics = pair.filter { it.percentUsed != null }.take(2)
             val legendMetrics = orbitLegendMetrics(pair.ifEmpty { ordered })
             if (ringMetrics.isNotEmpty()) {
-                OrbitUsageBlock(ringMetrics = ringMetrics, legendMetrics = legendMetrics)
+                OrbitUsageBlock(
+                    ringMetrics = ringMetrics,
+                    legendMetrics = legendMetrics,
+                    fillMode = fillMode,
+                )
                 Spacer(modifier = Modifier.height(12.dp))
             }
             val shownIds = (ringMetrics + legendMetrics).map { it.id }.toSet()
             ordered.filter { it.id !in shownIds }.forEach { metric ->
-                UsageMetricRow(metric, style = DetailVisualizationStyle.BARS)
+                UsageMetricRow(metric, style = DetailVisualizationStyle.BARS, fillMode = fillMode)
                 Spacer(modifier = Modifier.height(8.dp))
             }
         }
         else -> ordered.forEach { metric ->
-            UsageMetricRow(metric, style = style)
+            UsageMetricRow(metric, style = style, fillMode = fillMode)
             Spacer(modifier = Modifier.height(8.dp))
         }
+    }
+    if (ordered.any { it.pace() != null }) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "↗ ahead of pace   — on pace   ↘ under pace",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -249,6 +277,7 @@ fun orbitLegendMetrics(metrics: List<UsageMetric>): List<UsageMetric> {
 fun OrbitUsageBlock(
     ringMetrics: List<UsageMetric>,
     legendMetrics: List<UsageMetric> = ringMetrics,
+    fillMode: UsageFillMode = UsageFillMode.DRAIN,
 ) {
     val primary = ringMetrics.getOrNull(0)
     val secondary = ringMetrics.getOrNull(1)
@@ -264,6 +293,7 @@ fun OrbitUsageBlock(
                 primaryPercent = primary?.percentUsed,
                 secondaryPercent = secondary?.percentUsed,
                 countdownFraction = countdown,
+                fillMode = fillMode,
                 modifier = Modifier.size(120.dp),
             )
             Text(
@@ -288,11 +318,14 @@ fun OrbitUsageBlock(
                             ),
                     )
                     Spacer(modifier = Modifier.width(8.dp))
+                    val pace = metric.pace()
+                    val label = metricLabelForMode(metric.id, metric.label, fillMode)
+                    val value = metric.displayValue(fillMode)
                     Text(
-                        text = if (metric.countValue != null) {
-                            "${metric.label} ${metric.displayValue} available"
-                        } else {
-                            "${metric.label} ${metric.displayValue}"
+                        text = buildString {
+                            if (pace != null) append(pace.glyph).append(" ")
+                            append(label).append(" ").append(value)
+                            if (metric.countValue != null) append(" available")
                         },
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -307,10 +340,11 @@ fun OrbitRings(
     primaryPercent: Double?,
     secondaryPercent: Double?,
     countdownFraction: Float = 0f,
+    fillMode: UsageFillMode = UsageFillMode.DRAIN,
     modifier: Modifier = Modifier,
 ) {
-    val primary = ((primaryPercent ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f)
-    val secondary = ((secondaryPercent ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f)
+    val primary = fillMode.barFraction(primaryPercent ?: 0.0)
+    val secondary = fillMode.barFraction(secondaryPercent ?: 0.0)
     val hasSecondary = secondaryPercent != null
     val drain = countdownFraction.coerceIn(0f, 1f)
     Canvas(modifier = modifier) {
@@ -390,18 +424,34 @@ fun OrbitRings(
 fun UsageMetricRow(
     metric: UsageMetric,
     style: DetailVisualizationStyle = DetailVisualizationStyle.BARS,
+    fillMode: UsageFillMode = UsageFillMode.DRAIN,
 ) {
+    val pace = metric.pace()
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
-            Text(text = metric.label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             Text(
-                text = metric.displayValue,
+                text = metricLabelForMode(metric.id, metric.label, fillMode),
                 style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.weight(1f),
             )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (pace != null && style != DetailVisualizationStyle.ORBIT) {
+                    Text(
+                        text = pace.glyph,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+                Text(
+                    text = metric.displayValue(fillMode),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
         }
         metric.detail?.let {
             Text(
@@ -412,7 +462,12 @@ fun UsageMetricRow(
             )
         }
         if (metric.percentUsed != null) {
-            UsageBar(percent = metric.percentUsed, height = if (style == DetailVisualizationStyle.CAPSULE) 10.dp else 6.dp, style = style)
+            UsageBar(
+                percent = metric.percentUsed,
+                height = if (style == DetailVisualizationStyle.CAPSULE) 10.dp else 6.dp,
+                style = style,
+                fillMode = fillMode,
+            )
         }
         metric.resetsAtEpochMs?.let { reset ->
             Text(
@@ -429,8 +484,9 @@ fun UsageBar(
     percent: Double?,
     height: Dp,
     style: DetailVisualizationStyle = DetailVisualizationStyle.BARS,
+    fillMode: UsageFillMode = UsageFillMode.DRAIN,
 ) {
-    val progress = ((percent ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f)
+    val progress = fillMode.barFraction(percent ?: 0.0)
     val shape = if (style == DetailVisualizationStyle.CAPSULE) RoundedCornerShape(50) else RoundedCornerShape(4.dp)
     LinearProgressIndicator(
         progress = { progress },

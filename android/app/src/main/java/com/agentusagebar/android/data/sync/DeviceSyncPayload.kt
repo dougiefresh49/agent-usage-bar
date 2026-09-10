@@ -40,6 +40,7 @@ data class DeviceSyncAppearance(
     val secondaryMetric: String,
     val detailStyle: String,
     val textSize: String,
+    val fillMode: String? = null,
 )
 
 @Serializable

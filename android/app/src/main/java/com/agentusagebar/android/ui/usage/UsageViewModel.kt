@@ -309,6 +309,10 @@ class UsageViewModel(
         viewModelScope.launch { repository.setDetailStyle(style) }
     }
 
+    fun setFillMode(mode: com.agentusagebar.android.data.model.UsageFillMode) {
+        viewModelScope.launch { repository.setFillMode(mode) }
+    }
+
     fun setTextSize(size: com.agentusagebar.android.data.model.UsageTextSize) {
         viewModelScope.launch { repository.setTextSize(size) }
     }

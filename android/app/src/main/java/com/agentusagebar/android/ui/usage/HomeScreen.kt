@@ -173,6 +173,7 @@ private fun HomeScreen(
                 preferredProvider = appSettings.widgetProvider,
                 primaryMetric = appSettings.primaryMetric,
                 secondaryMetric = appSettings.secondaryMetric,
+                fillMode = appSettings.fillMode,
             )
 
             HorizontalDivider()
@@ -299,6 +300,7 @@ private fun HomeScreen(
                         } else {
                             defaults.second
                         },
+                        fillMode = appSettings.fillMode,
                     )
 
                     if (selected == UsageProvider.OPENAI) {
