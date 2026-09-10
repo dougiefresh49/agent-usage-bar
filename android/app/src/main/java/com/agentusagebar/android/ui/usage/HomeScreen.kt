@@ -102,6 +102,7 @@ private fun HomeScreen(
     val message by viewModel.message.collectAsStateWithLifecycle()
     val resetCreditState by viewModel.resetCreditState.collectAsStateWithLifecycle()
     val resetCreditSummary by viewModel.resetCreditSummary.collectAsStateWithLifecycle()
+    val isOpenAIConfigured by viewModel.isOpenAIConfigured.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
 
@@ -205,7 +206,17 @@ private fun HomeScreen(
                     }
                 }
 
-                selectedState?.isConfigured != true -> {
+                // Codex: openAIBearer (CLI-first), not the pasted-token-only snapshot flag.
+                selected == UsageProvider.OPENAI && !isOpenAIConfigured -> {
+                    Text(
+                        text = "Add a ChatGPT session token in Settings.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    TextButton(onClick = onOpenSettings) { Text("Open Settings") }
+                }
+
+                selected != UsageProvider.OPENAI && selectedState?.isConfigured != true -> {
                     Text(
                         text = when (selected) {
                             UsageProvider.CLAUDE -> "Connect Claude to view account limits."
@@ -235,7 +246,10 @@ private fun HomeScreen(
                     }
                 }
 
-                selectedState.metrics.isEmpty() && selectedState.error == null -> {
+                // CLI-only Codex never gets snapshot.isConfigured; skip the forever spinner.
+                selectedState?.metrics.isNullOrEmpty() == true &&
+                    selectedState?.error == null &&
+                    !(selected == UsageProvider.OPENAI && selectedState?.isConfigured != true) -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.height(18.dp))
                         Spacer(modifier = Modifier.padding(6.dp))
@@ -247,7 +261,7 @@ private fun HomeScreen(
                     val usesPreferredStats = selected == appSettings.widgetProvider
                     val defaults = UsageMetricPreferences.defaults(selected)
                     ProviderDetailSection(
-                        metrics = selectedState.metrics,
+                        metrics = selectedState?.metrics.orEmpty(),
                         style = appSettings.detailStyle,
                         provider = selected,
                         primaryMetric = if (usesPreferredStats) {

@@ -102,9 +102,14 @@ class UsageViewModel(
     private val _resetCreditSummary = MutableStateFlow(ResetCreditSummary())
     val resetCreditSummary = _resetCreditSummary.asStateFlow()
 
+    /** True when openAIBearer is set (CLI token first, then pasted session token). */
+    private val _isOpenAIConfigured = MutableStateFlow(false)
+    val isOpenAIConfigured = _isOpenAIConfigured.asStateFlow()
+
     private var outcomeClearJob: Job? = null
 
     init {
+        refreshOpenAIConfiguredFlag()
         viewModelScope.launch {
             repository.refreshAll()
             UsageRefreshScheduler.ensureScheduled(AgentUsageBarAppHolder.context())
@@ -117,6 +122,11 @@ class UsageViewModel(
         if (provider == UsageProvider.OPENAI) {
             viewModelScope.launch { refreshResetCreditSummary() }
         }
+    }
+
+    private fun refreshOpenAIConfiguredFlag() {
+        _isOpenAIConfigured.value =
+            !credentialsStore.loadConnected().openAIBearer.isNullOrBlank()
     }
 
     fun setClaudeCode(value: String) {
@@ -200,6 +210,7 @@ class UsageViewModel(
         val summary = withContext(Dispatchers.IO) {
             runCatching {
                 val credentials = credentialsStore.loadConnected()
+                _isOpenAIConfigured.value = !credentials.openAIBearer.isNullOrBlank()
                 val bearer = credentials.openAIBearer
                     ?: error("OpenAI not configured")
                 val response = resetCreditClient.fetchCredits(
@@ -225,7 +236,10 @@ class UsageViewModel(
                     nextExpiresInDays = days,
                     soonestCreditId = soonest?.id,
                 )
-            }.getOrElse { ResetCreditSummary() }
+            }.getOrElse {
+                refreshOpenAIConfiguredFlag()
+                ResetCreditSummary()
+            }
         }
         _resetCreditSummary.value = summary
     }
@@ -261,7 +275,11 @@ class UsageViewModel(
     fun saveOpenAIToken(token: String) {
         viewModelScope.launch {
             repository.saveOpenAIToken(token)
-                .onSuccess { _message.value = "OpenAI session token saved locally." }
+                .onSuccess {
+                    refreshOpenAIConfiguredFlag()
+                    _message.value = "OpenAI session token saved locally."
+                    refreshResetCreditSummary()
+                }
                 .onFailure { _message.value = it.message }
         }
     }
@@ -275,7 +293,11 @@ class UsageViewModel(
     }
 
     fun clearOpenAIToken() {
-        viewModelScope.launch { repository.clearOpenAIToken() }
+        viewModelScope.launch {
+            repository.clearOpenAIToken()
+            refreshOpenAIConfiguredFlag()
+            refreshResetCreditSummary()
+        }
     }
 
     fun clearCursorToken() {
@@ -308,6 +330,8 @@ class UsageViewModel(
                 .onSuccess {
                     _message.value = it
                     _devicePairing.value = DevicePairingUiState()
+                    refreshOpenAIConfiguredFlag()
+                    refreshResetCreditSummary()
                     UsageRefreshScheduler.ensureScheduled(
                         AgentUsageBarAppHolder.context(),
                         forceReschedule = true,
@@ -345,6 +369,8 @@ class UsageViewModel(
                         DeviceSyncCheckResult.UNLINKED_BY_MAC ->
                             "$desktopName removed this phone. Imported credentials were removed."
                     }
+                    refreshOpenAIConfiguredFlag()
+                    refreshResetCreditSummary()
                     _deviceActions.value = _deviceActions.value + (
                         desktopID to DeviceActionUiState(
                             phase = DeviceActionPhase.SUCCESS,
@@ -401,6 +427,10 @@ class UsageViewModel(
                         else -> " No matching imported credentials remained."
                     }
                     _message.value = unlinkMessage + credentialsMessage
+                    if (removeImportedCredentials) {
+                        refreshOpenAIConfiguredFlag()
+                        refreshResetCreditSummary()
+                    }
                 }
                 .onFailure {
                     _deviceActions.value = _deviceActions.value + (
