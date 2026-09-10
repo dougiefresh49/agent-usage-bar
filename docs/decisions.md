@@ -8,6 +8,7 @@ as prose or were dropped, not backfilled.
 
 | # | date | decision | status |
 |---|------|----------|--------|
+| 20 | 2026-09-10 | #54 popover pace, the question at fix dispatch 4: the design still holds; round 4's three findings (additional Codex limits leaked into the menu-bar metric picker, seven-day geometry attached to every non-session model group, a "Resets" fallback where the spec says nothing) are each implementation misses, so dispatch 4 goes out and is the last one; anything left after round 5 is fixed or dismissed by the orchestrator's own read (#68) | accepted |
 | 19 | 2026-09-10 | The UUIDv5 RFC test vector in issue #46 and #51 is a typo; the correct value for UUIDv5(DNS namespace, "www.example.com") is 2ed6657d-e927-568b-95e1-2665a8aea6a2 (checked with Python's uuid5), and the tests keep that value | accepted |
 | 18 | 2026-09-10 | #46 reset-credit engine, the question at fix dispatch 3: the persisted pending attempt stays under the one defaults key the spec names but holds a map keyed by credit id, cleared per credit after an outcome decodes, so a failed send for one credit never loses another credit's request id; dispatch 3 goes out for that change only, and a further reviewer objection to this shape is dismissed by this row (#65) | accepted |
 | 17 | 2026-09-10 | #54 popover pace: overview capsules keep the compact used-percent text and only the per-window headline and detail rows switch to "left", reading owner decision 3's "headline only" narrowly (#68) | assumed (reopens when: Doug says the overview cards should read "left" too) |
