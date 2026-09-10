@@ -151,7 +151,7 @@ abstract class SnapshotOverviewWidget(
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         // Always read the persisted snapshot so all four providers render even if
         // the activity process is cold.
-        val providers = WidgetSnapshotStore.load(context)
+        val loaded = WidgetSnapshotStore.load(context)
         val settings = SettingsStore(context).settings.first()
         val openAppAction = actionStartActivity<MainActivity>()
         val openSettingsAction = actionStartActivityIntent(
@@ -161,7 +161,7 @@ abstract class SnapshotOverviewWidget(
         provideContent {
             GlanceTheme {
                 OverviewWidgetContent(
-                    providers = providers,
+                    providers = loaded.providers,
                     style = settings.detailStyle,
                     preferredProvider = settings.widgetProvider,
                     primaryMetric = settings.primaryMetric,
@@ -189,8 +189,8 @@ class VerticalWidget : SnapshotOverviewWidget()
 class ProviderWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val settings = SettingsStore(context).settings.first()
-        val providers = WidgetSnapshotStore.load(context)
-        val state = providers[settings.widgetProvider]
+        val loaded = WidgetSnapshotStore.load(context)
+        val state = loaded.providers[settings.widgetProvider]
             ?: ProviderUsageState(settings.widgetProvider, false)
         val orderedState = state.copy(
             metrics = UsageMetricPreferences.orderedMetrics(
@@ -206,6 +206,7 @@ class ProviderWidget : GlanceAppWidget() {
                     state = orderedState,
                     style = settings.detailStyle,
                     claudeOrbitCenterMetric = settings.claudeWidgetOrbitCenterMetric,
+                    cursorRenewsAtEpochMs = loaded.cursorRenewsAtEpochMs,
                 )
             }
         }
@@ -692,6 +693,7 @@ private fun ProviderWidgetContent(
     state: ProviderUsageState,
     style: DetailVisualizationStyle,
     claudeOrbitCenterMetric: String,
+    cursorRenewsAtEpochMs: Long? = null,
 ) {
     Column(
         modifier = GlanceModifier
@@ -709,6 +711,15 @@ private fun ProviderWidgetContent(
                 fontSize = 14.sp,
             ),
         )
+        if (state.provider == UsageProvider.CURSOR) {
+            cursorRenewsAtEpochMs?.let { renewsAt ->
+                Spacer(GlanceModifier.height(2.dp))
+                Text(
+                    text = formatRenewsIn(renewsAt),
+                    style = TextStyle(color = ColorProvider(WidgetMuted), fontSize = 11.sp),
+                )
+            }
+        }
         Spacer(GlanceModifier.height(8.dp))
         when {
             !state.isConfigured -> {
