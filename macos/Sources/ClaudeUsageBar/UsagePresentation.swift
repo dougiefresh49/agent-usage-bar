@@ -185,9 +185,9 @@ struct UsagePresentationMetric: Identifiable, Equatable {
         }
     }
 
-    /// Remaining-percent popover headline ("68% left"), or nil for counts and missing values.
+    /// Remaining-percent popover headline ("68% left") for paced windows; nil when geometry is missing.
     var remainingHeadlineText: String? {
-        guard case .percentage(let percent?) = kind else { return nil }
+        guard geometry != nil, case .percentage(let percent?) = kind else { return nil }
         return "\(UsagePace.remainingPercent(percent))% left"
     }
 
@@ -206,6 +206,16 @@ struct UsagePresentationMetric: Identifiable, Equatable {
         }
     }
 
+    /// Spoken pace label for popover accessibility, keyed on `UsagePace` rather than the glyph name.
+    func paceAccessibilityText(now: Date = Date()) -> String? {
+        switch pace(now: now) {
+        case .ahead: return "ahead of pace"
+        case .on: return "on pace"
+        case .under: return "under pace"
+        case nil: return nil
+        }
+    }
+
     func restoresLine(now: Date = Date()) -> String? {
         guard let geometry else { return nil }
         return UsagePace.restoresLine(geometry, now: now)
@@ -216,7 +226,12 @@ struct UsagePresentationMetric: Identifiable, Equatable {
         return UsagePace.elapsedShare(geometry, now: now)
     }
 
-    /// Used-percent accessibility for the menu bar and overview. Popover rows build their own from remainingHeadlineText.
+    /// Relative "Resets …" fallback when there is no pace geometry (Cursor, ElevenLabs, and similar).
+    var showsLegacyResetLine: Bool {
+        geometry == nil
+    }
+
+    /// Used-percent accessibility for the menu bar and overview.
     var accessibilityValue: String {
         switch kind {
         case .percentage(let percent?):
@@ -226,6 +241,21 @@ struct UsagePresentationMetric: Identifiable, Equatable {
         case .count(let count?):
             return "\(count) available"
         }
+    }
+
+    /// Popover accessibility value: remaining headline, optional pace, optional restores line.
+    func popoverAccessibilityValue(now: Date = Date()) -> String {
+        if let remaining = remainingHeadlineText {
+            var parts = [remaining]
+            if let paceText = paceAccessibilityText(now: now) {
+                parts.append(paceText)
+            }
+            if let restores = restoresLine(now: now) {
+                parts.append(restores)
+            }
+            return parts.joined(separator: ", ")
+        }
+        return accessibilityValue
     }
 }
 
@@ -541,7 +571,7 @@ enum UsagePresentationMetrics {
             let label = additional.label ?? additional.type ?? "Additional Limit"
             let idSuffix = additional.type ?? additional.label ?? "\(index)"
             return percentageMetric(
-                id: "openai.additional.\(idSuffix)",
+                id: "openai.additional.\(idSuffix).\(index)",
                 label: label,
                 shortLabel: compactLabel(label),
                 percent: window.usedPercent,
@@ -555,33 +585,34 @@ enum UsagePresentationMetrics {
     static func cursorMetrics(_ usage: CursorUsageResponse?) -> [UsagePresentationMetric] {
         let resetDate = usage?.billingCycleEndDate
         let interval: TimeInterval = 30 * 24 * 60 * 60
+        // No pace geometry: Cursor has no window duration from the API.
         return [
-            percentageMetric(
+            UsagePresentationMetric(
                 id: cursorModelsID,
                 label: "First-Party Models",
                 shortLabel: "M",
-                percent: usage?.planUsage?.autoPercentUsed,
+                kind: .percentage(usage?.planUsage?.autoPercentUsed),
                 resetDate: resetDate,
                 resetInterval: interval,
-                geometryDuration: nil
+                geometry: nil
             ),
-            percentageMetric(
+            UsagePresentationMetric(
                 id: cursorAPIID,
                 label: "API",
                 shortLabel: "API",
-                percent: usage?.planUsage?.apiPercentUsed,
+                kind: .percentage(usage?.planUsage?.apiPercentUsed),
                 resetDate: resetDate,
                 resetInterval: interval,
-                geometryDuration: nil
+                geometry: nil
             ),
-            percentageMetric(
+            UsagePresentationMetric(
                 id: cursorTotalID,
                 label: "Total Plan Usage",
                 shortLabel: "Tot",
-                percent: usage?.planUsage?.totalPercentUsed,
+                kind: .percentage(usage?.planUsage?.totalPercentUsed),
                 resetDate: resetDate,
                 resetInterval: interval,
-                geometryDuration: nil
+                geometry: nil
             )
         ]
     }
@@ -590,14 +621,15 @@ enum UsagePresentationMetrics {
         _ usage: ElevenLabsSubscriptionResponse?
     ) -> [UsagePresentationMetric] {
         [
-            percentageMetric(
+            // No pace geometry: ElevenLabs has no even-pace window.
+            UsagePresentationMetric(
                 id: elevenLabsCreditsID,
                 label: "Credits Used",
                 shortLabel: "Used",
-                percent: usage?.utilization,
+                kind: .percentage(usage?.utilization),
                 resetDate: usage?.nextResetDate,
                 resetInterval: billingInterval(for: usage?.characterRefreshPeriod),
-                geometryDuration: nil
+                geometry: nil
             ),
             UsagePresentationMetric(
                 id: elevenLabsRemainingID,
@@ -630,8 +662,9 @@ enum UsagePresentationMetrics {
         resetInterval: TimeInterval?,
         geometryDuration: TimeInterval?
     ) -> UsagePresentationMetric {
+        // Geometry whenever percent and reset are known; duration may be nil (pace/hairline stay off, restores still work).
         let geometry: UsageWindowGeometry?
-        if let percent, let geometryDuration, geometryDuration > 0 {
+        if let percent, resetDate != nil {
             geometry = UsageWindowGeometry(
                 usedPercent: percent,
                 resetsAt: resetDate,

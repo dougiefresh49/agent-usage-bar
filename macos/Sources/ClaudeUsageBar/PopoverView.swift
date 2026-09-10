@@ -558,7 +558,7 @@ private struct UsageMetricRow: View {
                 Text(restores)
                     .usageFont(.supporting)
                     .foregroundStyle(.secondary)
-            } else if showsLegacyResetLine, let resetDate = metric.resetDate {
+            } else if metric.showsLegacyResetLine, let resetDate = metric.resetDate {
                 Text("Resets \(resetDate, style: .relative)")
                     .usageFont(.supporting)
                     .foregroundStyle(.secondary)
@@ -569,12 +569,7 @@ private struct UsageMetricRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityValue(popoverAccessibilityValue(now: now))
-    }
-
-    /// Claude and Codex pace rows show `restoresLine` or nothing. Cursor and ElevenLabs keep the relative reset line.
-    private var showsLegacyResetLine: Bool {
-        !(metric.id.hasPrefix("claude.") || metric.id.hasPrefix("openai."))
+        .accessibilityValue(metric.popoverAccessibilityValue(now: now))
     }
 
     private var headlineText: String {
@@ -584,24 +579,6 @@ private struct UsageMetricRow: View {
     private var absoluteResetHelp: String? {
         guard let resetDate = metric.resetDate else { return nil }
         return resetDate.formatted(date: .abbreviated, time: .shortened)
-    }
-
-    private func popoverAccessibilityValue(now: Date) -> String {
-        if let remaining = metric.remainingHeadlineText {
-            var parts = [remaining]
-            if let paceImage = metric.paceSystemImage(now: now) {
-                switch paceImage {
-                case "arrow.up.right": parts.append("ahead of pace")
-                case "arrow.down.right": parts.append("under pace")
-                default: parts.append("on pace")
-                }
-            }
-            if let restores = metric.restoresLine(now: now) {
-                parts.append(restores)
-            }
-            return parts.joined(separator: ", ")
-        }
-        return metric.accessibilityValue
     }
 }
 
@@ -634,14 +611,16 @@ private struct PaceUsageBar: View {
                 }
 
                 if let elapsedShare {
-                    let x = max(0, min(1, elapsedShare)) * width
+                    let rawX = max(0, min(1, elapsedShare)) * width
+                    let x = min(max(rawX, 0.5), max(0.5, width - 1))
                     Rectangle()
                         .fill(Color.primary.opacity(0.85))
                         .frame(width: 1, height: height)
-                        .offset(x: max(0, x - 0.5))
+                        .offset(x: x - 0.5)
                         .allowsHitTesting(false)
                 }
             }
+            .clipShape(Capsule())
         }
         .frame(height: 6)
         .modifier(OptionalHelpModifier(text: resetHelp))
@@ -758,7 +737,7 @@ private struct DetailMetricCapsuleCell: View {
                 Text(restores)
                     .usageFont(.supporting)
                     .foregroundStyle(.secondary)
-            } else if let metric, showsLegacyResetLine(for: metric), let resetDate = metric.resetDate {
+            } else if let metric, metric.showsLegacyResetLine, let resetDate = metric.resetDate {
                 Text("Resets \(resetDate, style: .relative)")
                     .usageFont(.supporting)
                     .foregroundStyle(.secondary)
@@ -767,30 +746,7 @@ private struct DetailMetricCapsuleCell: View {
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
-        .accessibilityValue(capsuleAccessibilityValue(now: now))
-    }
-
-    private func showsLegacyResetLine(for metric: UsagePresentationMetric) -> Bool {
-        !(metric.id.hasPrefix("claude.") || metric.id.hasPrefix("openai."))
-    }
-
-    private func capsuleAccessibilityValue(now: Date) -> String {
-        guard let metric else { return "Unavailable" }
-        if let remaining = metric.remainingHeadlineText {
-            var parts = [remaining]
-            if let paceImage = metric.paceSystemImage(now: now) {
-                switch paceImage {
-                case "arrow.up.right": parts.append("ahead of pace")
-                case "arrow.down.right": parts.append("under pace")
-                default: parts.append("on pace")
-                }
-            }
-            if let restores = metric.restoresLine(now: now) {
-                parts.append(restores)
-            }
-            return parts.joined(separator: ", ")
-        }
-        return metric.accessibilityValue
+        .accessibilityValue(metric?.popoverAccessibilityValue(now: now) ?? "Unavailable")
     }
 }
 
@@ -943,22 +899,8 @@ private struct UsageOrbitView: View {
         countdown: Double,
         now: Date
     ) -> String {
-        let values = metrics.map { metric -> String in
-            if let remaining = metric.remainingHeadlineText {
-                var parts = [remaining]
-                if let paceImage = metric.paceSystemImage(now: now) {
-                    switch paceImage {
-                    case "arrow.up.right": parts.append("ahead of pace")
-                    case "arrow.down.right": parts.append("under pace")
-                    default: parts.append("on pace")
-                    }
-                }
-                if let restores = metric.restoresLine(now: now) {
-                    parts.append(restores)
-                }
-                return "\(metric.label) \(parts.joined(separator: ", "))"
-            }
-            return "\(metric.label) \(metric.accessibilityValue)"
+        let values = metrics.map { metric in
+            "\(metric.label) \(metric.popoverAccessibilityValue(now: now))"
         }
         .joined(separator: ", ")
         return "\(values), \(Int(round(countdown * 100))) percent of reset time remaining, \(time)"

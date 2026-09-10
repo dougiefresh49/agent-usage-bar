@@ -340,9 +340,17 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertEqual(opus.geometry?.duration, UsageWindowGeometry.claudeWeeklyDuration)
         XCTAssertEqual(weeklyScoped.geometry?.duration, UsageWindowGeometry.claudeWeeklyDuration)
         XCTAssertEqual(sessionScoped.geometry?.duration, UsageWindowGeometry.claudeSessionDuration)
-        XCTAssertNil(monthlyScoped.geometry)
-        XCTAssertNil(ungroupedScoped.geometry)
+        XCTAssertNotNil(monthlyScoped.geometry)
+        XCTAssertNil(monthlyScoped.geometry?.duration)
+        XCTAssertEqual(monthlyScoped.geometry?.usedPercent, 8)
+        XCTAssertEqual(monthlyScoped.geometry?.resetsAt, monthlyScoped.resetDate)
+        XCTAssertEqual(monthlyScoped.remainingHeadlineText, "92% left")
+        XCTAssertFalse(monthlyScoped.showsLegacyResetLine)
+        XCTAssertNotNil(ungroupedScoped.geometry)
+        XCTAssertNil(ungroupedScoped.geometry?.duration)
+        XCTAssertEqual(ungroupedScoped.remainingHeadlineText, "97% left")
         XCTAssertNil(extra.geometry)
+        XCTAssertNil(extra.remainingHeadlineText)
     }
 
     func testOpenAIMetricsAttachGeometryFromLimitWindowSeconds() throws {
@@ -395,7 +403,7 @@ final class UsagePresentationTests: XCTestCase {
         let primary = try XCTUnwrap(metrics.first { $0.id == UsagePresentationMetrics.openAIPrimaryID })
         let secondary = try XCTUnwrap(metrics.first { $0.id == UsagePresentationMetrics.openAISecondaryID })
         let credits = try XCTUnwrap(metrics.first { $0.id == UsagePresentationMetrics.openAIResetCreditsID })
-        let additional = try XCTUnwrap(additionalMetrics.first { $0.id == "openai.additional.code_review" })
+        let additional = try XCTUnwrap(additionalMetrics.first { $0.id == "openai.additional.code_review.0" })
 
         XCTAssertEqual(primary.geometry?.duration, 5 * 60 * 60)
         XCTAssertEqual(primary.geometry?.usedPercent, 32.4)
@@ -466,10 +474,10 @@ final class UsagePresentationTests: XCTestCase {
             ]
         )
         XCTAssertFalse(shared.contains { $0.id.hasPrefix("openai.additional.") })
-        XCTAssertEqual(additional.map(\.id), ["openai.additional.code_review"])
+        XCTAssertEqual(additional.map(\.id), ["openai.additional.code_review.0"])
     }
 
-    func testCursorAndElevenLabsMetricsHaveNoGeometry() {
+    func testCursorAndElevenLabsMetricsHaveNoGeometry() throws {
         let cursor = UsagePresentationMetrics.cursorMetrics(
             CursorUsageResponse(
                 billingCycleStart: nil,
@@ -492,6 +500,11 @@ final class UsagePresentationTests: XCTestCase {
             )
         )
         XCTAssertTrue(cursor.allSatisfy { $0.geometry == nil })
+        XCTAssertTrue(cursor.allSatisfy { $0.paceSystemImage() == nil })
+        XCTAssertTrue(cursor.allSatisfy { $0.restoresLine() == nil })
+        let models = try XCTUnwrap(cursor.first { $0.id == UsagePresentationMetrics.cursorModelsID })
+        XCTAssertNil(models.remainingHeadlineText)
+        XCTAssertEqual(models.valueText, "12%")
 
         let eleven = UsagePresentationMetrics.elevenLabsMetrics(
             ElevenLabsSubscriptionResponse(
@@ -509,6 +522,11 @@ final class UsagePresentationTests: XCTestCase {
             )
         )
         XCTAssertTrue(eleven.allSatisfy { $0.geometry == nil })
+        XCTAssertTrue(eleven.allSatisfy { $0.paceSystemImage() == nil })
+        XCTAssertTrue(eleven.allSatisfy { $0.restoresLine() == nil })
+        let credits = try XCTUnwrap(eleven.first { $0.id == UsagePresentationMetrics.elevenLabsCreditsID })
+        XCTAssertNil(credits.remainingHeadlineText)
+        XCTAssertEqual(credits.valueText, "0%")
     }
 
     func testRemainingHeadlineAndRestoresLineForFixedNow() {
@@ -533,18 +551,11 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertEqual(metric.restoresLine(now: now), "+32% in 5d 3h")
         // Elapsed ~26.8%; used 32.4 is ahead of even pace.
         XCTAssertEqual(metric.paceSystemImage(now: now), "arrow.up.right")
-    }
-
-    func testPaceGlyphHiddenWhenGeometryMissing() {
-        let metric = percentageMetric(
-            id: "cursor.models",
-            label: "Models",
-            value: 40
+        XCTAssertEqual(metric.paceAccessibilityText(now: now), "ahead of pace")
+        XCTAssertEqual(
+            metric.popoverAccessibilityValue(now: now),
+            "68% left, ahead of pace, +32% in 5d 3h"
         )
-        XCTAssertNil(metric.geometry)
-        XCTAssertNil(metric.paceSystemImage())
-        XCTAssertNil(metric.restoresLine())
-        XCTAssertEqual(metric.remainingHeadlineText, "60% left")
     }
 
     private func percentageMetric(
