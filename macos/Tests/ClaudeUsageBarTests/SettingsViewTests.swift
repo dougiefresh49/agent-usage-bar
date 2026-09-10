@@ -92,4 +92,10 @@ final class SettingsViewTests: XCTestCase {
         XCTAssertEqual(cursorPastedTokenDisclosureTitle(source: .environment), "Use a pasted token instead")
         XCTAssertEqual(cursorPastedTokenDisclosureTitle(source: .none), "Use a pasted token")
     }
+
+    func testUsageFillModeAppearanceDefaults() {
+        XCTAssertEqual(UsagePresentationDefaults.fillModeKey, "usageFillMode")
+        XCTAssertEqual(UsagePresentationDefaults.fillMode, .drain)
+        XCTAssertEqual(UsageFillMode.allCases.map(\.rawValue), ["fill", "drain"])
+    }
 }

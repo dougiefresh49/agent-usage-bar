@@ -29,6 +29,13 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertEqual(UsageTextSize.large.overviewColumnCount, 2)
     }
 
+    func testUsageFillModeDefaultsToDrain() {
+        XCTAssertEqual(UsagePresentationDefaults.fillMode, .drain)
+        XCTAssertEqual(UsageFillMode(rawValue: "fill"), .fill)
+        XCTAssertEqual(UsageFillMode.fill.displayName, "Fill")
+        XCTAssertEqual(UsageFillMode.drain.displayName, "Drain")
+    }
+
     func testCountdownProgressMapsFiveHourSessionToExpectedDrainLevels() throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
         let interval: TimeInterval = 5 * 60 * 60
@@ -344,13 +351,14 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertNil(monthlyScoped.geometry?.duration)
         XCTAssertEqual(monthlyScoped.geometry?.usedPercent, 8)
         XCTAssertEqual(monthlyScoped.geometry?.resetsAt, monthlyScoped.resetDate)
-        XCTAssertEqual(monthlyScoped.remainingHeadlineText, "92% left")
+        XCTAssertEqual(monthlyScoped.headlineText(mode: .drain), "92% left")
         XCTAssertFalse(monthlyScoped.showsLegacyResetLine)
         XCTAssertNotNil(ungroupedScoped.geometry)
         XCTAssertNil(ungroupedScoped.geometry?.duration)
-        XCTAssertEqual(ungroupedScoped.remainingHeadlineText, "97% left")
+        XCTAssertEqual(ungroupedScoped.headlineText(mode: .drain), "97% left")
         XCTAssertNil(extra.geometry)
-        XCTAssertNil(extra.remainingHeadlineText)
+        XCTAssertEqual(extra.headlineText(mode: .drain), "95% left")
+        XCTAssertEqual(extra.headlineText(mode: .fill), "5% used")
     }
 
     func testOpenAIMetricsAttachGeometryFromLimitWindowSeconds() throws {
@@ -415,7 +423,7 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertEqual(additional.geometry?.duration, 24 * 60 * 60)
         XCTAssertEqual(additional.geometry?.usedPercent, 18)
         XCTAssertEqual(additional.geometry?.resetsAt, Date(timeIntervalSince1970: additionalResetAt))
-        XCTAssertEqual(additional.remainingHeadlineText, "82% left")
+        XCTAssertEqual(additional.headlineText(mode: .drain), "82% left")
     }
 
     func testOpenAISharedMetricsOmitAdditionalLimits() throws {
@@ -503,7 +511,8 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertTrue(cursor.allSatisfy { $0.paceSystemImage() == nil })
         XCTAssertTrue(cursor.allSatisfy { $0.restoresLine() == nil })
         let models = try XCTUnwrap(cursor.first { $0.id == UsagePresentationMetrics.cursorModelsID })
-        XCTAssertNil(models.remainingHeadlineText)
+        XCTAssertEqual(models.headlineText(mode: .drain), "88% left")
+        XCTAssertEqual(models.headlineText(mode: .fill), "12% used")
         XCTAssertEqual(models.valueText, "12%")
 
         let eleven = UsagePresentationMetrics.elevenLabsMetrics(
@@ -525,8 +534,53 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertTrue(eleven.allSatisfy { $0.paceSystemImage() == nil })
         XCTAssertTrue(eleven.allSatisfy { $0.restoresLine() == nil })
         let credits = try XCTUnwrap(eleven.first { $0.id == UsagePresentationMetrics.elevenLabsCreditsID })
-        XCTAssertNil(credits.remainingHeadlineText)
+        XCTAssertEqual(credits.headlineText(mode: .drain), "100% left")
+        XCTAssertEqual(credits.headlineText(mode: .fill), "0% used")
         XCTAssertEqual(credits.valueText, "0%")
+    }
+
+    func testFillAndDrainPresentationHelpers() throws {
+        let percentMetric = UsagePresentationMetric(
+            id: "test.percent",
+            label: "Weekly",
+            shortLabel: "7d",
+            kind: .percentage(32.4),
+            resetDate: nil,
+            resetInterval: nil,
+            geometry: nil
+        )
+        let countMetric = UsagePresentationMetric(
+            id: "test.count",
+            label: "Credits",
+            shortLabel: "R",
+            kind: .count(3),
+            resetDate: nil,
+            resetInterval: nil,
+            geometry: nil
+        )
+
+        XCTAssertEqual(percentMetric.headlineText(mode: .fill), "32% used")
+        XCTAssertEqual(percentMetric.headlineText(mode: .drain), "68% left")
+        XCTAssertNil(countMetric.headlineText(mode: .fill))
+        XCTAssertNil(countMetric.headlineText(mode: .drain))
+
+        XCTAssertEqual(
+            try XCTUnwrap(percentMetric.displayedProgress(mode: .fill)),
+            0.324,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(percentMetric.displayedProgress(mode: .drain)),
+            0.676,
+            accuracy: 0.0001
+        )
+        XCTAssertNil(countMetric.displayedProgress(mode: .fill))
+        XCTAssertNil(countMetric.displayedProgress(mode: .drain))
+
+        XCTAssertEqual(percentMetric.compactValueText(mode: .fill), "32%")
+        XCTAssertEqual(percentMetric.compactValueText(mode: .drain), "68%")
+        XCTAssertEqual(countMetric.compactValueText(mode: .fill), "3")
+        XCTAssertEqual(countMetric.compactValueText(mode: .drain), "3")
     }
 
     func testRemainingHeadlineAndRestoresLineForFixedNow() {
@@ -546,15 +600,20 @@ final class UsagePresentationTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(metric.remainingHeadlineText, "68% left")
+        XCTAssertEqual(metric.headlineText(mode: .drain), "68% left")
+        XCTAssertEqual(metric.headlineText(mode: .fill), "32% used")
         XCTAssertEqual(metric.valueText, "32%")
         XCTAssertEqual(metric.restoresLine(now: now), "+32% in 5d 3h")
         // Elapsed ~26.8%; used 32.4 is ahead of even pace.
         XCTAssertEqual(metric.paceSystemImage(now: now), "arrow.up.right")
         XCTAssertEqual(metric.paceAccessibilityText(now: now), "ahead of pace")
         XCTAssertEqual(
-            metric.popoverAccessibilityValue(now: now),
+            metric.popoverAccessibilityValue(mode: .drain, now: now),
             "68% left, ahead of pace, +32% in 5d 3h"
+        )
+        XCTAssertEqual(
+            metric.popoverAccessibilityValue(mode: .fill, now: now),
+            "32% used, ahead of pace, +32% in 5d 3h"
         )
     }
 

@@ -11,6 +11,8 @@ struct PopoverView: View {
     private var detailStyleRaw = UsagePresentationDefaults.detailStyle.rawValue
     @AppStorage(UsagePresentationDefaults.textSizeKey)
     private var usageTextSizeRaw = UsagePresentationDefaults.textSize.rawValue
+    @AppStorage(UsagePresentationDefaults.fillModeKey)
+    private var fillModeRaw = UsagePresentationDefaults.fillMode.rawValue
     @State private var selectedProvider: UsageProvider = .claude
     @State private var detailContentHeight: CGFloat = 0
     /// Presented from the popover root so an outside click that dismisses the
@@ -102,6 +104,7 @@ struct PopoverView: View {
         .frame(width: 390)
         .frame(maxHeight: 720)
         .environment(\.usageTextSize, usageTextSize)
+        .environment(\.usageFillMode, usageFillMode)
         .dynamicTypeSize(usageTextSize.dynamicTypeSize)
         .onAppear {
             // Refresh when any provider's last update is older than that service's
@@ -270,6 +273,11 @@ struct PopoverView: View {
     private var usageTextSize: UsageTextSize {
         UsageTextSize(rawValue: usageTextSizeRaw)
             ?? UsagePresentationDefaults.textSize
+    }
+
+    private var usageFillMode: UsageFillMode {
+        UsageFillMode(rawValue: fillModeRaw)
+            ?? UsagePresentationDefaults.fillMode
     }
 
     private func presentationMetrics(
@@ -501,6 +509,7 @@ private struct CompactMetricCapsule: View {
 
 private struct CompactMetricCell: View {
     let metric: UsagePresentationMetric?
+    @Environment(\.usageFillMode) private var fillMode
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -511,14 +520,15 @@ private struct CompactMetricCell: View {
                 .minimumScaleFactor(0.85)
                 .frame(maxWidth: .infinity, alignment: .center)
 
-            if let progress = metric?.normalizedProgress {
+            if let usedProgress = metric?.normalizedProgress {
+                let drawn = metric?.displayedProgress(mode: fillMode) ?? usedProgress
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
                         Capsule()
                             .fill(Color.primary.opacity(0.10))
                         Capsule()
-                            .fill(colorForPct(progress))
-                            .frame(width: proxy.size.width * progress)
+                            .fill(colorForPct(usedProgress))
+                            .frame(width: proxy.size.width * drawn)
                     }
                 }
                 .frame(height: 3)
@@ -537,7 +547,7 @@ private struct CompactMetricCell: View {
 
     private var compactText: String {
         guard let metric else { return "—" }
-        return "\(metric.shortLabel) \(metric.valueText)"
+        return "\(metric.shortLabel) \(metric.compactValueText(mode: fillMode))"
     }
 }
 
@@ -562,6 +572,7 @@ private struct DetailUsageVisualization: View {
 
 private struct UsageMetricRow: View {
     let metric: UsagePresentationMetric
+    @Environment(\.usageFillMode) private var fillMode
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -590,6 +601,7 @@ private struct UsageMetricRow: View {
                 PaceUsageBar(
                     usedShare: progress,
                     elapsedShare: metric.elapsedShare(now: now),
+                    fillMode: fillMode,
                     showsRestoreHatch: metric.geometry?.resetsAt != nil,
                     tint: colorForPct(progress),
                     resetHelp: absoluteResetHelp
@@ -611,11 +623,11 @@ private struct UsageMetricRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityValue(metric.popoverAccessibilityValue(now: now))
+        .accessibilityValue(metric.popoverAccessibilityValue(mode: fillMode, now: now))
     }
 
     private var headlineText: String {
-        metric.remainingHeadlineText ?? metric.valueText
+        metric.headlineText(mode: fillMode) ?? metric.valueText
     }
 
     private var absoluteResetHelp: String? {
@@ -624,10 +636,11 @@ private struct UsageMetricRow: View {
     }
 }
 
-/// Used fill with an optional elapsed hairline and a hatched restore tail over the used share.
+/// Used or remaining fill with an optional elapsed hairline and a hatched restore region.
 private struct PaceUsageBar: View {
     let usedShare: Double
     let elapsedShare: Double?
+    let fillMode: UsageFillMode
     let showsRestoreHatch: Bool
     let tint: Color
     let resetHelp: String?
@@ -636,24 +649,50 @@ private struct PaceUsageBar: View {
         GeometryReader { proxy in
             let width = proxy.size.width
             let height = proxy.size.height
-            let usedWidth = max(0, min(1, usedShare)) * width
+            let clampedUsed = max(0, min(1, usedShare))
+            let drawnShare: Double = {
+                switch fillMode {
+                case .fill: return clampedUsed
+                case .drain: return 1 - clampedUsed
+                }
+            }()
+            let drawnWidth = drawnShare * width
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(Color.primary.opacity(0.10))
 
                 Capsule()
                     .fill(tint)
-                    .frame(width: usedWidth)
+                    .frame(width: drawnWidth)
 
-                if showsRestoreHatch, usedWidth > 0 {
-                    HatchedBarOverlay()
-                        .frame(width: usedWidth, height: height)
-                        .clipShape(Capsule())
-                        .allowsHitTesting(false)
+                if showsRestoreHatch {
+                    switch fillMode {
+                    case .fill:
+                        if drawnWidth > 0 {
+                            HatchedBarOverlay()
+                                .frame(width: drawnWidth, height: height)
+                                .clipShape(Capsule())
+                                .allowsHitTesting(false)
+                        }
+                    case .drain:
+                        let hatchWidth = width - drawnWidth
+                        if hatchWidth > 0 {
+                            HatchedBarOverlay()
+                                .frame(width: hatchWidth, height: height)
+                                .offset(x: drawnWidth)
+                                .allowsHitTesting(false)
+                        }
+                    }
                 }
 
                 if let elapsedShare {
-                    let rawX = max(0, min(1, elapsedShare)) * width
+                    let mappedElapsed: Double = {
+                        switch fillMode {
+                        case .fill: return elapsedShare
+                        case .drain: return 1 - elapsedShare
+                        }
+                    }()
+                    let rawX = max(0, min(1, mappedElapsed)) * width
                     let x = min(max(rawX, 0.5), max(0.5, width - 1))
                     Rectangle()
                         .fill(Color.primary.opacity(0.85))
@@ -735,6 +774,7 @@ private struct DetailMetricCapsule: View {
 
 private struct DetailMetricCapsuleCell: View {
     let metric: UsagePresentationMetric?
+    @Environment(\.usageFillMode) private var fillMode
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -753,7 +793,7 @@ private struct DetailMetricCapsuleCell: View {
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
                 }
-                Text(metric?.remainingHeadlineText ?? metric?.valueText ?? "—")
+                Text(metric?.headlineText(mode: fillMode) ?? metric?.valueText ?? "—")
                     .monospacedDigit()
             }
             .usageFont(.legend)
@@ -762,6 +802,7 @@ private struct DetailMetricCapsuleCell: View {
                 PaceUsageBar(
                     usedShare: progress,
                     elapsedShare: metric?.elapsedShare(now: now),
+                    fillMode: fillMode,
                     showsRestoreHatch: metric?.geometry?.resetsAt != nil,
                     tint: colorForPct(progress),
                     resetHelp: metric?.resetDate?.formatted(date: .abbreviated, time: .shortened)
@@ -788,12 +829,13 @@ private struct DetailMetricCapsuleCell: View {
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
-        .accessibilityValue(metric?.popoverAccessibilityValue(now: now) ?? "Unavailable")
+        .accessibilityValue(metric?.popoverAccessibilityValue(mode: fillMode, now: now) ?? "Unavailable")
     }
 }
 
 private struct UsageOrbitView: View {
     let metrics: [UsagePresentationMetric]
+    @Environment(\.usageFillMode) private var fillMode
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -874,7 +916,7 @@ private struct UsageOrbitView: View {
             Circle()
                 .stroke(Color.primary.opacity(0.10), lineWidth: 8)
             Circle()
-                .trim(from: 0, to: metric.normalizedProgress ?? 0)
+                .trim(from: 0, to: metric.displayedProgress(mode: fillMode) ?? 0)
                 .stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round))
                 .rotationEffect(.degrees(-90))
         }
@@ -899,7 +941,7 @@ private struct UsageOrbitView: View {
                             }
                             Text(metric.isCount
                                 ? "\(metric.valueText) available"
-                                : (metric.remainingHeadlineText ?? metric.valueText))
+                                : (metric.headlineText(mode: fillMode) ?? metric.valueText))
                                 .usageFont(.legendEmphasized)
                                 .monospacedDigit()
                         }
@@ -942,7 +984,7 @@ private struct UsageOrbitView: View {
         now: Date
     ) -> String {
         let values = metrics.map { metric in
-            "\(metric.label) \(metric.popoverAccessibilityValue(now: now))"
+            "\(metric.label) \(metric.popoverAccessibilityValue(mode: fillMode, now: now))"
         }
         .joined(separator: ", ")
         return "\(values), \(Int(round(countdown * 100))) percent of reset time remaining, \(time)"
@@ -1521,10 +1563,19 @@ private struct UsageTextSizeEnvironmentKey: EnvironmentKey {
     static let defaultValue = UsagePresentationDefaults.textSize
 }
 
+private struct UsageFillModeEnvironmentKey: EnvironmentKey {
+    static let defaultValue = UsagePresentationDefaults.fillMode
+}
+
 private extension EnvironmentValues {
     var usageTextSize: UsageTextSize {
         get { self[UsageTextSizeEnvironmentKey.self] }
         set { self[UsageTextSizeEnvironmentKey.self] = newValue }
+    }
+
+    var usageFillMode: UsageFillMode {
+        get { self[UsageFillModeEnvironmentKey.self] }
+        set { self[UsageFillModeEnvironmentKey.self] = newValue }
     }
 }
 

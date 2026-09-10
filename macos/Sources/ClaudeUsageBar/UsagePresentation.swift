@@ -99,6 +99,20 @@ enum UsageTextSize: String, CaseIterable, Identifiable {
     }
 }
 
+enum UsageFillMode: String, CaseIterable, Identifiable {
+    case fill
+    case drain
+
+    var id: Self { self }
+
+    var displayName: String {
+        switch self {
+        case .fill: return "Fill"
+        case .drain: return "Drain"
+        }
+    }
+}
+
 enum UsagePresentationDefaults {
     static let menuBarProviderKey = "menuBarProvider"
     static let menuBarStyleKey = "menuBarVisualizationStyle"
@@ -106,11 +120,13 @@ enum UsagePresentationDefaults {
     static let menuBarSecondaryMetricKey = "menuBarSecondaryMetric"
     static let detailStyleKey = "detailVisualizationStyle"
     static let textSizeKey = "usageTextSize"
+    static let fillModeKey = "usageFillMode"
 
     static let menuBarProvider = UsageProvider.claude
     static let menuBarStyle = MenuBarVisualizationStyle.bars
     static let detailStyle = DetailVisualizationStyle.bars
     static let textSize = UsageTextSize.comfortable
+    static let fillMode = UsageFillMode.drain
 }
 
 enum UsageMetricKind: Equatable {
@@ -185,10 +201,35 @@ struct UsagePresentationMetric: Identifiable, Equatable {
         }
     }
 
-    /// Remaining-percent popover headline ("68% left") for paced windows; nil when geometry is missing.
-    var remainingHeadlineText: String? {
-        guard geometry != nil, case .percentage(let percent?) = kind else { return nil }
-        return "\(UsagePace.remainingPercent(percent))% left"
+    /// Drawn bar/ring fraction for the popover: used share in fill, remaining share in drain.
+    func displayedProgress(mode: UsageFillMode) -> Double? {
+        guard let progress = normalizedProgress else { return nil }
+        switch mode {
+        case .fill: return progress
+        case .drain: return 1 - progress
+        }
+    }
+
+    /// Popover headline for percentage metrics ("31% used" / "69% left"); nil for counts and missing percent.
+    func headlineText(mode: UsageFillMode) -> String? {
+        guard case .percentage(let percent?) = kind else { return nil }
+        switch mode {
+        case .fill:
+            return "\(Int(round(percent)))% used"
+        case .drain:
+            return "\(UsagePace.remainingPercent(percent))% left"
+        }
+    }
+
+    /// Overview-capsule value: used percent in fill, remaining percent in drain; counts unchanged.
+    func compactValueText(mode: UsageFillMode) -> String {
+        guard case .percentage(let percent?) = kind else { return valueText }
+        switch mode {
+        case .fill:
+            return valueText
+        case .drain:
+            return "\(UsagePace.remainingPercent(percent))%"
+        }
     }
 
     func pace(now: Date = Date()) -> UsagePace? {
@@ -243,10 +284,10 @@ struct UsagePresentationMetric: Identifiable, Equatable {
         }
     }
 
-    /// Popover accessibility value: remaining headline, optional pace, optional restores line.
-    func popoverAccessibilityValue(now: Date = Date()) -> String {
-        if let remaining = remainingHeadlineText {
-            var parts = [remaining]
+    /// Popover accessibility value: mode headline, optional pace, optional restores line.
+    func popoverAccessibilityValue(mode: UsageFillMode, now: Date = Date()) -> String {
+        if let headline = headlineText(mode: mode) {
+            var parts = [headline]
             if let paceText = paceAccessibilityText(now: now) {
                 parts.append(paceText)
             }
