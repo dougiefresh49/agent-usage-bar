@@ -8,6 +8,7 @@ as prose or were dropped, not backfilled.
 
 | # | date | decision | status |
 |---|------|----------|--------|
+| 31 | 2026-09-10 | Fill or drain becomes an Appearance setting, and bars, orbits, capsules, and headline all follow it; the headline-only scope of row 3 is replaced (https://github.com/dougiefresh49/agent-usage-bar/issues/79) | accepted |
 | 30 | 2026-09-10 | Release immutability is recommended for this repo: both Release workflows publish the release and its assets in one step and the appcast lives on GitHub Pages, so nothing edits a published release; a Release run that fails after publishing cannot be re-run onto its tag, which the Verifying section already treats as the next release's job | open |
 | 29 | 2026-09-10 | The Codex computer-use client now has the permissions it lacked overnight; computer-use rounds go back to the codex-computer-use skill, and the orchestrator drives a round itself only when that client cannot | accepted |
 | 28 | 2026-09-10 | Sol (gpt-5.6-sol at high reasoning) is the codex review model for this repo; the codex config's pinned gpt-6-astra default is not used for reviews here | accepted |
@@ -35,6 +36,6 @@ as prose or were dropped, not backfilled.
 | 6 | 2026-09-10 | Overnight #58 run: nothing waits on the owner; an item needing the owner's answer becomes an assumption row in the trail and a needs-your-eyes line in the report, and the lane continues on it unless the item is under the config-mutation gate, where it stops | accepted |
 | 5 | 2026-09-09 | No billing-cycle date is shown for Claude or Codex, since neither exposes one; Cursor shows renewal from `billingCycleEnd` (#58 owner decision 5) | accepted |
 | 4 | 2026-09-09 | No `codex app-server` refresh fallback until a real expired-token report; the plan doc keeps the recipe (#58 owner decision 4) | accepted |
-| 3 | 2026-09-09 | "Left" replaces "used" in the popover headline only; the menu bar icon and widgets keep used-percent semantics (#58 owner decision 3) | accepted |
+| 3 | 2026-09-09 | "Left" replaces "used" in the popover headline only; the menu bar icon and widgets keep used-percent semantics (#58 owner decision 3) | superseded by 31 |
 | 2 | 2026-09-09 | Keep the phone-fetches-itself sync model; Tailscale is only the transport, no relay, no Mac-as-server (#58 owner decision 2) | accepted |
 | 1 | 2026-09-09 | Credential precedence on the Mac: pasted token, then CLI login, then env var; on the phone the CLI token wins because the Mac keeps it fresh (#58 owner decision 1) | accepted |
