@@ -1486,7 +1486,7 @@ private struct SetupView: View {
 
 // MARK: - Subviews
 
-private struct CodeEntryView: View {
+struct CodeEntryView: View {
     @ObservedObject var service: UsageService
     @State private var code = ""
 
