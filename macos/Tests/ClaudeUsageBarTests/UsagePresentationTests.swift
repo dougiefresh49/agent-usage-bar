@@ -623,6 +623,66 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertEqual(percentMetric.compactValueText(mode: .drain), "68%")
         XCTAssertEqual(countMetric.compactValueText(mode: .fill), "3")
         XCTAssertEqual(countMetric.compactValueText(mode: .drain), "3")
+
+        XCTAssertEqual(percentMetric.accessibilityValue(mode: .fill), "32 percent used")
+        XCTAssertEqual(percentMetric.accessibilityValue(mode: .drain), "68 percent left")
+        XCTAssertEqual(countMetric.accessibilityValue(mode: .drain), "3 available")
+    }
+
+    func testFillModeDrawsUsedShareAndDrainDrawsWhatIsLeft() {
+        XCTAssertEqual(UsageFillMode.fill.drawnShare(used: 0.31), 0.31, accuracy: 0.0001)
+        XCTAssertEqual(UsageFillMode.drain.drawnShare(used: 0.31), 0.69, accuracy: 0.0001)
+        XCTAssertEqual(UsageFillMode.drain.drawnShare(used: 1.4), 0, accuracy: 0.0001)
+        XCTAssertEqual(UsageFillMode.fill.drawnShare(used: -0.2), 0, accuracy: 0.0001)
+
+        // The bar's leading edge on the hairline means on pace in both modes.
+        XCTAssertEqual(UsageFillMode.fill.hairlinePosition(elapsed: 0.78), 0.78, accuracy: 0.0001)
+        XCTAssertEqual(UsageFillMode.drain.hairlinePosition(elapsed: 0.78), 0.22, accuracy: 0.0001)
+        XCTAssertEqual(
+            UsageFillMode.drain.hairlinePosition(elapsed: 0.78),
+            UsageFillMode.drain.drawnShare(used: 0.78),
+            accuracy: 0.0001
+        )
+    }
+
+    func testDrainLabelsReplaceUsedWordingOnlyInDrainMode() {
+        let credits = UsagePresentationMetric(
+            id: "elevenlabs.credits",
+            label: "Credits Used",
+            shortLabel: "Used",
+            kind: .percentage(21),
+            resetDate: nil,
+            resetInterval: nil,
+            geometry: nil,
+            drainLabel: "Credits",
+            drainShortLabel: "Credits"
+        )
+        XCTAssertEqual(credits.label(mode: .fill), "Credits Used")
+        XCTAssertEqual(credits.shortLabel(mode: .fill), "Used")
+        XCTAssertEqual(credits.label(mode: .drain), "Credits")
+        XCTAssertEqual(credits.shortLabel(mode: .drain), "Credits")
+        XCTAssertEqual(credits.label, "Credits Used")
+
+        let neutral = UsagePresentationMetric(
+            id: "claude.5h",
+            label: "5-Hour Window",
+            shortLabel: "5h",
+            kind: .percentage(21),
+            resetDate: nil,
+            resetInterval: nil
+        )
+        XCTAssertEqual(neutral.label(mode: .drain), "5-Hour Window")
+        XCTAssertEqual(neutral.shortLabel(mode: .drain), "5h")
+
+        let elevenLabs = UsagePresentationMetrics.elevenLabsMetrics(nil)
+        let creditsMetric = elevenLabs.first { $0.id == UsagePresentationMetrics.elevenLabsCreditsID }
+        XCTAssertEqual(creditsMetric?.label(mode: .drain), "Credits")
+        XCTAssertEqual(creditsMetric?.shortLabel(mode: .drain), "Credits")
+
+        let cursor = UsagePresentationMetrics.cursorMetrics(nil)
+        let total = cursor.first { $0.id == UsagePresentationMetrics.cursorTotalID }
+        XCTAssertEqual(total?.label(mode: .fill), "Total Plan Usage")
+        XCTAssertEqual(total?.label(mode: .drain), "Total Plan")
     }
 
     func testRemainingHeadlineAndRestoresLineForFixedNow() {

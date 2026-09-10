@@ -60,12 +60,12 @@ enum UsagePace {
         guard let resetsAt = window.resetsAt else {
             return nil
         }
-        if resetsAt <= now {
-            return "resets now"
-        }
         let restored = Int(window.usedPercent.rounded(.toNearestOrAwayFromZero))
         guard restored > 0 else {
             return nil
+        }
+        if resetsAt <= now {
+            return "resets now"
         }
         return "+\(restored)% in \(formatDuration(resetsAt.timeIntervalSince(now)))"
     }

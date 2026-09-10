@@ -129,6 +129,13 @@ final class UsagePaceTests: XCTestCase {
         )
         XCTAssertNil(UsagePace.restoresLine(roundsToZero, now: now))
 
+        let freshPastReset = UsageWindowGeometry(
+            usedPercent: 0,
+            resetsAt: now.addingTimeInterval(-1),
+            duration: UsageWindowGeometry.claudeSessionDuration
+        )
+        XCTAssertNil(UsagePace.restoresLine(freshPastReset, now: now))
+
         let roundsToOne = UsageWindowGeometry(
             usedPercent: 0.5,
             resetsAt: now.addingTimeInterval(3_600),

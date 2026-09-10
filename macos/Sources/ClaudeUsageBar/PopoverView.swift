@@ -165,6 +165,8 @@ struct PopoverView: View {
                 }
             }
 
+            PaceLegend(metrics: metrics)
+
             if let extra = service.usage?.extraUsage,
                extra.usedCredits != nil || extra.monthlyLimit != nil {
                 ExtraUsageRow(extra: extra)
@@ -408,6 +410,7 @@ private struct ProviderSummaryCard: View {
     let summary: ProviderSummary
     let isSelected: Bool
     let action: () -> Void
+    @Environment(\.usageFillMode) private var fillMode
 
     var body: some View {
         Button(action: action) {
@@ -469,7 +472,7 @@ private struct ProviderSummaryCard: View {
 
     private var summaryAccessibilityLabel: String {
         let values = summary.metrics
-            .map { "\($0.label) \($0.accessibilityValue)" }
+            .map { "\($0.label(mode: fillMode)) \($0.accessibilityValue(mode: fillMode))" }
             .joined(separator: ", ")
         return values.isEmpty
             ? "\(summary.provider.shortName) usage details"
@@ -547,7 +550,7 @@ private struct CompactMetricCell: View {
 
     private var compactText: String {
         guard let metric else { return "—" }
-        return "\(metric.shortLabel) \(metric.compactValueText(mode: fillMode))"
+        return "\(metric.shortLabel(mode: fillMode)) \(metric.compactValueText(mode: fillMode))"
     }
 }
 
@@ -566,9 +569,6 @@ private struct DetailUsageVisualization: View {
             DetailMetricCapsule(metrics: metrics)
         case .orbit:
             UsageOrbitView(metrics: metrics)
-        }
-        if metrics.contains(where: { $0.pace() != nil }) {
-            PaceLegend()
         }
     }
 }
@@ -591,7 +591,15 @@ private struct PaceGlyph: View {
 
 /// One-line key for the pace glyphs, shown under a provider's details when any window has a pace.
 private struct PaceLegend: View {
+    let metrics: [UsagePresentationMetric]
+
     var body: some View {
+        if metrics.contains(where: { $0.pace() != nil }) {
+            legend
+        }
+    }
+
+    private var legend: some View {
         HStack(spacing: 10) {
             legendItem("arrow.up.right", "ahead of pace")
             legendItem("minus", "on pace")
@@ -599,7 +607,7 @@ private struct PaceLegend: View {
         }
         .usageFont(.supporting)
         .foregroundStyle(.secondary)
-        .help("Pace compares the share of quota used with the share of the window elapsed. More than 5 points over is ahead, more than 5 under is under.")
+        .help("Pace compares the share of quota used with the share of the window elapsed. Ahead means used is more than 5 points above elapsed; under means more than 5 points below.")
     }
 
     private func legendItem(_ systemImage: String, _ text: String) -> some View {
@@ -623,7 +631,7 @@ private struct UsageMetricRow: View {
     private func metricContent(now: Date) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
-                Text(metric.label)
+                Text(metric.label(mode: fillMode))
                     .usageFont(.metric)
                 Spacer(minLength: 4)
                 PaceGlyph(metric: metric, now: now)
@@ -685,14 +693,7 @@ private struct PaceUsageBar: View {
         GeometryReader { proxy in
             let width = proxy.size.width
             let height = proxy.size.height
-            let clampedUsed = max(0, min(1, usedShare))
-            let drawnShare: Double = {
-                switch fillMode {
-                case .fill: return clampedUsed
-                case .drain: return 1 - clampedUsed
-                }
-            }()
-            let drawnWidth = drawnShare * width
+            let drawnWidth = fillMode.drawnShare(used: usedShare) * width
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(Color.primary.opacity(0.10))
@@ -722,13 +723,7 @@ private struct PaceUsageBar: View {
                 }
 
                 if let elapsedShare {
-                    let mappedElapsed: Double = {
-                        switch fillMode {
-                        case .fill: return elapsedShare
-                        case .drain: return 1 - elapsedShare
-                        }
-                    }()
-                    let rawX = max(0, min(1, mappedElapsed)) * width
+                    let rawX = fillMode.hairlinePosition(elapsed: elapsedShare) * width
                     let x = min(max(rawX, 0.5), max(0.5, width - 1))
                     Rectangle()
                         .fill(Color.primary.opacity(0.85))
@@ -821,7 +816,7 @@ private struct DetailMetricCapsuleCell: View {
     private func cellContent(now: Date) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 4) {
-                Text(metric?.label ?? "Unavailable")
+                Text(metric?.label(mode: fillMode) ?? "Unavailable")
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let metric {
@@ -963,7 +958,7 @@ private struct UsageOrbitView: View {
                 HStack(spacing: 7) {
                     legendMark(for: metric, index: index)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(metric.label)
+                        Text(metric.label(mode: fillMode))
                             .usageFont(.legend)
                             .lineLimit(1)
                         HStack(spacing: 4) {
@@ -1016,7 +1011,7 @@ private struct UsageOrbitView: View {
         now: Date
     ) -> String {
         let values = metrics.map { metric in
-            "\(metric.label) \(metric.popoverAccessibilityValue(mode: fillMode, now: now))"
+            "\(metric.label(mode: fillMode)) \(metric.popoverAccessibilityValue(mode: fillMode, now: now))"
         }
         .joined(separator: ", ")
         return "\(values), \(Int(round(countdown * 100))) percent of reset time remaining, \(time)"
@@ -1077,6 +1072,8 @@ private struct OpenAIUsageView: View {
                 ForEach(popoverMetrics.filter { !summaryIDs.contains($0.id) }) { metric in
                     UsageMetricRow(metric: metric)
                 }
+
+                PaceLegend(metrics: popoverMetrics)
 
                 if let plan = UsageDetailRows.codexPlanLine(planType: service.openAIUsage?.planType) {
                     providerDetailRow(plan)
@@ -1150,6 +1147,7 @@ private struct CursorUsageView: View {
     @ObservedObject var service: ConnectedUsageService
     let style: DetailVisualizationStyle
     let metrics: [UsagePresentationMetric]
+    @Environment(\.usageFillMode) private var fillMode
 
     var body: some View {
         ProviderHeader(provider: .cursor)
@@ -1187,8 +1185,9 @@ private struct CursorUsageView: View {
                                 .usageFont(.metric)
                                 .monospacedDigit()
                         }
-                        ProgressView(value: (spend.utilization ?? 0) / 100, total: 1)
-                            .tint(colorForPct((spend.utilization ?? 0) / 100))
+                        let spent = min(max((spend.utilization ?? 0) / 100, 0), 1)
+                        ProgressView(value: fillMode.drawnShare(used: spent), total: 1)
+                            .tint(colorForPct(spent))
                     }
                 }
 
@@ -1531,6 +1530,7 @@ private struct CodeEntryView: View {
 
 private struct ExtraUsageRow: View {
     let extra: ExtraUsage
+    @Environment(\.usageFillMode) private var fillMode
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1543,12 +1543,14 @@ private struct ExtraUsageRow: View {
                         .monospacedDigit()
                     Spacer()
                     if let pct = extra.utilization {
-                        Text("\(Int(round(pct)))%")
+                        Text(fillMode == .drain
+                            ? "\(UsagePace.remainingPercent(pct))% left"
+                            : "\(Int(round(pct)))% used")
                             .usageFont(.legend)
                             .monospacedDigit()
                     }
                 }
-                ProgressView(value: (extra.utilization ?? 0) / 100.0, total: 1.0)
+                ProgressView(value: fillMode.drawnShare(used: (extra.utilization ?? 0) / 100.0), total: 1.0)
                     .tint(.blue)
             }
         }

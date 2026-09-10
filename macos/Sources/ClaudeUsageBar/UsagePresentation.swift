@@ -111,6 +111,20 @@ enum UsageFillMode: String, CaseIterable, Identifiable {
         case .drain: return "Drain"
         }
     }
+
+    /// Fraction a bar or ring draws for a used share (0...1): the used share in fill, what is left in drain.
+    func drawnShare(used: Double) -> Double {
+        let clamped = min(max(used, 0), 1)
+        switch self {
+        case .fill: return clamped
+        case .drain: return 1 - clamped
+        }
+    }
+
+    /// Where the even-pace hairline sits (0...1) for an elapsed share; the bar's leading edge on it means on pace in both modes.
+    func hairlinePosition(elapsed: Double) -> Double {
+        drawnShare(used: elapsed)
+    }
 }
 
 enum UsagePresentationDefaults {
@@ -143,6 +157,10 @@ struct UsagePresentationMetric: Identifiable, Equatable {
     let resetInterval: TimeInterval?
     /// Pace inputs for Claude and Codex windows. Cursor and ElevenLabs stay nil.
     let geometry: UsageWindowGeometry?
+    /// Popover labels for drain mode when the default label names the used share
+    /// ("Credits Used"); nil keeps `label` and `shortLabel` in both modes.
+    let drainLabel: String?
+    let drainShortLabel: String?
 
     init(
         id: String,
@@ -151,7 +169,9 @@ struct UsagePresentationMetric: Identifiable, Equatable {
         kind: UsageMetricKind,
         resetDate: Date?,
         resetInterval: TimeInterval?,
-        geometry: UsageWindowGeometry? = nil
+        geometry: UsageWindowGeometry? = nil,
+        drainLabel: String? = nil,
+        drainShortLabel: String? = nil
     ) {
         self.id = id
         self.label = label
@@ -160,6 +180,18 @@ struct UsagePresentationMetric: Identifiable, Equatable {
         self.resetDate = resetDate
         self.resetInterval = resetInterval
         self.geometry = geometry
+        self.drainLabel = drainLabel
+        self.drainShortLabel = drainShortLabel
+    }
+
+    /// Popover label for the mode; the menu bar and widgets keep `label`.
+    func label(mode: UsageFillMode) -> String {
+        mode == .drain ? (drainLabel ?? label) : label
+    }
+
+    /// Popover short label for the mode; the menu bar and widgets keep `shortLabel`.
+    func shortLabel(mode: UsageFillMode) -> String {
+        mode == .drain ? (drainShortLabel ?? shortLabel) : shortLabel
     }
 
     var normalizedProgress: Double? {
@@ -203,11 +235,7 @@ struct UsagePresentationMetric: Identifiable, Equatable {
 
     /// Drawn bar/ring fraction for the popover: used share in fill, remaining share in drain.
     func displayedProgress(mode: UsageFillMode) -> Double? {
-        guard let progress = normalizedProgress else { return nil }
-        switch mode {
-        case .fill: return progress
-        case .drain: return 1 - progress
-        }
+        normalizedProgress.map { mode.drawnShare(used: $0) }
     }
 
     /// Popover headline for percentage metrics ("31% used" / "69% left"); nil for counts and missing percent.
@@ -291,6 +319,15 @@ struct UsagePresentationMetric: Identifiable, Equatable {
             return "Unavailable"
         case .count(let count?):
             return "\(count) available"
+        }
+    }
+
+    /// Overview-card accessibility value in the mode's terms: "31 percent used" / "69 percent left".
+    func accessibilityValue(mode: UsageFillMode) -> String {
+        guard case .percentage(let percent?) = kind else { return accessibilityValue }
+        switch mode {
+        case .fill: return "\(Int(round(percent))) percent used"
+        case .drain: return "\(UsagePace.remainingPercent(percent)) percent left"
         }
     }
 
@@ -664,7 +701,8 @@ enum UsagePresentationMetrics {
                 kind: .percentage(usage?.planUsage?.totalPercentUsed),
                 resetDate: resetDate,
                 resetInterval: interval,
-                geometry: nil
+                geometry: nil,
+                drainLabel: "Total Plan"
             )
         ]
     }
@@ -681,7 +719,9 @@ enum UsagePresentationMetrics {
                 kind: .percentage(usage?.utilization),
                 resetDate: usage?.nextResetDate,
                 resetInterval: billingInterval(for: usage?.characterRefreshPeriod),
-                geometry: nil
+                geometry: nil,
+                drainLabel: "Credits",
+                drainShortLabel: "Credits"
             ),
             UsagePresentationMetric(
                 id: elevenLabsRemainingID,
