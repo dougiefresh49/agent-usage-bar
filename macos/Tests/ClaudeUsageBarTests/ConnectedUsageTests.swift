@@ -261,6 +261,9 @@ final class ConnectedUsageServiceTests: XCTestCase {
                     request.value(forHTTPHeaderField: "Authorization"),
                     "Bearer openai-token"
                 )
+                XCTAssertEqual(request.value(forHTTPHeaderField: "OpenAI-Beta"), "codex-1")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Originator"), "Codex Desktop")
+                XCTAssertNil(request.value(forHTTPHeaderField: "Chatgpt-Account-Id"))
                 return (response, Data(#"{"rate_limit":{"primary_window":{"used_percent":43}}}"#.utf8))
             case "/credits":
                 return (response, Data(#"{"credits":[],"available_count":0}"#.utf8))
@@ -296,9 +299,244 @@ final class ConnectedUsageServiceTests: XCTestCase {
         XCTAssertEqual(service.cursorUsage?.planUsage?.apiPercentUsed, 6)
         XCTAssertEqual(service.openAIUsage?.rateLimit?.primaryWindow?.usedPercent, 43)
         XCTAssertEqual(service.elevenLabsUsage?.creditsRemaining, 9000)
+        XCTAssertEqual(service.openAICredentialSource, .pasted)
+        XCTAssertEqual(service.cursorCredentialSource, .pasted)
         XCTAssertNil(service.cursorError)
         XCTAssertNil(service.openAIError)
         XCTAssertNil(service.elevenLabsError)
+    }
+
+    func testOpenAICredentialPrecedencePrefersPastedOverCLIAndEnvironment() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(openAISessionToken: "pasted-token"))
+
+        let session = makeSession()
+        var authorizedToken: String?
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            if request.url?.path == "/openai" {
+                authorizedToken = request.value(forHTTPHeaderField: "Authorization")
+                return (response, Data(#"{"account_id":"acct-from-usage","rate_limit":{"primary_window":{"used_percent":1}}}"#.utf8))
+            }
+            if request.url?.path == "/credits" {
+                return (response, Data(#"{"credits":[],"available_count":0}"#.utf8))
+            }
+            throw URLError(.badURL)
+        }
+
+        let service = ConnectedUsageService(
+            session: session,
+            openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
+            openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
+            credentialsStore: store,
+            environment: ["OPENAI_SESSION_TOKEN": "env-token"],
+            codexAuthLoader: {
+                CodexCLICredentials(accessToken: "cli-token", accountId: "acct-cli", lastRefresh: nil)
+            }
+        )
+
+        await service.fetchOpenAIUsage()
+
+        XCTAssertEqual(service.openAICredentialSource, .pasted)
+        XCTAssertEqual(authorizedToken, "Bearer pasted-token")
+        XCTAssertNil(service.openAITokenExpiry)
+    }
+
+    func testOpenAIFallsBackToCodexCLIThenEnvironment() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        let session = makeSession()
+        let exp = Date().addingTimeInterval(4 * 86_400)
+        let cliToken = try makeUnsignedJWT(payloadJSON: #"{"exp":\#(Int(exp.timeIntervalSince1970))}"#)
+
+        var authorizedToken: String?
+        var accountHeader: String?
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            if request.url?.path == "/openai" {
+                authorizedToken = request.value(forHTTPHeaderField: "Authorization")
+                accountHeader = request.value(forHTTPHeaderField: "Chatgpt-Account-Id")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "OpenAI-Beta"), "codex-1")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Originator"), "Codex Desktop")
+                return (response, Data(#"{"rate_limit":{"primary_window":{"used_percent":2}}}"#.utf8))
+            }
+            if request.url?.path == "/credits" {
+                return (response, Data(#"{"credits":[],"available_count":0}"#.utf8))
+            }
+            throw URLError(.badURL)
+        }
+
+        let cliService = ConnectedUsageService(
+            session: session,
+            openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
+            openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
+            credentialsStore: store,
+            environment: ["OPENAI_SESSION_TOKEN": "env-token"],
+            codexAuthLoader: {
+                CodexCLICredentials(accessToken: cliToken, accountId: "acct-cli", lastRefresh: nil)
+            }
+        )
+        await cliService.fetchOpenAIUsage()
+        XCTAssertEqual(cliService.openAICredentialSource, .codexCLI)
+        XCTAssertEqual(authorizedToken, "Bearer \(cliToken)")
+        XCTAssertEqual(accountHeader, "acct-cli")
+        XCTAssertEqual(cliService.openAIAccountID, "acct-cli")
+        XCTAssertEqual(
+            cliService.openAITokenExpiry?.timeIntervalSince1970 ?? -1,
+            Double(Int(exp.timeIntervalSince1970)),
+            accuracy: 0.5
+        )
+
+        authorizedToken = nil
+        let envService = ConnectedUsageService(
+            session: session,
+            openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
+            openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
+            credentialsStore: store,
+            environment: ["OPENAI_SESSION_TOKEN": "env-token"],
+            codexAuthLoader: { nil }
+        )
+        await envService.fetchOpenAIUsage()
+        XCTAssertEqual(envService.openAICredentialSource, .environment)
+        XCTAssertEqual(authorizedToken, "Bearer env-token")
+    }
+
+    func testCursorCLIUsesConnectRequestAndFetchesPlanInfoOncePerHour() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        let session = makeSession()
+        let exp = Date().addingTimeInterval(9 * 86_400)
+        let cliToken = try makeUnsignedJWT(payloadJSON: #"{"exp":\#(Int(exp.timeIntervalSince1970))}"#)
+
+        var usagePaths: [String] = []
+        var planInfoCount = 0
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            let path = request.url?.path ?? ""
+            usagePaths.append(path)
+            if path.contains("GetCurrentPeriodUsage") {
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(cliToken)")
+                XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+                return (response, Data(#"{"planUsage":{"autoPercentUsed":1,"apiPercentUsed":2}}"#.utf8))
+            }
+            if path.contains("GetPlanInfo") {
+                planInfoCount += 1
+                return (
+                    response,
+                    Data(#"{"planInfo":{"planName":"Pro","includedAmountCents":2000,"price":"$20/mo"}}"#.utf8)
+                )
+            }
+            throw URLError(.badURL)
+        }
+
+        let service = ConnectedUsageService(
+            session: session,
+            credentialsStore: store,
+            environment: [:],
+            cursorKeychainRunner: { _, _ in cliToken },
+            planInfoInterval: 3600
+        )
+
+        await service.fetchCursorUsage()
+        await service.fetchCursorUsage()
+
+        XCTAssertEqual(service.cursorCredentialSource, .cursorCLI)
+        XCTAssertEqual(service.cursorUsage?.planUsage?.apiPercentUsed, 2)
+        XCTAssertEqual(service.cursorPlanInfo?.planInfo?.planName, "Pro")
+        XCTAssertEqual(planInfoCount, 1)
+        XCTAssertEqual(
+            usagePaths.filter { $0.contains("GetCurrentPeriodUsage") }.count,
+            2
+        )
+        XCTAssertEqual(
+            service.cursorTokenExpiry?.timeIntervalSince1970 ?? -1,
+            Double(Int(exp.timeIntervalSince1970)),
+            accuracy: 0.5
+        )
+    }
+
+    func testUnauthorizedCopyDependsOnCredentialSource() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(openAISessionToken: "pasted"))
+        let session = makeSession()
+
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 401,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        let pasted = ConnectedUsageService(
+            session: session,
+            openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
+            openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
+            credentialsStore: store,
+            environment: [:],
+            codexAuthLoader: { nil }
+        )
+        await pasted.fetchOpenAIUsage()
+        XCTAssertEqual(pasted.openAIError?.contains("OpenAI session expired"), true)
+        XCTAssertEqual(pasted.openAIError?.contains("Settings"), true)
+
+        try store.save(ConnectedServiceCredentials())
+        let cli = ConnectedUsageService(
+            session: session,
+            openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
+            openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
+            credentialsStore: store,
+            environment: [:],
+            codexAuthLoader: {
+                CodexCLICredentials(accessToken: "cli", accountId: nil, lastRefresh: nil)
+            }
+        )
+        await cli.fetchOpenAIUsage()
+        XCTAssertEqual(
+            cli.openAIError,
+            "Codex login expired. Run any codex command or `codex login` to refresh."
+        )
+
+        let cursorCLI = ConnectedUsageService(
+            session: session,
+            credentialsStore: store,
+            environment: [:],
+            cursorKeychainRunner: { _, _ in "cursor-cli-token" }
+        )
+        await cursorCLI.fetchCursorUsage()
+        XCTAssertEqual(
+            cursorCLI.cursorError,
+            "Cursor CLI login expired. Run `cursor-agent login`."
+        )
+    }
+
+    private func makeUnsignedJWT(payloadJSON: String) throws -> String {
+        let header = Data(#"{"alg":"none","typ":"JWT"}"#.utf8).base64URLEncoded()
+        let payload = Data(payloadJSON.utf8).base64URLEncoded()
+        return "\(header).\(payload).sig"
     }
 
     private func makeSession() -> URLSession {

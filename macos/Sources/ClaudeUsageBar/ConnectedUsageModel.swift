@@ -48,6 +48,7 @@ struct CursorSpendLimitUsage: Codable, Equatable {
 }
 
 struct OpenAIUsageResponse: Codable, Equatable {
+    let accountId: String?
     let email: String?
     let planType: String?
     let rateLimit: OpenAIRateLimit?
@@ -58,6 +59,7 @@ struct OpenAIUsageResponse: Codable, Equatable {
     let rateLimitResetCredits: OpenAIResetCreditSummary?
 
     enum CodingKeys: String, CodingKey {
+        case accountId = "account_id"
         case email
         case planType = "plan_type"
         case rateLimit = "rate_limit"
@@ -66,6 +68,28 @@ struct OpenAIUsageResponse: Codable, Equatable {
         case credits
         case spendControl = "spend_control"
         case rateLimitResetCredits = "rate_limit_reset_credits"
+    }
+
+    init(
+        accountId: String? = nil,
+        email: String? = nil,
+        planType: String? = nil,
+        rateLimit: OpenAIRateLimit? = nil,
+        codeReviewRateLimit: OpenAIRateLimit? = nil,
+        additionalRateLimits: [OpenAIAdditionalRateLimit]? = nil,
+        credits: OpenAICreditBalance? = nil,
+        spendControl: OpenAISpendControl? = nil,
+        rateLimitResetCredits: OpenAIResetCreditSummary? = nil
+    ) {
+        self.accountId = accountId
+        self.email = email
+        self.planType = planType
+        self.rateLimit = rateLimit
+        self.codeReviewRateLimit = codeReviewRateLimit
+        self.additionalRateLimits = additionalRateLimits
+        self.credits = credits
+        self.spendControl = spendControl
+        self.rateLimitResetCredits = rateLimitResetCredits
     }
 }
 

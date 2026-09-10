@@ -161,52 +161,70 @@ struct SettingsWindowContent: View {
     private var providersTab: some View {
         Form {
             Section("OpenAI / Codex") {
-                Text("Use the bearer token from the Authorization header of a ChatGPT usage request. OpenAI API keys do not expose ChatGPT subscription limits.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(openAICredentialStatusText(
+                    source: connectedService.openAICredentialSource,
+                    expiry: connectedService.openAITokenExpiry
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
-                CredentialSecureField(
-                    title: connectedService.isOpenAIConfigured
-                        ? "Session token configured"
-                        : "Bearer session token",
-                    text: $openAIToken
-                )
+                DisclosureGroup("Use a pasted token instead") {
+                    Text("Use the bearer token from the Authorization header of a ChatGPT usage request. OpenAI API keys do not expose ChatGPT subscription limits.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-                HStack {
-                    Button("Save Session Token") {
-                        saveOpenAIToken()
-                    }
-                    .disabled(openAIToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    CredentialSecureField(
+                        title: connectedService.openAICredentialSource == .pasted
+                            ? "Session token configured"
+                            : "Bearer session token",
+                        text: $openAIToken
+                    )
 
-                    if connectedService.isOpenAIConfigured {
-                        Button("Clear", role: .destructive) {
-                            connectedService.clearOpenAIToken()
+                    HStack {
+                        Button("Save Session Token") {
+                            saveOpenAIToken()
+                        }
+                        .disabled(openAIToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        if connectedService.openAICredentialSource == .pasted {
+                            Button("Clear", role: .destructive) {
+                                connectedService.clearOpenAIToken()
+                            }
                         }
                     }
                 }
             }
 
             Section("Cursor") {
-                Text("Paste the WorkosCursorSessionToken cookie value from cursor.com. You can also paste a full Cookie header or copied cURL request.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(cursorCredentialStatusText(
+                    source: connectedService.cursorCredentialSource,
+                    expiry: connectedService.cursorTokenExpiry
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
-                CredentialSecureField(
-                    title: connectedService.isCursorConfigured
-                        ? "Session token configured"
-                        : "WorkosCursorSessionToken",
-                    text: $cursorToken
-                )
+                DisclosureGroup("Use a pasted token instead") {
+                    Text("Paste the WorkosCursorSessionToken cookie value from cursor.com. You can also paste a full Cookie header or copied cURL request.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-                HStack {
-                    Button("Save Session Token") {
-                        saveCursorToken()
-                    }
-                    .disabled(cursorToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    CredentialSecureField(
+                        title: connectedService.cursorCredentialSource == .pasted
+                            ? "Session token configured"
+                            : "WorkosCursorSessionToken",
+                        text: $cursorToken
+                    )
 
-                    if connectedService.isCursorConfigured {
-                        Button("Clear", role: .destructive) {
-                            connectedService.clearCursorToken()
+                    HStack {
+                        Button("Save Session Token") {
+                            saveCursorToken()
+                        }
+                        .disabled(cursorToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        if connectedService.cursorCredentialSource == .pasted {
+                            Button("Clear", role: .destructive) {
+                                connectedService.clearCursorToken()
+                            }
                         }
                     }
                 }
@@ -719,4 +737,58 @@ private func obfuscateDomainPart(_ domain: String) -> String {
     }.joined(separator: ".")
 
     return "\(maskedName).\(tld)"
+}
+
+func openAICredentialStatusText(
+    source: OpenAICredentialSource,
+    expiry: Date?,
+    now: Date = Date()
+) -> String {
+    switch source {
+    case .pasted:
+        return "Using pasted token"
+    case .codexCLI:
+        if let expiry, expiry > now {
+            return "Using Codex CLI login (expires in \(credentialExpiryLabel(from: now, to: expiry)))"
+        }
+        return "Using Codex CLI login"
+    case .environment:
+        return "Using environment variable"
+    case .none:
+        return "Run `codex login` to connect without pasting a token."
+    }
+}
+
+func cursorCredentialStatusText(
+    source: CursorCredentialSource,
+    expiry: Date?,
+    now: Date = Date()
+) -> String {
+    switch source {
+    case .pasted:
+        return "Using pasted token"
+    case .cursorCLI:
+        if let expiry, expiry > now {
+            return "Using Cursor CLI login (expires in \(credentialExpiryLabel(from: now, to: expiry)))"
+        }
+        return "Using Cursor CLI login"
+    case .environment:
+        return "Using environment variable"
+    case .none:
+        return "Run `cursor-agent login` to connect without pasting a token."
+    }
+}
+
+func credentialExpiryLabel(from now: Date, to expiry: Date) -> String {
+    let remaining = max(0, expiry.timeIntervalSince(now))
+    let days = Int(remaining / 86_400)
+    if days > 0 {
+        return "\(days)d"
+    }
+    let hours = Int(remaining / 3_600)
+    if hours > 0 {
+        return "\(hours)h"
+    }
+    let minutes = Int(remaining / 60)
+    return "\(minutes)m"
 }
