@@ -172,6 +172,41 @@ struct SettingsWindowContent: View {
 
     private var providersTab: some View {
         Form {
+            Section("Claude") {
+                if service.claudeCredentialSource != .none {
+                    Text(claudeCredentialStatusText(
+                        source: service.claudeCredentialSource,
+                        expiry: service.claudeCodeTokenExpiry
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                if let email = service.accountEmail {
+                    ObfuscatedEmailRow(email: email)
+                }
+
+                DisclosureGroup(claudeAppSignInDisclosureTitle(source: service.claudeCredentialSource)) {
+                    if service.hasStoredAppOAuth {
+                        if service.claudeCredentialSource == .claudeCode {
+                            Text("This app's own sign-in is also stored and not in use.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Button("Sign Out") {
+                            service.signOut()
+                        }
+                    } else if service.isAwaitingCode {
+                        CodeEntryView(service: service)
+                    } else {
+                        Button("Sign in with Anthropic") {
+                            service.startOAuthFlow()
+                        }
+                    }
+                }
+            }
+
             Section("OpenAI / Codex") {
                 Text(openAICredentialStatusText(
                     source: connectedService.openAICredentialSource,
@@ -269,28 +304,6 @@ struct SettingsWindowContent: View {
                     if connectedService.isElevenLabsConfigured {
                         Button("Clear", role: .destructive) {
                             connectedService.clearElevenLabsAPIKey()
-                        }
-                    }
-                }
-            }
-
-            if service.isAuthenticated {
-                Section("Anthropic Account") {
-                    if service.claudeCredentialSource != .none {
-                        Text(claudeCredentialStatusText(
-                            source: service.claudeCredentialSource,
-                            expiry: service.claudeCodeTokenExpiry,
-                            hasStoredAppOAuth: service.hasStoredAppOAuth
-                        ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                    if let email = service.accountEmail {
-                        ObfuscatedEmailRow(email: email)
-                    }
-                    if service.hasStoredAppOAuth {
-                        Button("Sign Out") {
-                            service.signOut()
                         }
                     }
                 }
@@ -767,8 +780,7 @@ private func obfuscateDomainPart(_ domain: String) -> String {
 func claudeCredentialStatusText(
     source: ClaudeCredentialSource,
     expiry: Date?,
-    now: Date = Date(),
-    hasStoredAppOAuth: Bool = false
+    now: Date = Date()
 ) -> String {
     switch source {
     case .claudeCode:
@@ -778,14 +790,22 @@ func claudeCredentialStatusText(
         } else {
             text = "Claude Code login expired. Run any claude command to refresh."
         }
-        if hasStoredAppOAuth {
-            text += " This app's own sign-in is also stored and not in use."
-        }
         return text
     case .appOAuth:
         return "Using this app's sign-in"
     case .none:
         return ""
+    }
+}
+
+func claudeAppSignInDisclosureTitle(source: ClaudeCredentialSource) -> String {
+    switch source {
+    case .claudeCode:
+        return "Use this app's sign-in instead"
+    case .appOAuth:
+        return "Manage this app's sign-in"
+    case .none:
+        return "Sign in with Anthropic"
     }
 }
 

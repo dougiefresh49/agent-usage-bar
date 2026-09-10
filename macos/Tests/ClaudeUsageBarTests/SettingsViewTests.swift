@@ -146,28 +146,27 @@ final class SettingsViewTests: XCTestCase {
             "Claude Code login expired. Run any claude command to refresh."
         )
         XCTAssertEqual(
-            claudeCredentialStatusText(
-                source: .claudeCode,
-                expiry: expiry,
-                hasStoredAppOAuth: true
-            ),
-            "Using Claude Code login (expires in 3h) This app's own sign-in is also stored and not in use."
-        )
-        XCTAssertEqual(
-            claudeCredentialStatusText(
-                source: .claudeCode,
-                expiry: nil,
-                hasStoredAppOAuth: true
-            ),
-            "Claude Code login expired. Run any claude command to refresh. This app's own sign-in is also stored and not in use."
-        )
-        XCTAssertEqual(
             claudeCredentialStatusText(source: .appOAuth, expiry: nil),
             "Using this app's sign-in"
         )
         XCTAssertEqual(
             claudeCredentialStatusText(source: .none, expiry: nil),
             ""
+        )
+    }
+
+    func testClaudeAppSignInDisclosureTitleFollowsTheActiveSource() {
+        XCTAssertEqual(
+            claudeAppSignInDisclosureTitle(source: .claudeCode),
+            "Use this app's sign-in instead"
+        )
+        XCTAssertEqual(
+            claudeAppSignInDisclosureTitle(source: .appOAuth),
+            "Manage this app's sign-in"
+        )
+        XCTAssertEqual(
+            claudeAppSignInDisclosureTitle(source: .none),
+            "Sign in with Anthropic"
         )
     }
 
