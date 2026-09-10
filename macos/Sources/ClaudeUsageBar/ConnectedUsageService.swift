@@ -48,6 +48,8 @@ final class ConnectedUsageService: ObservableObject {
     private let cursorKeychainRunner: CursorCLIKeychain.Runner
     private let planInfoInterval: TimeInterval
     private var lastCursorPlanInfoFetch: Date?
+    private var isFetchingCursorPlanInfo = false
+    private var openAIAccountIDCredentialIdentity: String?
     var snapshotStore: UsageSnapshotStore?
     var notificationService: NotificationService?
     private var timer: Timer?
@@ -246,7 +248,7 @@ final class ConnectedUsageService: ObservableObject {
         let unauthorizedMessage = resolved.source == .codexCLI
             ? Self.openAICLIUnauthorizedMessage
             : nil
-        let accountId = openAIAccountID ?? resolved.accountId
+        let accountId = resolved.accountId ?? openAIAccountID
 
         do {
             let usageData = try await openAIResponseData(
@@ -257,7 +259,9 @@ final class ConnectedUsageService: ObservableObject {
             )
             let decoded = try JSONDecoder().decode(OpenAIUsageResponse.self, from: usageData)
             openAIUsage = decoded
-            openAIAccountID = resolved.accountId ?? decoded.accountId
+            if let discovered = resolved.accountId ?? decoded.accountId {
+                openAIAccountID = discovered
+            }
             openAIError = nil
             openAILastUpdated = Date()
             snapshotStore?.update(
@@ -272,7 +276,7 @@ final class ConnectedUsageService: ObservableObject {
             let creditData = try await openAIResponseData(
                 endpoint: openAIResetCreditsEndpoint,
                 token: resolved.token,
-                accountId: openAIAccountID ?? resolved.accountId,
+                accountId: resolved.accountId ?? openAIAccountID,
                 unauthorizedMessage: unauthorizedMessage
             )
             openAIResetCredits = try JSONDecoder().decode(
@@ -337,10 +341,17 @@ final class ConnectedUsageService: ObservableObject {
 
     private func fetchCursorPlanInfoIfNeeded(token: String) async {
         let now = Date()
+        if isFetchingCursorPlanInfo {
+            return
+        }
         if let lastCursorPlanInfoFetch,
            now.timeIntervalSince(lastCursorPlanInfoFetch) < planInfoInterval {
             return
         }
+
+        isFetchingCursorPlanInfo = true
+        lastCursorPlanInfoFetch = now
+        defer { isFetchingCursorPlanInfo = false }
 
         do {
             let request = CursorConnectAPI.request(
@@ -353,7 +364,6 @@ final class ConnectedUsageService: ObservableObject {
                 unauthorizedMessage: Self.cursorCLIUnauthorizedMessage
             )
             cursorPlanInfo = try JSONDecoder().decode(CursorPlanInfoResponse.self, from: data)
-            lastCursorPlanInfoFetch = now
         } catch {
             // Soft failure: usage still stands without plan info.
         }
@@ -413,12 +423,16 @@ final class ConnectedUsageService: ObservableObject {
         timer = newTimer
     }
 
+    /// Pasted or environment tokens only. Device sync stays on the v1 fields until #53.
     private var cursorToken: String? {
-        resolveCursorCredential()?.token
+        credentialsStore.load().cursorSessionToken
+            ?? environment["CURSOR_SESSION_TOKEN"].flatMap(ConnectedTokenNormalizer.cursor)
     }
 
+    /// Pasted or environment tokens only. Device sync stays on the v1 fields until #53.
     private var openAIToken: String? {
-        resolveOpenAICredential()?.token
+        credentialsStore.load().openAISessionToken
+            ?? environment["OPENAI_SESSION_TOKEN"].flatMap(ConnectedTokenNormalizer.openAI)
     }
 
     private var elevenLabsAPIKey: String? {
@@ -476,7 +490,11 @@ final class ConnectedUsageService: ObservableObject {
             isOpenAIConfigured = true
             openAICredentialSource = openAI.source
             openAITokenExpiry = openAI.source == .codexCLI ? openAI.expiry : nil
-            if let accountId = openAI.accountId {
+            let identity = "\(openAI.source)|\(openAI.token)"
+            if identity != openAIAccountIDCredentialIdentity {
+                openAIAccountIDCredentialIdentity = identity
+                openAIAccountID = openAI.accountId
+            } else if let accountId = openAI.accountId {
                 openAIAccountID = accountId
             }
         } else {
@@ -484,6 +502,7 @@ final class ConnectedUsageService: ObservableObject {
             openAICredentialSource = .none
             openAITokenExpiry = nil
             openAIAccountID = nil
+            openAIAccountIDCredentialIdentity = nil
         }
 
         if let cursor = resolveCursorCredential() {
