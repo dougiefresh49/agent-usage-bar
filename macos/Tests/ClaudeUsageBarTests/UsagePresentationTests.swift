@@ -294,6 +294,30 @@ final class UsagePresentationTests: XCTestCase {
                         surface: nil
                     ),
                     isActive: true
+                ),
+                ClaudeUsageLimit(
+                    kind: "monthly_scoped",
+                    group: "monthly",
+                    percent: 8,
+                    severity: nil,
+                    resetsAt: resetsAt,
+                    scope: ClaudeUsageScope(
+                        model: ClaudeUsageModel(id: "opus", displayName: "Opus"),
+                        surface: nil
+                    ),
+                    isActive: true
+                ),
+                ClaudeUsageLimit(
+                    kind: "ungrouped_scoped",
+                    group: nil,
+                    percent: 3,
+                    severity: nil,
+                    resetsAt: resetsAt,
+                    scope: ClaudeUsageScope(
+                        model: ClaudeUsageModel(id: "composer", displayName: "Composer"),
+                        surface: nil
+                    ),
+                    isActive: true
                 )
             ]
         )
@@ -304,6 +328,8 @@ final class UsagePresentationTests: XCTestCase {
         let opus = try XCTUnwrap(metrics.first { $0.id == UsagePresentationMetrics.claudeOpusID })
         let weeklyScoped = try XCTUnwrap(metrics.first { $0.label.contains("Fable") })
         let sessionScoped = try XCTUnwrap(metrics.first { $0.label.contains("session") })
+        let monthlyScoped = try XCTUnwrap(metrics.first { $0.label.contains("monthly") })
+        let ungroupedScoped = try XCTUnwrap(metrics.first { $0.label == "Composer" })
         let extra = try XCTUnwrap(metrics.first { $0.id == UsagePresentationMetrics.claudeExtraID })
 
         XCTAssertEqual(fiveHour.geometry?.duration, UsageWindowGeometry.claudeSessionDuration)
@@ -314,6 +340,8 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertEqual(opus.geometry?.duration, UsageWindowGeometry.claudeWeeklyDuration)
         XCTAssertEqual(weeklyScoped.geometry?.duration, UsageWindowGeometry.claudeWeeklyDuration)
         XCTAssertEqual(sessionScoped.geometry?.duration, UsageWindowGeometry.claudeSessionDuration)
+        XCTAssertNil(monthlyScoped.geometry)
+        XCTAssertNil(ungroupedScoped.geometry)
         XCTAssertNil(extra.geometry)
     }
 
@@ -363,10 +391,11 @@ final class UsagePresentationTests: XCTestCase {
         )
 
         let metrics = UsagePresentationMetrics.openAIMetrics(usage: usage, resetCredits: nil)
+        let additionalMetrics = UsagePresentationMetrics.openAIAdditionalLimitMetrics(usage: usage)
         let primary = try XCTUnwrap(metrics.first { $0.id == UsagePresentationMetrics.openAIPrimaryID })
         let secondary = try XCTUnwrap(metrics.first { $0.id == UsagePresentationMetrics.openAISecondaryID })
         let credits = try XCTUnwrap(metrics.first { $0.id == UsagePresentationMetrics.openAIResetCreditsID })
-        let additional = try XCTUnwrap(metrics.first { $0.id == "openai.additional.code_review" })
+        let additional = try XCTUnwrap(additionalMetrics.first { $0.id == "openai.additional.code_review" })
 
         XCTAssertEqual(primary.geometry?.duration, 5 * 60 * 60)
         XCTAssertEqual(primary.geometry?.usedPercent, 32.4)
@@ -379,6 +408,65 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertEqual(additional.geometry?.usedPercent, 18)
         XCTAssertEqual(additional.geometry?.resetsAt, Date(timeIntervalSince1970: additionalResetAt))
         XCTAssertEqual(additional.remainingHeadlineText, "82% left")
+    }
+
+    func testOpenAISharedMetricsOmitAdditionalLimits() throws {
+        let resetAt: TimeInterval = 1_700_000_000 + 5 * 60 * 60
+        let usage = OpenAIUsageResponse(
+            email: nil,
+            planType: nil,
+            rateLimit: OpenAIRateLimit(
+                allowed: true,
+                limitReached: false,
+                primaryWindow: OpenAIUsageWindow(
+                    usedPercent: 32.4,
+                    limitWindowSeconds: 5 * 60 * 60,
+                    resetAfterSeconds: nil,
+                    resetAt: resetAt
+                ),
+                secondaryWindow: OpenAIUsageWindow(
+                    usedPercent: 41,
+                    limitWindowSeconds: 7 * 24 * 60 * 60,
+                    resetAfterSeconds: nil,
+                    resetAt: resetAt
+                )
+            ),
+            codeReviewRateLimit: nil,
+            additionalRateLimits: [
+                OpenAIAdditionalRateLimit(
+                    type: "code_review",
+                    label: "Code Review",
+                    rateLimit: OpenAIRateLimit(
+                        allowed: true,
+                        limitReached: false,
+                        primaryWindow: OpenAIUsageWindow(
+                            usedPercent: 18,
+                            limitWindowSeconds: 24 * 60 * 60,
+                            resetAfterSeconds: nil,
+                            resetAt: resetAt
+                        ),
+                        secondaryWindow: nil
+                    )
+                )
+            ],
+            credits: nil,
+            spendControl: nil,
+            rateLimitResetCredits: nil
+        )
+
+        let shared = UsagePresentationMetrics.openAIMetrics(usage: usage, resetCredits: nil)
+        let additional = UsagePresentationMetrics.openAIAdditionalLimitMetrics(usage: usage)
+
+        XCTAssertEqual(
+            shared.map(\.id),
+            [
+                UsagePresentationMetrics.openAIPrimaryID,
+                UsagePresentationMetrics.openAISecondaryID,
+                UsagePresentationMetrics.openAIResetCreditsID
+            ]
+        )
+        XCTAssertFalse(shared.contains { $0.id.hasPrefix("openai.additional.") })
+        XCTAssertEqual(additional.map(\.id), ["openai.additional.code_review"])
     }
 
     func testCursorAndElevenLabsMetricsHaveNoGeometry() {

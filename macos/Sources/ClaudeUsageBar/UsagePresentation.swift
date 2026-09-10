@@ -444,9 +444,15 @@ enum UsagePresentationMetrics {
             case nil: groupLabel = ""
             }
             let label = groupLabel.isEmpty ? modelName : "\(modelName) (\(groupLabel))"
-            let duration = limit.group == "session"
-                ? UsageWindowGeometry.claudeSessionDuration
-                : UsageWindowGeometry.claudeWeeklyDuration
+            let geometryDuration: TimeInterval?
+            switch limit.group {
+            case "session":
+                geometryDuration = UsageWindowGeometry.claudeSessionDuration
+            case "weekly":
+                geometryDuration = UsageWindowGeometry.claudeWeeklyDuration
+            default:
+                geometryDuration = nil
+            }
             metrics.append(
                 percentageMetric(
                     id: "claude.limit.\(limit.id)",
@@ -454,8 +460,8 @@ enum UsagePresentationMetrics {
                     shortLabel: compactLabel(modelName),
                     percent: limit.percent,
                     resetDate: limit.resetsAtDate,
-                    resetInterval: duration,
-                    geometryDuration: duration
+                    resetInterval: geometryDuration,
+                    geometryDuration: geometryDuration
                 )
             )
         }
@@ -523,24 +529,27 @@ enum UsagePresentationMetrics {
                 geometry: nil
             )
         )
+        return metrics
+    }
 
-        for (index, additional) in (usage?.additionalRateLimits ?? []).enumerated() {
-            guard let window = additional.rateLimit?.primaryWindow else { continue }
+    /// Codex additional rate-limit rows for the popover only. Kept out of `openAIMetrics` so the menu-bar metric picker stays unchanged.
+    static func openAIAdditionalLimitMetrics(
+        usage: OpenAIUsageResponse?
+    ) -> [UsagePresentationMetric] {
+        (usage?.additionalRateLimits ?? []).enumerated().compactMap { index, additional in
+            guard let window = additional.rateLimit?.primaryWindow else { return nil }
             let label = additional.label ?? additional.type ?? "Additional Limit"
             let idSuffix = additional.type ?? additional.label ?? "\(index)"
-            metrics.append(
-                percentageMetric(
-                    id: "openai.additional.\(idSuffix)",
-                    label: label,
-                    shortLabel: compactLabel(label),
-                    percent: window.usedPercent,
-                    resetDate: window.resetDate,
-                    resetInterval: window.limitWindowSeconds,
-                    geometryDuration: window.limitWindowSeconds
-                )
+            return percentageMetric(
+                id: "openai.additional.\(idSuffix)",
+                label: label,
+                shortLabel: compactLabel(label),
+                percent: window.usedPercent,
+                resetDate: window.resetDate,
+                resetInterval: window.limitWindowSeconds,
+                geometryDuration: window.limitWindowSeconds
             )
         }
-        return metrics
     }
 
     static func cursorMetrics(_ usage: CursorUsageResponse?) -> [UsagePresentationMetric] {

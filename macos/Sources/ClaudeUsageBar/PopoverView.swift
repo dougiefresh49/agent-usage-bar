@@ -56,6 +56,9 @@ struct PopoverView: View {
                                 service: connectedService,
                                 style: detailStyle,
                                 metrics: presentationMetrics(for: .openAI)
+                                    + UsagePresentationMetrics.openAIAdditionalLimitMetrics(
+                                        usage: connectedService.openAIUsage
+                                    )
                             )
                         case .cursor:
                             CursorUsageView(
@@ -555,7 +558,7 @@ private struct UsageMetricRow: View {
                 Text(restores)
                     .usageFont(.supporting)
                     .foregroundStyle(.secondary)
-            } else if let resetDate = metric.resetDate {
+            } else if showsLegacyResetLine, let resetDate = metric.resetDate {
                 Text("Resets \(resetDate, style: .relative)")
                     .usageFont(.supporting)
                     .foregroundStyle(.secondary)
@@ -567,6 +570,11 @@ private struct UsageMetricRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityValue(popoverAccessibilityValue(now: now))
+    }
+
+    /// Claude and Codex pace rows show `restoresLine` or nothing. Cursor and ElevenLabs keep the relative reset line.
+    private var showsLegacyResetLine: Bool {
+        !(metric.id.hasPrefix("claude.") || metric.id.hasPrefix("openai."))
     }
 
     private var headlineText: String {
@@ -750,7 +758,7 @@ private struct DetailMetricCapsuleCell: View {
                 Text(restores)
                     .usageFont(.supporting)
                     .foregroundStyle(.secondary)
-            } else if let resetDate = metric?.resetDate {
+            } else if let metric, showsLegacyResetLine(for: metric), let resetDate = metric.resetDate {
                 Text("Resets \(resetDate, style: .relative)")
                     .usageFont(.supporting)
                     .foregroundStyle(.secondary)
@@ -760,6 +768,10 @@ private struct DetailMetricCapsuleCell: View {
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityValue(capsuleAccessibilityValue(now: now))
+    }
+
+    private func showsLegacyResetLine(for metric: UsagePresentationMetric) -> Bool {
+        !(metric.id.hasPrefix("claude.") || metric.id.hasPrefix("openai."))
     }
 
     private func capsuleAccessibilityValue(now: Date) -> String {
