@@ -523,6 +523,23 @@ enum UsagePresentationMetrics {
                 geometry: nil
             )
         )
+
+        for (index, additional) in (usage?.additionalRateLimits ?? []).enumerated() {
+            guard let window = additional.rateLimit?.primaryWindow else { continue }
+            let label = additional.label ?? additional.type ?? "Additional Limit"
+            let idSuffix = additional.type ?? additional.label ?? "\(index)"
+            metrics.append(
+                percentageMetric(
+                    id: "openai.additional.\(idSuffix)",
+                    label: label,
+                    shortLabel: compactLabel(label),
+                    percent: window.usedPercent,
+                    resetDate: window.resetDate,
+                    resetInterval: window.limitWindowSeconds,
+                    geometryDuration: window.limitWindowSeconds
+                )
+            )
+        }
         return metrics
     }
 

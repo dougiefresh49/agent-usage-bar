@@ -987,7 +987,7 @@ private struct OpenAIUsageView: View {
 
         if !service.isOpenAIConfigured {
             configurePrompt("Add a ChatGPT session token in Settings.")
-        } else if let usage = service.openAIUsage {
+        } else if service.openAIUsage != nil {
             let summaryMetrics = UsagePresentationMetrics.detailPair(
                 for: .openAI,
                 available: metrics
@@ -1001,16 +1001,6 @@ private struct OpenAIUsageView: View {
 
             ForEach(metrics.filter { !summaryIDs.contains($0.id) }) { metric in
                 UsageMetricRow(metric: metric)
-            }
-
-            ForEach(usage.additionalRateLimits ?? []) { additional in
-                if let window = additional.rateLimit?.primaryWindow {
-                    UsageValueRow(
-                        label: additional.label ?? additional.type ?? "Additional Limit",
-                        percent: window.usedPercent,
-                        resetDate: window.resetDate
-                    )
-                }
             }
 
             let announcements = service.openAIResetCredits?.credits.filter(\.isAvailable) ?? []
@@ -1229,32 +1219,6 @@ private struct ElevenLabsUsageView: View {
         rawValue
             .replacingOccurrences(of: "_", with: " ")
             .capitalized
-    }
-}
-
-private struct UsageValueRow: View {
-    let label: String
-    let percent: Double?
-    let resetDate: Date?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label)
-                    .usageFont(.metric)
-                Spacer()
-                Text(percent.map { "\(Int(round($0)))%" } ?? "—")
-                    .usageFont(.metric)
-                    .monospacedDigit()
-            }
-            ProgressView(value: (percent ?? 0) / 100, total: 1)
-                .tint(colorForPct((percent ?? 0) / 100))
-            if let resetDate {
-                Text("Resets \(resetDate, style: .relative)")
-                    .usageFont(.supporting)
-                    .foregroundStyle(.secondary)
-            }
-        }
     }
 }
 

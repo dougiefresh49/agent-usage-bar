@@ -319,6 +319,7 @@ final class UsagePresentationTests: XCTestCase {
 
     func testOpenAIMetricsAttachGeometryFromLimitWindowSeconds() throws {
         let resetAt: TimeInterval = 1_700_000_000 + 5 * 60 * 60
+        let additionalResetAt: TimeInterval = 1_700_000_000 + 24 * 60 * 60
         let usage = OpenAIUsageResponse(
             email: nil,
             planType: nil,
@@ -339,7 +340,23 @@ final class UsagePresentationTests: XCTestCase {
                 )
             ),
             codeReviewRateLimit: nil,
-            additionalRateLimits: nil,
+            additionalRateLimits: [
+                OpenAIAdditionalRateLimit(
+                    type: "code_review",
+                    label: "Code Review",
+                    rateLimit: OpenAIRateLimit(
+                        allowed: true,
+                        limitReached: false,
+                        primaryWindow: OpenAIUsageWindow(
+                            usedPercent: 18,
+                            limitWindowSeconds: 24 * 60 * 60,
+                            resetAfterSeconds: nil,
+                            resetAt: additionalResetAt
+                        ),
+                        secondaryWindow: nil
+                    )
+                )
+            ],
             credits: nil,
             spendControl: nil,
             rateLimitResetCredits: nil
@@ -349,6 +366,7 @@ final class UsagePresentationTests: XCTestCase {
         let primary = try XCTUnwrap(metrics.first { $0.id == UsagePresentationMetrics.openAIPrimaryID })
         let secondary = try XCTUnwrap(metrics.first { $0.id == UsagePresentationMetrics.openAISecondaryID })
         let credits = try XCTUnwrap(metrics.first { $0.id == UsagePresentationMetrics.openAIResetCreditsID })
+        let additional = try XCTUnwrap(metrics.first { $0.id == "openai.additional.code_review" })
 
         XCTAssertEqual(primary.geometry?.duration, 5 * 60 * 60)
         XCTAssertEqual(primary.geometry?.usedPercent, 32.4)
@@ -356,6 +374,11 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertEqual(secondary.geometry?.duration, 7 * 24 * 60 * 60)
         XCTAssertEqual(secondary.geometry?.resetsAt, Date(timeIntervalSince1970: resetAt))
         XCTAssertNil(credits.geometry)
+        XCTAssertEqual(additional.label, "Code Review")
+        XCTAssertEqual(additional.geometry?.duration, 24 * 60 * 60)
+        XCTAssertEqual(additional.geometry?.usedPercent, 18)
+        XCTAssertEqual(additional.geometry?.resetsAt, Date(timeIntervalSince1970: additionalResetAt))
+        XCTAssertEqual(additional.remainingHeadlineText, "82% left")
     }
 
     func testCursorAndElevenLabsMetricsHaveNoGeometry() {
