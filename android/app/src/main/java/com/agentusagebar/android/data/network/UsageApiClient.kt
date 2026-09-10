@@ -2,7 +2,11 @@ package com.agentusagebar.android.data.network
 
 import com.agentusagebar.android.data.credentials.CredentialsStore
 import com.agentusagebar.android.data.model.ClaudeCredentials
+import com.agentusagebar.android.data.model.ClaudeProfileResponse
 import com.agentusagebar.android.data.model.ClaudeUsageResponse
+import com.agentusagebar.android.data.model.ConnectedCredentials
+import com.agentusagebar.android.data.model.CursorAuth
+import com.agentusagebar.android.data.model.CursorPlanInfoResponse
 import com.agentusagebar.android.data.model.CursorUsageResponse
 import com.agentusagebar.android.data.model.ElevenLabsSubscriptionResponse
 import com.agentusagebar.android.data.model.OpenAIResetCreditsResponse
@@ -25,25 +29,37 @@ import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
 class UsageApiClient(
-    private val credentialsStore: CredentialsStore,
+    private val credentialsStore: CredentialsStore? = null,
     private val client: OkHttpClient = defaultClient(),
     private val json: Json = Json {
         ignoreUnknownKeys = true
         isLenient = true
     },
+    private val connectedCredentials: () -> ConnectedCredentials = {
+        credentialsStore?.loadConnected() ?: ConnectedCredentials()
+    },
+    private val claudeCredentials: () -> ClaudeCredentials? = {
+        credentialsStore?.loadClaude()
+    },
+    private val saveClaudeCredentials: (ClaudeCredentials) -> Unit = { creds ->
+        credentialsStore?.saveClaude(creds)
+    },
+    private val clearClaudeCredentials: () -> Unit = {
+        credentialsStore?.clearClaude()
+    },
 ) {
     private var codeVerifier: String? = null
     private var oauthState: String? = null
 
-    fun isClaudeConfigured(): Boolean = credentialsStore.loadClaude() != null
+    fun isClaudeConfigured(): Boolean = claudeCredentials() != null
     fun isOpenAIConfigured(): Boolean =
-        !credentialsStore.loadConnected().openAISessionToken.isNullOrBlank()
+        !connectedCredentials().openAIBearer.isNullOrBlank()
 
     fun isCursorConfigured(): Boolean =
-        !credentialsStore.loadConnected().cursorSessionToken.isNullOrBlank()
+        connectedCredentials().cursorAuth != null
 
     fun isElevenLabsConfigured(): Boolean =
-        !credentialsStore.loadConnected().elevenLabsAPIKey.isNullOrBlank()
+        !connectedCredentials().elevenLabsAPIKey.isNullOrBlank()
 
     fun startClaudeOAuthUrl(): String {
         val verifier = generateCodeVerifier()
@@ -102,14 +118,14 @@ class UsageApiClient(
             }
             val credentials = parseTokenResponse(responseBody)
                 ?: error("Could not parse token response")
-            credentialsStore.saveClaude(credentials)
+            saveClaudeCredentials(credentials)
             codeVerifier = null
             oauthState = null
         }
     }
 
     fun signOutClaude() {
-        credentialsStore.clearClaude()
+        clearClaudeCredentials()
         codeVerifier = null
         oauthState = null
     }
@@ -127,28 +143,32 @@ class UsageApiClient(
     }.getOrNull()
 
     fun fetchOpenAIUsage(): Result<OpenAIUsageResponse> = runCatching {
-        val token = credentialsStore.loadConnected().openAISessionToken
-            ?: error("OpenAI not configured")
+        val connected = connectedCredentials()
+        val token = connected.openAIBearer ?: error("OpenAI not configured")
         json.decodeFromString<OpenAIUsageResponse>(
-            openAIAuthorizedGet(OPENAI_USAGE_ENDPOINT, token),
+            openAIAuthorizedGet(OPENAI_USAGE_ENDPOINT, token, connected.openAIAccountId),
         )
     }
 
     fun fetchOpenAIResetCredits(): Result<OpenAIResetCreditsResponse> = runCatching {
-        val token = credentialsStore.loadConnected().openAISessionToken
-            ?: error("OpenAI not configured")
+        val connected = connectedCredentials()
+        val token = connected.openAIBearer ?: error("OpenAI not configured")
         json.decodeFromString<OpenAIResetCreditsResponse>(
-            openAIAuthorizedGet(OPENAI_RESET_CREDITS_ENDPOINT, token),
+            openAIAuthorizedGet(OPENAI_RESET_CREDITS_ENDPOINT, token, connected.openAIAccountId),
         )
     }
 
-    private fun openAIAuthorizedGet(url: String, token: String): String {
-        val request = Request.Builder()
+    private fun openAIAuthorizedGet(url: String, token: String, accountId: String?): String {
+        val builder = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer $token")
             .header("Accept", "application/json")
-            .build()
-        return client.newCall(request).execute().use { response ->
+            .header("OpenAI-Beta", "codex-1")
+            .header("Originator", "Codex Desktop")
+        if (!accountId.isNullOrBlank()) {
+            builder.header("Chatgpt-Account-Id", accountId)
+        }
+        return client.newCall(builder.build()).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw httpError("OpenAI", response.code)
@@ -158,27 +178,67 @@ class UsageApiClient(
     }
 
     fun fetchCursorUsage(): Result<CursorUsageResponse> = runCatching {
-        val token = credentialsStore.loadConnected().cursorSessionToken
-            ?: error("Cursor not configured")
+        when (val auth = connectedCredentials().cursorAuth) {
+            is CursorAuth.CliToken -> {
+                json.decodeFromString<CursorUsageResponse>(
+                    cursorConnectPost(CURSOR_CONNECT_GET_CURRENT_PERIOD_USAGE, auth.token),
+                )
+            }
+            is CursorAuth.Cookie -> {
+                val request = Request.Builder()
+                    .url(CURSOR_USAGE_ENDPOINT)
+                    .post("{}".toRequestBody(JSON_MEDIA))
+                    .header("Content-Type", "application/json")
+                    .header("Origin", "https://cursor.com")
+                    .header("Referer", "https://cursor.com/dashboard?tab=spending")
+                    .header("Cookie", "WorkosCursorSessionToken=${auth.token}")
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    val body = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        throw httpError("Cursor", response.code)
+                    }
+                    json.decodeFromString<CursorUsageResponse>(body)
+                }
+            }
+            null -> error("Cursor not configured")
+        }
+    }
+
+    fun fetchCursorPlanInfo(): Result<CursorPlanInfoResponse> = runCatching {
+        val token = (connectedCredentials().cursorAuth as? CursorAuth.CliToken)?.token
+            ?: error("Cursor plan info requires a CLI token")
+        json.decodeFromString<CursorPlanInfoResponse>(
+            cursorConnectPost(CURSOR_CONNECT_GET_PLAN_INFO, token),
+        )
+    }
+
+    fun fetchClaudeProfile(): Result<ClaudeProfileResponse> = runCatching {
+        val data = sendAuthorizedGet(PROFILE_ENDPOINT)
+        json.decodeFromString<ClaudeProfileResponse>(data)
+    }
+
+    private fun cursorConnectPost(method: String, token: String): String {
         val request = Request.Builder()
-            .url(CURSOR_USAGE_ENDPOINT)
+            .url("$CURSOR_CONNECT_BASE/aiserver.v1.DashboardService/$method")
             .post("{}".toRequestBody(JSON_MEDIA))
+            .header("Authorization", "Bearer $token")
             .header("Content-Type", "application/json")
-            .header("Origin", "https://cursor.com")
-            .header("Referer", "https://cursor.com/dashboard?tab=spending")
-            .header("Cookie", "WorkosCursorSessionToken=$token")
+            .header("connect-protocol-version", "1")
+            .header("x-cursor-client-version", "cli-agent-usage-bar")
+            .header("x-cursor-client-type", "cli")
             .build()
-        client.newCall(request).execute().use { response ->
+        return client.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw httpError("Cursor", response.code)
             }
-            json.decodeFromString<CursorUsageResponse>(body)
+            body
         }
     }
 
     fun fetchElevenLabsUsage(): Result<ElevenLabsSubscriptionResponse> = runCatching {
-        val apiKey = credentialsStore.loadConnected().elevenLabsAPIKey
+        val apiKey = connectedCredentials().elevenLabsAPIKey
             ?: error("ElevenLabs not configured")
         val request = Request.Builder()
             .url(ELEVENLABS_SUBSCRIPTION_ENDPOINT)
@@ -198,19 +258,19 @@ class UsageApiClient(
         url: String,
         expireOnAuthFailure: Boolean = true,
     ): String {
-        var credentials = credentialsStore.loadClaude()
+        var credentials = claudeCredentials()
             ?: error("Not signed in")
 
         if (credentials.needsRefresh()) {
             val refreshed = refreshClaude(force = true)
             if (!refreshed && credentials.isExpired()) {
                 if (expireOnAuthFailure) {
-                    credentialsStore.clearClaude()
+                    clearClaudeCredentials()
                     error("Session expired — please sign in again")
                 }
                 error("Token refresh failed")
             }
-            credentials = credentialsStore.loadClaude() ?: credentials
+            credentials = claudeCredentials() ?: credentials
         }
 
         var responseCode: Int
@@ -229,17 +289,17 @@ class UsageApiClient(
 
         if (!refreshClaude(force = true)) {
             if (expireOnAuthFailure) {
-                credentialsStore.clearClaude()
+                clearClaudeCredentials()
                 error("Session expired — please sign in again")
             }
             error("Token refresh failed")
         }
 
-        val refreshed = credentialsStore.loadClaude() ?: error("Not signed in")
+        val refreshed = claudeCredentials() ?: error("Not signed in")
         client.newCall(authorizedRequest(url, refreshed.accessToken)).execute().use { response ->
             if (response.code == 401) {
                 if (expireOnAuthFailure) {
-                    credentialsStore.clearClaude()
+                    clearClaudeCredentials()
                     error("Session expired — please sign in again")
                 }
                 error("Unauthorized")
@@ -250,7 +310,7 @@ class UsageApiClient(
     }
 
     private fun refreshClaude(force: Boolean): Boolean {
-        val current = credentialsStore.loadClaude() ?: return false
+        val current = claudeCredentials() ?: return false
         val refreshToken = current.refreshToken
         if (refreshToken.isNullOrBlank()) return false
         if (!force && !current.needsRefresh()) return true
@@ -281,7 +341,7 @@ class UsageApiClient(
                     response.body?.string().orEmpty(),
                     fallback = current,
                 ) ?: return false
-                credentialsStore.saveClaude(updated)
+                saveClaudeCredentials(updated)
                 true
             }
         }.getOrDefault(false)
@@ -364,9 +424,13 @@ class UsageApiClient(
         private const val TOKEN_ENDPOINT = "https://platform.claude.com/v1/oauth/token"
         private const val USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
         private const val USERINFO_ENDPOINT = "https://api.anthropic.com/api/oauth/userinfo"
+        private const val PROFILE_ENDPOINT = "https://api.anthropic.com/api/oauth/profile"
         private const val OPENAI_USAGE_ENDPOINT = "https://chatgpt.com/backend-api/wham/usage"
         private const val OPENAI_RESET_CREDITS_ENDPOINT =
             "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+        private const val CURSOR_CONNECT_BASE = "https://api2.cursor.sh"
+        private const val CURSOR_CONNECT_GET_CURRENT_PERIOD_USAGE = "GetCurrentPeriodUsage"
+        private const val CURSOR_CONNECT_GET_PLAN_INFO = "GetPlanInfo"
         private const val CURSOR_USAGE_ENDPOINT =
             "https://cursor.com/api/dashboard/get-current-period-usage"
         private const val ELEVENLABS_SUBSCRIPTION_ENDPOINT =

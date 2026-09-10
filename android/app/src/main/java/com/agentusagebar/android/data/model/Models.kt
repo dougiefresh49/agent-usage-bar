@@ -97,6 +97,85 @@ data class CursorSpendLimitUsage(
 }
 
 @Serializable
+data class CursorPlanInfoResponse(
+    val planInfo: CursorPlanInfo? = null,
+    val nextUpgrade: CursorPlanNextUpgrade? = null,
+)
+
+@Serializable
+data class CursorPlanInfo(
+    val planName: String? = null,
+    val includedAmountCents: Int? = null,
+    val price: String? = null,
+    /** Epoch milliseconds as a string, matching the Connect-RPC payload. */
+    val billingCycleEnd: String? = null,
+    val planOwner: String? = null,
+)
+
+@Serializable
+data class CursorPlanNextUpgrade(
+    val tier: String? = null,
+    val name: String? = null,
+    val includedAmountCents: Int? = null,
+    val price: String? = null,
+    val description: String? = null,
+)
+
+@Serializable
+data class ClaudeProfileResponse(
+    val account: ClaudeProfileAccount? = null,
+    val organization: ClaudeProfileOrganization? = null,
+) {
+    /**
+     * Maps organization.rate_limit_tier to a short plan label.
+     * Shared contract with macOS (#48) and tracking #58.
+     */
+    val planLabel: String
+        get() {
+            when (organization?.rateLimitTier) {
+                "default_claude_max_20x" -> return "Max 20x"
+                "default_claude_max_5x" -> return "Max 5x"
+                "claude_pro" -> return "Pro"
+            }
+            if (account?.hasClaudePro == true && account.hasClaudeMax != true) {
+                return "Pro"
+            }
+            val type = organization?.organizationType
+            if (!type.isNullOrBlank()) {
+                return type.split('_')
+                    .filter { it.isNotBlank() }
+                    .joinToString(" ") { part ->
+                        part.replaceFirstChar { ch ->
+                            if (ch.isLowerCase()) ch.titlecase() else ch.toString()
+                        }
+                    }
+            }
+            return when {
+                account?.hasClaudeMax == true -> "Max"
+                account?.hasClaudePro == true -> "Pro"
+                else -> "Claude"
+            }
+        }
+}
+
+@Serializable
+data class ClaudeProfileAccount(
+    @SerialName("has_claude_max") val hasClaudeMax: Boolean? = null,
+    @SerialName("has_claude_pro") val hasClaudePro: Boolean? = null,
+)
+
+@Serializable
+data class ClaudeProfileOrganization(
+    @SerialName("organization_type") val organizationType: String? = null,
+    @SerialName("billing_type") val billingType: String? = null,
+    /** Live JSON key is singular rate_limit_tier (verified 2026-09-09). */
+    @SerialName("rate_limit_tier") val rateLimitTier: String? = null,
+    @SerialName("subscription_status") val subscriptionStatus: String? = null,
+    @SerialName("subscription_created_at") val subscriptionCreatedAt: String? = null,
+    @SerialName("has_extra_usage_enabled") val hasExtraUsageEnabled: Boolean? = null,
+)
+
+@Serializable
 data class OpenAIUsageResponse(
     val email: String? = null,
     @SerialName("plan_type") val planType: String? = null,
@@ -412,4 +491,6 @@ data class ProviderUsageState(
 data class AppUsageSnapshot(
     val generatedAtEpochMs: Long = 0L,
     val providers: Map<UsageProvider, ProviderUsageState> = emptyMap(),
+    val claudeProfile: ClaudeProfileResponse? = null,
+    val cursorPlanInfo: CursorPlanInfoResponse? = null,
 )
