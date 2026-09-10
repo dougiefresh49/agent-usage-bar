@@ -3,7 +3,7 @@ import Foundation
 enum JWTClaims {
     static func expiry(of token: String) -> Date? {
         let segments = token.split(separator: ".", omittingEmptySubsequences: false)
-        guard segments.count >= 2 else { return nil }
+        guard segments.count == 3 else { return nil }
 
         let payloadSegment = String(segments[1])
         guard let payloadData = Data(base64URLEncoded: payloadSegment) else {

@@ -17,6 +17,18 @@ final class JWTClaimsTests: XCTestCase {
         XCTAssertNil(JWTClaims.expiry(of: ""))
     }
 
+    func testExpiryReturnsNilForWrongSegmentCount() throws {
+        let exp: TimeInterval = 1_893_456_000
+        let twoSegment = try makeUnsignedJWT(payloadJSON: #"{"exp":\#(Int(exp))}"#)
+            .split(separator: ".")
+            .prefix(2)
+            .joined(separator: ".")
+        let fourSegment = try makeUnsignedJWT(payloadJSON: #"{"exp":\#(Int(exp))}"#) + ".extra"
+
+        XCTAssertNil(JWTClaims.expiry(of: twoSegment))
+        XCTAssertNil(JWTClaims.expiry(of: fourSegment))
+    }
+
     private func makeUnsignedJWT(payloadJSON: String) throws -> String {
         let header = Data(#"{"alg":"none","typ":"JWT"}"#.utf8).base64URLEncodedString()
         let payload = Data(payloadJSON.utf8).base64URLEncodedString()

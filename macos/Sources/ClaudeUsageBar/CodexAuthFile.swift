@@ -39,9 +39,7 @@ enum CodexAuthFile {
     }
 
     private static func authFileURL(environment: [String: String], home: URL) -> URL {
-        if let codexHome = environment["CODEX_HOME"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           codexHome.isEmpty == false {
+        if let codexHome = environment["CODEX_HOME"] {
             return URL(fileURLWithPath: codexHome, isDirectory: true)
                 .appendingPathComponent("auth.json")
         }

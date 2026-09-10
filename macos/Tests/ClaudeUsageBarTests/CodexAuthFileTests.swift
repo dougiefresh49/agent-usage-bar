@@ -94,6 +94,25 @@ final class CodexAuthFileTests: XCTestCase {
         XCTAssertNil(credentials)
     }
 
+    func testEmptyCODEX_HOMEDoesNotFallBackToDefaultHome() throws {
+        let defaultDir = tempHome.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: defaultDir, withIntermediateDirectories: true)
+        try writeAuthFile(
+            at: defaultDir.appendingPathComponent("auth.json"),
+            authMode: "chatgpt",
+            accessToken: "default-token",
+            accountId: "acct-default",
+            lastRefresh: "2026-09-04T02:39:09.977682Z"
+        )
+
+        let credentials = CodexAuthFile.load(
+            environment: ["CODEX_HOME": ""],
+            home: tempHome
+        )
+
+        XCTAssertNil(credentials)
+    }
+
     func testLoadReturnsNilForMalformedJSON() throws {
         let authURL = tempCodexHome.appendingPathComponent("auth.json")
         try Data("{ not json".utf8).write(to: authURL)
