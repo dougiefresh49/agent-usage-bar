@@ -188,9 +188,8 @@ final class OpenAIResetCreditRedeemerTests: XCTestCase {
         }
 
         let pendingData = try XCTUnwrap(defaults.data(forKey: "openAIResetCreditPendingAttempt"))
-        let pending = try JSONDecoder().decode(PendingAttemptProbe.self, from: pendingData)
-        XCTAssertEqual(pending.creditID, creditID)
-        XCTAssertEqual(pending.requestID, expectedID)
+        let pending = try JSONDecoder().decode([String: UUID].self, from: pendingData)
+        XCTAssertEqual(pending[creditID], expectedID)
 
         RedeemerMockURLProtocol.handler = { request in
             let body = try XCTUnwrap(Self.jsonBody(for: request))
@@ -227,7 +226,7 @@ final class OpenAIResetCreditRedeemerTests: XCTestCase {
     }
 
     func testFailedCreditAThenCreditBSucceeds() async throws {
-        // Spec only reuses request id for the same creditID; a later credit may proceed.
+        // A later credit may proceed; clearing B must not drop A's pending entry.
         RedeemerMockURLProtocol.handler = { _ in
             throw URLError(.timedOut)
         }
@@ -235,6 +234,10 @@ final class OpenAIResetCreditRedeemerTests: XCTestCase {
         let redeemer = OpenAIResetCreditRedeemer(
             session: makeSession(),
             defaults: defaults
+        )
+        let expectedAID = OpenAIResetCreditRedemption.requestID(
+            accountID: "acct",
+            creditID: "credit-a"
         )
 
         do {
@@ -245,7 +248,7 @@ final class OpenAIResetCreditRedeemerTests: XCTestCase {
             )
             XCTFail("Expected timeout")
         } catch is URLError {
-            // Pending for credit-a remains until overwritten.
+            // Pending for credit-a remains in the map.
         }
 
         var seenCreditIDs: [String] = []
@@ -268,6 +271,70 @@ final class OpenAIResetCreditRedeemerTests: XCTestCase {
         )
         XCTAssertEqual(outcome, .reset)
         XCTAssertEqual(seenCreditIDs, ["credit-b"])
+
+        let pendingData = try XCTUnwrap(defaults.data(forKey: "openAIResetCreditPendingAttempt"))
+        let pending = try JSONDecoder().decode([String: UUID].self, from: pendingData)
+        XCTAssertEqual(pending["credit-a"], expectedAID)
+        XCTAssertNil(pending["credit-b"])
+    }
+
+    func testFailedCreditAThenCreditBLeavesAReusable() async throws {
+        // Failed send for A, then send for B, must leave A's request id reusable.
+        let expectedAID = OpenAIResetCreditRedemption.requestID(
+            accountID: "acct",
+            creditID: "credit-a"
+        )
+        var seenRequestIDs: [String] = []
+
+        RedeemerMockURLProtocol.handler = { _ in
+            throw URLError(.timedOut)
+        }
+
+        let redeemer = OpenAIResetCreditRedeemer(
+            session: makeSession(),
+            defaults: defaults
+        )
+
+        do {
+            _ = try await redeemer.redeem(
+                token: "tok",
+                accountID: "acct",
+                creditID: "credit-a"
+            )
+            XCTFail("Expected timeout")
+        } catch is URLError {
+            // Keep A's pending entry.
+        }
+
+        RedeemerMockURLProtocol.handler = { request in
+            let body = try XCTUnwrap(Self.jsonBody(for: request))
+            if let id = body["redeem_request_id"] {
+                seenRequestIDs.append(id)
+            }
+            return try Self.httpResponse(
+                url: request.url!,
+                statusCode: 200,
+                body: #"{"code":"reset"}"#
+            )
+        }
+
+        let bOutcome = try await redeemer.redeem(
+            token: "tok",
+            accountID: "acct",
+            creditID: "credit-b"
+        )
+        XCTAssertEqual(bOutcome, .reset)
+
+        let aOutcome = try await redeemer.redeem(
+            token: "tok",
+            accountID: "acct",
+            creditID: "credit-a"
+        )
+        XCTAssertEqual(aOutcome, .reset)
+        XCTAssertEqual(
+            seenRequestIDs.last,
+            expectedAID.uuidString.lowercased()
+        )
         XCTAssertNil(defaults.data(forKey: "openAIResetCreditPendingAttempt"))
     }
 
@@ -416,11 +483,6 @@ final class OpenAIResetCreditRedeemerTests: XCTestCase {
         )
         return (response, Data(body.utf8))
     }
-}
-
-private struct PendingAttemptProbe: Codable {
-    let creditID: String
-    let requestID: UUID
 }
 
 private final class RedeemerMockURLProtocol: URLProtocol {

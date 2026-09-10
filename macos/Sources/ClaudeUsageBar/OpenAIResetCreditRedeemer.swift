@@ -159,33 +159,44 @@ final class OpenAIResetCreditRedeemer {
             throw OpenAIResetCreditError.invalidResponse
         }
 
-        clearPending()
+        clearPending(creditID: creditID)
         return decoded.code
     }
 
     private func resolvedRequestID(accountID: String?, creditID: String) -> UUID {
-        if let pending = loadPending(), pending.creditID == creditID {
-            return pending.requestID
+        if let existing = loadPendingMap()[creditID] {
+            return existing
         }
         return OpenAIResetCreditRedemption.requestID(accountID: accountID, creditID: creditID)
     }
 
     private func persistPending(creditID: String, requestID: UUID) {
-        let attempt = PendingAttempt(creditID: creditID, requestID: requestID)
-        if let data = try? JSONEncoder().encode(attempt) {
+        var map = loadPendingMap()
+        map[creditID] = requestID
+        savePendingMap(map)
+    }
+
+    private func loadPendingMap() -> [String: UUID] {
+        guard let data = defaults.data(forKey: Self.pendingAttemptKey) else {
+            return [:]
+        }
+        return (try? JSONDecoder().decode([String: UUID].self, from: data)) ?? [:]
+    }
+
+    private func savePendingMap(_ map: [String: UUID]) {
+        if map.isEmpty {
+            defaults.removeObject(forKey: Self.pendingAttemptKey)
+            return
+        }
+        if let data = try? JSONEncoder().encode(map) {
             defaults.set(data, forKey: Self.pendingAttemptKey)
         }
     }
 
-    private func loadPending() -> PendingAttempt? {
-        guard let data = defaults.data(forKey: Self.pendingAttemptKey) else {
-            return nil
-        }
-        return try? JSONDecoder().decode(PendingAttempt.self, from: data)
-    }
-
-    private func clearPending() {
-        defaults.removeObject(forKey: Self.pendingAttemptKey)
+    private func clearPending(creditID: String) {
+        var map = loadPendingMap()
+        map.removeValue(forKey: creditID)
+        savePendingMap(map)
     }
 
     private func requestBodyObject(from request: URLRequest) -> [String: String]? {
@@ -195,11 +206,6 @@ final class OpenAIResetCreditRedeemer {
         }
         return object
     }
-}
-
-private struct PendingAttempt: Codable, Equatable {
-    let creditID: String
-    let requestID: UUID
 }
 
 private struct ConsumeResponse: Codable {
