@@ -33,6 +33,7 @@ class UsageService: ObservableObject {
     }
 
     private var refreshTask: Task<RefreshResult, Never>?
+    private var profileFetchTask: Task<Void, Never>?
 
     static let defaultPollingMinutes = 30
     static let pollingOptions = [5, 15, 30, 60]
@@ -249,6 +250,8 @@ class UsageService: ObservableObject {
         timer = nil
         refreshTask?.cancel()
         refreshTask = nil
+        profileFetchTask?.cancel()
+        profileFetchTask = nil
         lastError = nil
     }
 
@@ -325,15 +328,31 @@ class UsageService: ObservableObject {
             return
         }
 
-        // Soft failure must never overwrite lastError from a successful usage fetch.
-        let preservedError = lastError
-        defer { lastError = preservedError }
+        if let profileFetchTask {
+            await profileFetchTask.value
+            return
+        }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performOAuthProfileFetch()
+        }
+        profileFetchTask = task
+        await task.value
+        profileFetchTask = nil
+    }
+
+    /// Soft profile fetch: never mutates `lastError`, never expires the session.
+    private func performOAuthProfileFetch() async {
+        if let profileLastFetched,
+           Date().timeIntervalSince(profileLastFetched) < Self.profileCacheInterval {
+            return
+        }
+
+        let wasAuthenticated = isAuthenticated
 
         do {
-            guard let result = try await sendAuthorizedRequest(
-                to: profileEndpoint,
-                expireSessionOnAuthFailure: false
-            ) else {
+            guard let result = try await sendSoftAuthorizedRequest(to: profileEndpoint) else {
                 print("[ClaudeProfile] fetch skipped or unauthorized")
                 return
             }
@@ -342,11 +361,65 @@ class UsageService: ObservableObject {
                 print("[ClaudeProfile] HTTP \(http.statusCode)")
                 return
             }
+            // Drop the response if the user signed out while the request was in flight.
+            guard wasAuthenticated, isAuthenticated, loadCredentials() != nil else {
+                print("[ClaudeProfile] discarding response after sign-out")
+                return
+            }
             let decoded = try JSONDecoder().decode(ClaudeProfileResponse.self, from: data)
             profile = decoded
             profileLastFetched = Date()
         } catch {
             print("[ClaudeProfile] \(error.localizedDescription)")
+        }
+    }
+
+    /// Like `sendAuthorizedRequest`, but never sets `lastError` and never expires the session.
+    private func sendSoftAuthorizedRequest(
+        to url: URL
+    ) async throws -> (Data, HTTPURLResponse)? {
+        guard let initialCredentials = loadCredentials() else {
+            return nil
+        }
+
+        if initialCredentials.needsRefresh() {
+            let refreshResult = await refreshCredentials(force: true)
+            if refreshResult != .success, initialCredentials.isExpired() {
+                return nil
+            }
+        }
+
+        let activeCredentials = loadCredentials() ?? initialCredentials
+
+        var result = try await performAuthorizedRequest(
+            token: activeCredentials.accessToken,
+            url: url
+        )
+
+        if result.1.statusCode != 401 {
+            return result
+        }
+
+        let refreshResult = await refreshCredentials(force: true)
+        switch refreshResult {
+        case .success:
+            guard let refreshedCredentials = loadCredentials() else {
+                return nil
+            }
+
+            result = try await performAuthorizedRequest(
+                token: refreshedCredentials.accessToken,
+                url: url
+            )
+
+            if result.1.statusCode == 401 {
+                return nil
+            }
+
+            return result
+
+        case .permanentFailure, .transientFailure:
+            return nil
         }
     }
 
@@ -636,6 +709,8 @@ class UsageService: ObservableObject {
         timer = nil
         refreshTask?.cancel()
         refreshTask = nil
+        profileFetchTask?.cancel()
+        profileFetchTask = nil
         lastError = "Session expired — please sign in again"
     }
 }
