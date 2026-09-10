@@ -36,9 +36,26 @@ jobs:
           MAIN_SHA="$(git rev-parse origin/main)"
           HEAD_SHA="$(git rev-parse HEAD)"
           if [ "$HEAD_SHA" != "$MAIN_SHA" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Build SHA ${HEAD_SHA} is not tip of main (${MAIN_SHA}); skipping."
-            exit 0
+            # Main moved on after this build. Skip only when the newer commits
+            # touch Android-relevant paths, because then a newer Build and Bump
+            # will run. Docs, macOS, or skill commits landing right after a
+            # merge must not lose the release (#74).
+            rc=0
+            bash scripts/platform-changes.sh android --touches "$HEAD_SHA" "$MAIN_SHA" || rc=$?
+            case "$rc" in
+              0)
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                echo "Build SHA ${HEAD_SHA} is not tip of main (${MAIN_SHA}) and newer Android changes exist; skipping."
+                exit 0
+                ;;
+              1)
+                echo "Build SHA ${HEAD_SHA} is not tip of main (${MAIN_SHA}), but nothing Android-relevant changed since; tagging this build."
+                ;;
+              *)
+                echo "::error::Could not compare ${HEAD_SHA} with ${MAIN_SHA} (exit ${rc}); refusing to guess."
+                exit 1
+                ;;
+            esac
           fi
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
