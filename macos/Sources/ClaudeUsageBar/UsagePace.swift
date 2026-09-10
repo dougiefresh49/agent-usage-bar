@@ -1,7 +1,7 @@
 import Foundation
 
 /// One usage window's inputs for elapsed, pace, and restore presentation math.
-struct UsageWindowGeometry {
+struct UsageWindowGeometry: Equatable {
     var usedPercent: Double
     var resetsAt: Date?
     var duration: TimeInterval?
@@ -55,6 +55,7 @@ enum UsagePace {
     }
 
     /// What the next reset restores: `+32% in 5d 3h`, or `resets now` when the reset is in the past.
+    /// Nil when nothing has been used yet, so a fresh window shows no `+0%` line.
     static func restoresLine(_ window: UsageWindowGeometry, now: Date) -> String? {
         guard let resetsAt = window.resetsAt else {
             return nil
@@ -63,6 +64,9 @@ enum UsagePace {
             return "resets now"
         }
         let restored = Int(window.usedPercent.rounded(.toNearestOrAwayFromZero))
+        guard restored > 0 else {
+            return nil
+        }
         return "+\(restored)% in \(formatDuration(resetsAt.timeIntervalSince(now)))"
     }
 

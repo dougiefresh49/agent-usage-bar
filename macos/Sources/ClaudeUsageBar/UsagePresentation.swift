@@ -259,14 +259,6 @@ struct UsagePresentationMetric: Identifiable, Equatable {
     }
 }
 
-extension UsageWindowGeometry: Equatable {
-    static func == (lhs: UsageWindowGeometry, rhs: UsageWindowGeometry) -> Bool {
-        lhs.usedPercent == rhs.usedPercent
-            && lhs.resetsAt == rhs.resetsAt
-            && lhs.duration == rhs.duration
-    }
-}
-
 @MainActor
 enum UsagePresentationMetrics {
     static let claudeFiveHourID = "claude.5h"
