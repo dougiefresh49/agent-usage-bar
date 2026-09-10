@@ -359,10 +359,9 @@ class UsageService: ObservableObject {
                 pendingManualUsageRefresh = true
             }
             await usageFetchTask.value
-            // Race: flag set after the flight drained pending but before task cleared.
-            if trigger == .manual, pendingManualUsageRefresh {
-                await fetchUsage(trigger: .manual)
-            }
+            // The owner of the task runs the trailing manual fetch if the flag is
+            // still set once it clears the slot; recursing here can loop without a
+            // suspension point while the slot still holds the finished task.
             return
         }
 

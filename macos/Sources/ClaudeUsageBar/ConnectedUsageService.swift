@@ -294,9 +294,7 @@ final class ConnectedUsageService: ObservableObject {
                 pendingManualCursorRefresh = true
             }
             await cursorFetchTask.value
-            if trigger == .manual, pendingManualCursorRefresh {
-                await fetchCursorUsage(trigger: .manual)
-            }
+            // The task owner runs the trailing manual fetch; no recursion here.
             return
         }
 
@@ -407,9 +405,7 @@ final class ConnectedUsageService: ObservableObject {
                 pendingManualOpenAIRefresh = true
             }
             await openAIFetchTask.value
-            if trigger == .manual, pendingManualOpenAIRefresh {
-                await fetchOpenAIUsage(trigger: .manual)
-            }
+            // The task owner runs the trailing manual fetch; no recursion here.
             return
         }
 
@@ -638,9 +634,7 @@ final class ConnectedUsageService: ObservableObject {
                 pendingManualElevenLabsRefresh = true
             }
             await elevenLabsFetchTask.value
-            if trigger == .manual, pendingManualElevenLabsRefresh {
-                await fetchElevenLabsUsage(trigger: .manual)
-            }
+            // The task owner runs the trailing manual fetch; no recursion here.
             return
         }
 
