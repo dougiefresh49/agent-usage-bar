@@ -493,4 +493,6 @@ data class AppUsageSnapshot(
     val providers: Map<UsageProvider, ProviderUsageState> = emptyMap(),
     val claudeProfile: ClaudeProfileResponse? = null,
     val cursorPlanInfo: CursorPlanInfoResponse? = null,
+    /** Codex plan type from the usage response; null when absent or not configured. */
+    val openAIPlanType: String? = null,
 )

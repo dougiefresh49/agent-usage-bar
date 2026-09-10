@@ -434,26 +434,36 @@ class UsageRepository(
 
     private fun refreshOpenAI() {
         if (!api.isOpenAIConfigured()) {
-            updateProvider(
-                ProviderUsageState(
-                    provider = UsageProvider.OPENAI,
-                    isConfigured = false,
-                ),
-            )
+            _snapshot.update { current ->
+                current.copy(
+                    providers = current.providers + (
+                        UsageProvider.OPENAI to ProviderUsageState(
+                            provider = UsageProvider.OPENAI,
+                            isConfigured = false,
+                        )
+                    ),
+                    openAIPlanType = null,
+                )
+            }
             return
         }
         val usageResult = api.fetchOpenAIUsage()
         val resetCredits = api.fetchOpenAIResetCredits().getOrNull()
         usageResult
             .onSuccess { usage ->
-                updateProvider(
-                    ProviderUsageState(
-                        provider = UsageProvider.OPENAI,
-                        isConfigured = true,
-                        metrics = openAIMetrics(usage, resetCredits),
-                        updatedAtEpochMs = System.currentTimeMillis(),
-                    ),
-                )
+                _snapshot.update { current ->
+                    current.copy(
+                        providers = current.providers + (
+                            UsageProvider.OPENAI to ProviderUsageState(
+                                provider = UsageProvider.OPENAI,
+                                isConfigured = true,
+                                metrics = openAIMetrics(usage, resetCredits),
+                                updatedAtEpochMs = System.currentTimeMillis(),
+                            )
+                        ),
+                        openAIPlanType = usage.planType?.takeIf { it.isNotBlank() },
+                    )
+                }
             }
             .onFailure { error ->
                 updateProvider(

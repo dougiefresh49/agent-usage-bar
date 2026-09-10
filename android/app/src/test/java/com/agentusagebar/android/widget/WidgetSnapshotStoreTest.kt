@@ -125,6 +125,38 @@ class WidgetSnapshotStoreTest {
     }
 
     @Test
+    fun renewsAtComesFromBillingCycleEndOnly() {
+        val metricReset = 1_790_439_879_000L
+        val snapshot = AppUsageSnapshot(
+            generatedAtEpochMs = 1L,
+            providers = mapOf(
+                UsageProvider.CURSOR to ProviderUsageState(
+                    provider = UsageProvider.CURSOR,
+                    isConfigured = true,
+                    metrics = listOf(
+                        UsageMetric(
+                            id = UsageMetricPreferences.CURSOR_TOTAL,
+                            label = "Total Plan Usage",
+                            percentUsed = 10.0,
+                            resetsAtEpochMs = metricReset,
+                        ),
+                    ),
+                ),
+            ),
+            cursorPlanInfo = CursorPlanInfoResponse(
+                planInfo = CursorPlanInfo(
+                    planName = "Pro",
+                    includedAmountCents = 2000,
+                    price = "$20/mo",
+                    billingCycleEnd = null,
+                ),
+            ),
+        )
+        val payload = widgetSnapshotPayload(snapshot)
+        assertNull(payload.cursorRenewsAtEpochMs)
+    }
+
+    @Test
     fun legacySnapshotWithoutPlanFieldsStillDecodes() {
         val legacy = """
             {"generatedAtEpochMs":1,"providers":{"CURSOR":{"isConfigured":true,"metrics":[]}}}

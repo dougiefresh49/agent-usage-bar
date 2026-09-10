@@ -269,7 +269,6 @@ private fun HomeScreen(
                         UsageProvider.CURSOR -> {
                             val planInfo = snapshot.cursorPlanInfo?.planInfo
                             val renewsAt = planInfo?.billingCycleEnd?.toDoubleOrNull()?.toLong()
-                                ?: selectedState?.metrics?.firstNotNullOfOrNull { it.resetsAtEpochMs }
                             formatCursorPlanRow(
                                 planName = planInfo?.planName,
                                 price = planInfo?.price,
@@ -301,6 +300,15 @@ private fun HomeScreen(
                             )?.let { line ->
                                 Text(
                                     text = line,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        UsageProvider.OPENAI -> {
+                            snapshot.openAIPlanType?.takeIf { it.isNotBlank() }?.let { planType ->
+                                Text(
+                                    text = planType,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )

@@ -6,9 +6,16 @@ import com.agentusagebar.android.data.model.ProviderUsageState
 import com.agentusagebar.android.data.model.UsageMetric
 import com.agentusagebar.android.data.model.UsageMetricPreferences
 import com.agentusagebar.android.data.model.UsageProvider
+import java.util.Locale
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+
+/** Shared encode/decode for prefs and unit-test helpers. */
+internal val widgetSnapshotJson = Json {
+    ignoreUnknownKeys = true
+    encodeDefaults = true
+}
 
 /**
  * Widgets run in a separate process lifecycle from the UI. Persist the last
@@ -19,17 +26,12 @@ object WidgetSnapshotStore {
     private const val PREFS = "agent_usage_bar_widget_snapshot"
     private const val KEY = "snapshot_json"
 
-    private val json = Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-    }
-
     fun save(context: Context, snapshot: AppUsageSnapshot) {
         val payload = widgetSnapshotPayload(snapshot)
         context.applicationContext
             .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
-            .putString(KEY, json.encodeToString(payload))
+            .putString(KEY, widgetSnapshotJson.encodeToString(payload))
             .apply()
     }
 
@@ -39,7 +41,9 @@ object WidgetSnapshotStore {
             .getString(KEY, null)
             ?: return LoadedWidgetSnapshot()
 
-        val payload = runCatching { json.decodeFromString<WidgetSnapshotPayload>(raw) }.getOrNull()
+        val payload = runCatching {
+            widgetSnapshotJson.decodeFromString<WidgetSnapshotPayload>(raw)
+        }.getOrNull()
             ?: return LoadedWidgetSnapshot()
 
         return loadedWidgetSnapshot(payload)
@@ -86,8 +90,6 @@ internal data class WidgetMetricSnapshot(
 internal fun widgetSnapshotPayload(snapshot: AppUsageSnapshot): WidgetSnapshotPayload {
     val planInfo = snapshot.cursorPlanInfo?.planInfo
     val renewsAt = planInfo?.billingCycleEnd?.toDoubleOrNull()?.toLong()
-        ?: snapshot.providers[UsageProvider.CURSOR]?.metrics
-            ?.firstNotNullOfOrNull { it.resetsAtEpochMs }
     return WidgetSnapshotPayload(
         generatedAtEpochMs = snapshot.generatedAtEpochMs,
         providers = UsageProvider.entries.associate { provider ->
@@ -148,17 +150,12 @@ internal fun loadedWidgetSnapshot(payload: WidgetSnapshotPayload): LoadedWidgetS
     )
 }
 
-private val widgetJson = Json {
-    ignoreUnknownKeys = true
-    encodeDefaults = true
-}
-
-/** JSON round-trip for unit tests; mirrors prefs encode/decode. */
+/** JSON round-trip for unit tests; same [widgetSnapshotJson] as prefs. */
 internal fun encodeWidgetSnapshotPayload(payload: WidgetSnapshotPayload): String =
-    widgetJson.encodeToString(payload)
+    widgetSnapshotJson.encodeToString(payload)
 
 internal fun decodeWidgetSnapshotPayload(raw: String): WidgetSnapshotPayload =
-    widgetJson.decodeFromString(raw)
+    widgetSnapshotJson.decodeFromString(raw)
 
 /**
  * Cursor plan headline: "Pro · $20/mo · renews in 12d".
@@ -191,7 +188,7 @@ internal fun formatCursorSpendRow(
     val percent = percentUsed ?: return null
     val limitDollars = cents / 100.0
     val usedDollars = limitDollars * (percent / 100.0)
-    return "used $%.2f of $%.2f".format(usedDollars, limitDollars)
+    return "used $%.2f of $%.2f".format(Locale.US, usedDollars, limitDollars)
 }
 
 /** Claude tier line: "Max 20x · active". Null when both parts are absent. */
