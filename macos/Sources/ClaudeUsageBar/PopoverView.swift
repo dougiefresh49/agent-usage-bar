@@ -567,6 +567,46 @@ private struct DetailUsageVisualization: View {
         case .orbit:
             UsageOrbitView(metrics: metrics)
         }
+        if metrics.contains(where: { $0.pace() != nil }) {
+            PaceLegend()
+        }
+    }
+}
+
+/// The pace glyph next to a headline (arrow up, dash, arrow down) with a plain-words tooltip.
+/// Hidden from accessibility because the row's accessibility value already speaks the pace.
+private struct PaceGlyph: View {
+    let metric: UsagePresentationMetric
+    let now: Date
+
+    var body: some View {
+        if let paceImage = metric.paceSystemImage(now: now) {
+            Image(systemName: paceImage)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+                .modifier(OptionalHelpModifier(text: metric.paceHelpText(now: now)))
+        }
+    }
+}
+
+/// One-line key for the pace glyphs, shown under a provider's details when any window has a pace.
+private struct PaceLegend: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            legendItem("arrow.up.right", "ahead of pace")
+            legendItem("minus", "on pace")
+            legendItem("arrow.down.right", "under pace")
+        }
+        .usageFont(.supporting)
+        .foregroundStyle(.secondary)
+        .help("Pace compares the share of quota used with the share of the window elapsed. More than 5 points over is ahead, more than 5 under is under.")
+    }
+
+    private func legendItem(_ systemImage: String, _ text: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: systemImage)
+            Text(text)
+        }
     }
 }
 
@@ -586,12 +626,8 @@ private struct UsageMetricRow: View {
                 Text(metric.label)
                     .usageFont(.metric)
                 Spacer(minLength: 4)
-                if let paceImage = metric.paceSystemImage(now: now) {
-                    Image(systemName: paceImage)
-                        .usageFont(.supporting)
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                }
+                PaceGlyph(metric: metric, now: now)
+                    .usageFont(.supporting)
                 Text(headlineText)
                     .usageFont(.metric)
                     .monospacedDigit()
@@ -788,10 +824,8 @@ private struct DetailMetricCapsuleCell: View {
                 Text(metric?.label ?? "Unavailable")
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                if let paceImage = metric?.paceSystemImage(now: now) {
-                    Image(systemName: paceImage)
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
+                if let metric {
+                    PaceGlyph(metric: metric, now: now)
                 }
                 Text(metric?.headlineText(mode: fillMode) ?? metric?.valueText ?? "—")
                     .monospacedDigit()
@@ -933,11 +967,9 @@ private struct UsageOrbitView: View {
                             .usageFont(.legend)
                             .lineLimit(1)
                         HStack(spacing: 4) {
-                            if !metric.isCount, let paceImage = metric.paceSystemImage(now: now) {
-                                Image(systemName: paceImage)
+                            if !metric.isCount {
+                                PaceGlyph(metric: metric, now: now)
                                     .usageFont(.supporting)
-                                    .foregroundStyle(.secondary)
-                                    .accessibilityHidden(true)
                             }
                             Text(metric.isCount
                                 ? "\(metric.valueText) available"

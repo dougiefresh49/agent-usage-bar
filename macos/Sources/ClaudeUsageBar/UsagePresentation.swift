@@ -257,6 +257,16 @@ struct UsagePresentationMetric: Identifiable, Equatable {
         }
     }
 
+    /// Tooltip for the pace glyph, in plain words: "Ahead of pace: used 91%, window 78% elapsed".
+    func paceHelpText(now: Date = Date()) -> String? {
+        guard let geometry,
+              let paceText = paceAccessibilityText(now: now),
+              let elapsed = elapsedShare(now: now) else { return nil }
+        let used = Int(min(100, max(0, geometry.usedPercent)).rounded(.toNearestOrAwayFromZero))
+        let elapsedPercent = Int((elapsed * 100).rounded(.toNearestOrAwayFromZero))
+        return "\(paceText.prefix(1).uppercased())\(paceText.dropFirst()): used \(used)%, window \(elapsedPercent)% elapsed"
+    }
+
     func restoresLine(now: Date = Date()) -> String? {
         guard let geometry else { return nil }
         return UsagePace.restoresLine(geometry, now: now)

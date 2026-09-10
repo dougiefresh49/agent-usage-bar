@@ -485,6 +485,47 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertEqual(additional.map(\.id), ["openai.additional.code_review.0"])
     }
 
+    func testPaceHelpTextNamesEachPaceInPlainWords() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func metric(usedPercent: Double, elapsedShare: Double) -> UsagePresentationMetric {
+            let duration = UsageWindowGeometry.claudeSessionDuration
+            let resetsAt = now.addingTimeInterval(duration * (1 - elapsedShare))
+            return UsagePresentationMetric(
+                id: "claude.5h",
+                label: "Session",
+                shortLabel: "5h",
+                kind: .percentage(usedPercent),
+                resetDate: resetsAt,
+                resetInterval: duration,
+                geometry: UsageWindowGeometry(usedPercent: usedPercent, resetsAt: resetsAt, duration: duration)
+            )
+        }
+
+        XCTAssertEqual(
+            metric(usedPercent: 91, elapsedShare: 0.78).paceHelpText(now: now),
+            "Ahead of pace: used 91%, window 78% elapsed"
+        )
+        XCTAssertEqual(
+            metric(usedPercent: 50, elapsedShare: 0.52).paceHelpText(now: now),
+            "On pace: used 50%, window 52% elapsed"
+        )
+        XCTAssertEqual(
+            metric(usedPercent: 10, elapsedShare: 0.60).paceHelpText(now: now),
+            "Under pace: used 10%, window 60% elapsed"
+        )
+
+        let noDuration = UsagePresentationMetric(
+            id: "claude.5h",
+            label: "Session",
+            shortLabel: "5h",
+            kind: .percentage(50),
+            resetDate: now.addingTimeInterval(3600),
+            resetInterval: nil,
+            geometry: UsageWindowGeometry(usedPercent: 50, resetsAt: now.addingTimeInterval(3600), duration: nil)
+        )
+        XCTAssertNil(noDuration.paceHelpText(now: now))
+    }
+
     func testCursorAndElevenLabsMetricsHaveNoGeometry() throws {
         let cursor = UsagePresentationMetrics.cursorMetrics(
             CursorUsageResponse(
@@ -509,6 +550,7 @@ final class UsagePresentationTests: XCTestCase {
         )
         XCTAssertTrue(cursor.allSatisfy { $0.geometry == nil })
         XCTAssertTrue(cursor.allSatisfy { $0.paceSystemImage() == nil })
+        XCTAssertTrue(cursor.allSatisfy { $0.paceHelpText() == nil })
         XCTAssertTrue(cursor.allSatisfy { $0.restoresLine() == nil })
         let models = try XCTUnwrap(cursor.first { $0.id == UsagePresentationMetrics.cursorModelsID })
         XCTAssertEqual(models.headlineText(mode: .drain), "88% left")
@@ -607,6 +649,7 @@ final class UsagePresentationTests: XCTestCase {
         // Elapsed ~26.8%; used 32.4 is ahead of even pace.
         XCTAssertEqual(metric.paceSystemImage(now: now), "arrow.up.right")
         XCTAssertEqual(metric.paceAccessibilityText(now: now), "ahead of pace")
+        XCTAssertEqual(metric.paceHelpText(now: now), "Ahead of pace: used 32%, window 27% elapsed")
         XCTAssertEqual(
             metric.popoverAccessibilityValue(mode: .drain, now: now),
             "68% left, ahead of pace, +32% in 5d 3h"
