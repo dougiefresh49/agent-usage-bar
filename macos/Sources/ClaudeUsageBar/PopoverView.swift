@@ -545,7 +545,7 @@ private struct UsageMetricRow: View {
                 PaceUsageBar(
                     usedShare: progress,
                     elapsedShare: metric.elapsedShare(now: now),
-                    showsRestoreHatch: metric.geometry != nil,
+                    showsRestoreHatch: metric.geometry?.resetsAt != nil,
                     tint: colorForPct(progress),
                     resetHelp: absoluteResetHelp
                 )
@@ -722,6 +722,7 @@ private struct DetailMetricCapsuleCell: View {
                 if let paceImage = metric?.paceSystemImage(now: now) {
                     Image(systemName: paceImage)
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                 }
                 Text(metric?.remainingHeadlineText ?? metric?.valueText ?? "—")
                     .monospacedDigit()
@@ -732,7 +733,7 @@ private struct DetailMetricCapsuleCell: View {
                 PaceUsageBar(
                     usedShare: progress,
                     elapsedShare: metric?.elapsedShare(now: now),
-                    showsRestoreHatch: metric?.geometry != nil,
+                    showsRestoreHatch: metric?.geometry?.resetsAt != nil,
                     tint: colorForPct(progress),
                     resetHelp: metric?.resetDate?.formatted(date: .abbreviated, time: .shortened)
                 )
@@ -757,6 +758,27 @@ private struct DetailMetricCapsuleCell: View {
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(capsuleAccessibilityValue(now: now))
+    }
+
+    private func capsuleAccessibilityValue(now: Date) -> String {
+        guard let metric else { return "Unavailable" }
+        if let remaining = metric.remainingHeadlineText {
+            var parts = [remaining]
+            if let paceImage = metric.paceSystemImage(now: now) {
+                switch paceImage {
+                case "arrow.up.right": parts.append("ahead of pace")
+                case "arrow.down.right": parts.append("under pace")
+                default: parts.append("on pace")
+                }
+            }
+            if let restores = metric.restoresLine(now: now) {
+                parts.append(restores)
+            }
+            return parts.joined(separator: ", ")
+        }
+        return metric.accessibilityValue
     }
 }
 
@@ -767,7 +789,7 @@ private struct UsageOrbitView: View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             HStack(spacing: 16) {
                 orbit(now: context.date)
-                legend
+                legend(now: context.date)
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.vertical, 2)
@@ -849,7 +871,7 @@ private struct UsageOrbitView: View {
         .frame(width: diameter, height: diameter)
     }
 
-    private var legend: some View {
+    private func legend(now: Date) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             ForEach(Array(metrics.prefix(2).enumerated()), id: \.element.id) { index, metric in
                 HStack(spacing: 7) {
@@ -858,11 +880,24 @@ private struct UsageOrbitView: View {
                         Text(metric.label)
                             .usageFont(.legend)
                             .lineLimit(1)
-                        Text(metric.isCount
-                            ? "\(metric.valueText) available"
-                            : (metric.remainingHeadlineText ?? metric.valueText))
-                            .usageFont(.legendEmphasized)
-                            .monospacedDigit()
+                        HStack(spacing: 4) {
+                            if !metric.isCount, let paceImage = metric.paceSystemImage(now: now) {
+                                Image(systemName: paceImage)
+                                    .usageFont(.supporting)
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityHidden(true)
+                            }
+                            Text(metric.isCount
+                                ? "\(metric.valueText) available"
+                                : (metric.remainingHeadlineText ?? metric.valueText))
+                                .usageFont(.legendEmphasized)
+                                .monospacedDigit()
+                        }
+                        if let restores = metric.restoresLine(now: now) {
+                            Text(restores)
+                                .usageFont(.supporting)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
