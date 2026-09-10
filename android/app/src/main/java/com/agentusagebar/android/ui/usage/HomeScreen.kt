@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -99,6 +100,9 @@ private fun HomeScreen(
     val awaitingCode by viewModel.awaitingClaudeCode.collectAsStateWithLifecycle()
     val claudeCode by viewModel.claudeCode.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val resetCreditState by viewModel.resetCreditState.collectAsStateWithLifecycle()
+    val resetCreditSummary by viewModel.resetCreditSummary.collectAsStateWithLifecycle()
+    val isOpenAIConfigured by viewModel.isOpenAIConfigured.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
 
@@ -202,7 +206,17 @@ private fun HomeScreen(
                     }
                 }
 
-                selectedState?.isConfigured != true -> {
+                // Codex: openAIBearer (CLI-first), not the pasted-token-only snapshot flag.
+                selected == UsageProvider.OPENAI && !isOpenAIConfigured -> {
+                    Text(
+                        text = "Add a ChatGPT session token in Settings.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    TextButton(onClick = onOpenSettings) { Text("Open Settings") }
+                }
+
+                selected != UsageProvider.OPENAI && selectedState?.isConfigured != true -> {
                     Text(
                         text = when (selected) {
                             UsageProvider.CLAUDE -> "Connect Claude to view account limits."
@@ -232,7 +246,10 @@ private fun HomeScreen(
                     }
                 }
 
-                selectedState.metrics.isEmpty() && selectedState.error == null -> {
+                // CLI-only Codex never gets snapshot.isConfigured; skip the forever spinner.
+                selectedState?.metrics.isNullOrEmpty() == true &&
+                    selectedState?.error == null &&
+                    !(selected == UsageProvider.OPENAI && selectedState?.isConfigured != true) -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.height(18.dp))
                         Spacer(modifier = Modifier.padding(6.dp))
@@ -244,7 +261,7 @@ private fun HomeScreen(
                     val usesPreferredStats = selected == appSettings.widgetProvider
                     val defaults = UsageMetricPreferences.defaults(selected)
                     ProviderDetailSection(
-                        metrics = selectedState.metrics,
+                        metrics = selectedState?.metrics.orEmpty(),
                         style = appSettings.detailStyle,
                         provider = selected,
                         primaryMetric = if (usesPreferredStats) {
@@ -258,6 +275,45 @@ private fun HomeScreen(
                             defaults.second
                         },
                     )
+
+                    if (selected == UsageProvider.OPENAI) {
+                        if (resetCreditSummary.availableCount > 0) {
+                            val expiresLabel = resetCreditSummary.nextExpiresInDays?.let {
+                                " · next expires in ${it}d"
+                            }.orEmpty()
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "${resetCreditSummary.availableCount} banked$expiresLabel",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Button(
+                                    onClick = viewModel::beginResetCreditConfirm,
+                                    enabled = resetCreditState !is ResetCreditUiState.InFlight &&
+                                        resetCreditSummary.soonestCreditId != null,
+                                ) {
+                                    Text("Use reset")
+                                }
+                            }
+                        }
+                        // Outside the availability row so "Limits reset" stays after the last credit.
+                        when (val state = resetCreditState) {
+                            is ResetCreditUiState.Outcome -> Text(
+                                text = state.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            is ResetCreditUiState.Error -> Text(
+                                text = state.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            else -> Unit
+                        }
+                    }
                 }
             }
 
@@ -277,5 +333,29 @@ private fun HomeScreen(
             )
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+
+
+    if (resetCreditState is ResetCreditUiState.Confirming) {
+        AlertDialog(
+            onDismissRequest = viewModel::cancelResetCreditConfirm,
+            title = { Text("Use reset credit") },
+            text = {
+                Text(
+                    "Use a reset credit? This redeems one credit on your account " +
+                        "and clears the current rate-limit windows. It cannot be undone.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmResetCredit) {
+                    Text("Use credit")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelResetCreditConfirm) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
