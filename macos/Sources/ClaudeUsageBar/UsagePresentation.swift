@@ -125,6 +125,26 @@ struct UsagePresentationMetric: Identifiable, Equatable {
     let kind: UsageMetricKind
     let resetDate: Date?
     let resetInterval: TimeInterval?
+    /// Pace inputs for Claude and Codex windows. Cursor and ElevenLabs stay nil.
+    let geometry: UsageWindowGeometry?
+
+    init(
+        id: String,
+        label: String,
+        shortLabel: String,
+        kind: UsageMetricKind,
+        resetDate: Date?,
+        resetInterval: TimeInterval?,
+        geometry: UsageWindowGeometry? = nil
+    ) {
+        self.id = id
+        self.label = label
+        self.shortLabel = shortLabel
+        self.kind = kind
+        self.resetDate = resetDate
+        self.resetInterval = resetInterval
+        self.geometry = geometry
+    }
 
     var normalizedProgress: Double? {
         guard case .percentage(let percent?) = kind else { return nil }
@@ -153,6 +173,7 @@ struct UsagePresentationMetric: Identifiable, Equatable {
         }
     }
 
+    /// Used-percent text for menu bar, widgets, and overview capsules.
     var valueText: String {
         switch kind {
         case .percentage(let percent?):
@@ -164,6 +185,38 @@ struct UsagePresentationMetric: Identifiable, Equatable {
         }
     }
 
+    /// Remaining-percent popover headline ("68% left"), or nil for counts and missing values.
+    var remainingHeadlineText: String? {
+        guard case .percentage(let percent?) = kind else { return nil }
+        return "\(UsagePace.remainingPercent(percent))% left"
+    }
+
+    func pace(now: Date = Date()) -> UsagePace? {
+        guard let geometry else { return nil }
+        return UsagePace.pace(geometry, now: now)
+    }
+
+    /// SF Symbol for the pace glyph, or nil when pace cannot be computed.
+    func paceSystemImage(now: Date = Date()) -> String? {
+        switch pace(now: now) {
+        case .ahead: return "arrow.up.right"
+        case .on: return "minus"
+        case .under: return "arrow.down.right"
+        case nil: return nil
+        }
+    }
+
+    func restoresLine(now: Date = Date()) -> String? {
+        guard let geometry else { return nil }
+        return UsagePace.restoresLine(geometry, now: now)
+    }
+
+    func elapsedShare(now: Date = Date()) -> Double? {
+        guard let geometry else { return nil }
+        return UsagePace.elapsedShare(geometry, now: now)
+    }
+
+    /// Used-percent accessibility for the menu bar and overview. Popover rows build their own from remainingHeadlineText.
     var accessibilityValue: String {
         switch kind {
         case .percentage(let percent?):
@@ -173,6 +226,14 @@ struct UsagePresentationMetric: Identifiable, Equatable {
         case .count(let count?):
             return "\(count) available"
         }
+    }
+}
+
+extension UsageWindowGeometry: Equatable {
+    static func == (lhs: UsageWindowGeometry, rhs: UsageWindowGeometry) -> Bool {
+        lhs.usedPercent == rhs.usedPercent
+            && lhs.resetsAt == rhs.resetsAt
+            && lhs.duration == rhs.duration
     }
 }
 
@@ -325,7 +386,7 @@ enum UsagePresentationMetrics {
         [primary, secondary].compactMap { $0 }
     }
 
-    private static func claudeMetrics(_ usage: UsageResponse?) -> [UsagePresentationMetric] {
+    static func claudeMetrics(_ usage: UsageResponse?) -> [UsagePresentationMetric] {
         var metrics = [
             percentageMetric(
                 id: claudeFiveHourID,
@@ -333,7 +394,8 @@ enum UsagePresentationMetrics {
                 shortLabel: "5h",
                 percent: usage?.fiveHour?.utilization,
                 resetDate: usage?.fiveHour?.resetsAtDate,
-                resetInterval: 5 * 60 * 60
+                resetInterval: UsageWindowGeometry.claudeSessionDuration,
+                geometryDuration: UsageWindowGeometry.claudeSessionDuration
             ),
             percentageMetric(
                 id: claudeSevenDayID,
@@ -341,7 +403,8 @@ enum UsagePresentationMetrics {
                 shortLabel: "7d",
                 percent: usage?.sevenDay?.utilization,
                 resetDate: usage?.sevenDay?.resetsAtDate,
-                resetInterval: 7 * 24 * 60 * 60
+                resetInterval: UsageWindowGeometry.claudeWeeklyDuration,
+                geometryDuration: UsageWindowGeometry.claudeWeeklyDuration
             )
         ]
 
@@ -353,7 +416,8 @@ enum UsagePresentationMetrics {
                     shortLabel: "Op",
                     percent: opus.utilization,
                     resetDate: opus.resetsAtDate,
-                    resetInterval: 7 * 24 * 60 * 60
+                    resetInterval: UsageWindowGeometry.claudeWeeklyDuration,
+                    geometryDuration: UsageWindowGeometry.claudeWeeklyDuration
                 )
             )
         }
@@ -365,7 +429,8 @@ enum UsagePresentationMetrics {
                     shortLabel: "Sn",
                     percent: sonnet.utilization,
                     resetDate: sonnet.resetsAtDate,
-                    resetInterval: 7 * 24 * 60 * 60
+                    resetInterval: UsageWindowGeometry.claudeWeeklyDuration,
+                    geometryDuration: UsageWindowGeometry.claudeWeeklyDuration
                 )
             )
         }
@@ -379,6 +444,9 @@ enum UsagePresentationMetrics {
             case nil: groupLabel = ""
             }
             let label = groupLabel.isEmpty ? modelName : "\(modelName) (\(groupLabel))"
+            let duration = limit.group == "session"
+                ? UsageWindowGeometry.claudeSessionDuration
+                : UsageWindowGeometry.claudeWeeklyDuration
             metrics.append(
                 percentageMetric(
                     id: "claude.limit.\(limit.id)",
@@ -386,9 +454,8 @@ enum UsagePresentationMetrics {
                     shortLabel: compactLabel(modelName),
                     percent: limit.percent,
                     resetDate: limit.resetsAtDate,
-                    resetInterval: limit.group == "session"
-                        ? 5 * 60 * 60
-                        : 7 * 24 * 60 * 60
+                    resetInterval: duration,
+                    geometryDuration: duration
                 )
             )
         }
@@ -400,14 +467,15 @@ enum UsagePresentationMetrics {
                     shortLabel: "Ex",
                     percent: extra.utilization,
                     resetDate: nil,
-                    resetInterval: nil
+                    resetInterval: nil,
+                    geometryDuration: nil
                 )
             )
         }
         return metrics
     }
 
-    private static func openAIMetrics(
+    static func openAIMetrics(
         usage: OpenAIUsageResponse?,
         resetCredits: OpenAIResetCreditsResponse?
     ) -> [UsagePresentationMetric] {
@@ -425,7 +493,8 @@ enum UsagePresentationMetrics {
                 shortLabel: compactWindowLabel(primary, fallback: "Wk"),
                 percent: primary?.usedPercent,
                 resetDate: primary?.resetDate,
-                resetInterval: primary?.limitWindowSeconds
+                resetInterval: primary?.limitWindowSeconds,
+                geometryDuration: primary?.limitWindowSeconds
             )
         ]
 
@@ -437,7 +506,8 @@ enum UsagePresentationMetrics {
                     shortLabel: compactWindowLabel(secondary, fallback: "2nd"),
                     percent: secondary?.usedPercent,
                     resetDate: secondary?.resetDate,
-                    resetInterval: secondary?.limitWindowSeconds
+                    resetInterval: secondary?.limitWindowSeconds,
+                    geometryDuration: secondary?.limitWindowSeconds
                 )
             )
         }
@@ -449,13 +519,14 @@ enum UsagePresentationMetrics {
                 shortLabel: "R",
                 kind: .count(count),
                 resetDate: nil,
-                resetInterval: nil
+                resetInterval: nil,
+                geometry: nil
             )
         )
         return metrics
     }
 
-    private static func cursorMetrics(_ usage: CursorUsageResponse?) -> [UsagePresentationMetric] {
+    static func cursorMetrics(_ usage: CursorUsageResponse?) -> [UsagePresentationMetric] {
         let resetDate = usage?.billingCycleEndDate
         let interval: TimeInterval = 30 * 24 * 60 * 60
         return [
@@ -465,7 +536,8 @@ enum UsagePresentationMetrics {
                 shortLabel: "M",
                 percent: usage?.planUsage?.autoPercentUsed,
                 resetDate: resetDate,
-                resetInterval: interval
+                resetInterval: interval,
+                geometryDuration: nil
             ),
             percentageMetric(
                 id: cursorAPIID,
@@ -473,7 +545,8 @@ enum UsagePresentationMetrics {
                 shortLabel: "API",
                 percent: usage?.planUsage?.apiPercentUsed,
                 resetDate: resetDate,
-                resetInterval: interval
+                resetInterval: interval,
+                geometryDuration: nil
             ),
             percentageMetric(
                 id: cursorTotalID,
@@ -481,12 +554,13 @@ enum UsagePresentationMetrics {
                 shortLabel: "Tot",
                 percent: usage?.planUsage?.totalPercentUsed,
                 resetDate: resetDate,
-                resetInterval: interval
+                resetInterval: interval,
+                geometryDuration: nil
             )
         ]
     }
 
-    private static func elevenLabsMetrics(
+    static func elevenLabsMetrics(
         _ usage: ElevenLabsSubscriptionResponse?
     ) -> [UsagePresentationMetric] {
         [
@@ -496,7 +570,8 @@ enum UsagePresentationMetrics {
                 shortLabel: "Used",
                 percent: usage?.utilization,
                 resetDate: usage?.nextResetDate,
-                resetInterval: billingInterval(for: usage?.characterRefreshPeriod)
+                resetInterval: billingInterval(for: usage?.characterRefreshPeriod),
+                geometryDuration: nil
             ),
             UsagePresentationMetric(
                 id: elevenLabsRemainingID,
@@ -504,7 +579,8 @@ enum UsagePresentationMetrics {
                 shortLabel: "Left",
                 kind: .count(usage?.creditsRemaining),
                 resetDate: nil,
-                resetInterval: nil
+                resetInterval: nil,
+                geometry: nil
             )
         ]
     }
@@ -525,15 +601,27 @@ enum UsagePresentationMetrics {
         shortLabel: String,
         percent: Double?,
         resetDate: Date?,
-        resetInterval: TimeInterval?
+        resetInterval: TimeInterval?,
+        geometryDuration: TimeInterval?
     ) -> UsagePresentationMetric {
-        UsagePresentationMetric(
+        let geometry: UsageWindowGeometry?
+        if let geometryDuration, geometryDuration > 0 {
+            geometry = UsageWindowGeometry(
+                usedPercent: percent ?? 0,
+                resetsAt: resetDate,
+                duration: geometryDuration
+            )
+        } else {
+            geometry = nil
+        }
+        return UsagePresentationMetric(
             id: id,
             label: label,
             shortLabel: shortLabel,
             kind: .percentage(percent),
             resetDate: resetDate,
-            resetInterval: resetInterval
+            resetInterval: resetInterval,
+            geometry: geometry
         )
     }
 
