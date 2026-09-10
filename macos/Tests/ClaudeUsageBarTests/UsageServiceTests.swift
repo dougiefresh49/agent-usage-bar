@@ -899,7 +899,7 @@ final class UsageServiceTests: XCTestCase {
 
         let usageURL = URL(string: "https://example.com/api/oauth/usage")!
         let profileURL = URL(string: "https://example.com/api/oauth/profile")!
-        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
+        var tokenRefreshCount = 0
 
         MockURLProtocol.handler = { request in
             switch (request.httpMethod, request.url?.path) {
@@ -917,7 +917,9 @@ final class UsageServiceTests: XCTestCase {
             case ("GET", "/api/oauth/profile"):
                 return try Self.httpResponse(url: profileURL, statusCode: 401)
             case ("POST", "/v1/oauth/token"):
-                return try Self.httpResponse(url: tokenURL, statusCode: 500)
+                tokenRefreshCount += 1
+                XCTFail("Profile 401 must not trigger token refresh")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
             default:
                 XCTFail("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
@@ -929,7 +931,7 @@ final class UsageServiceTests: XCTestCase {
             usageEndpoint: usageURL,
             profileEndpoint: profileURL,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
-            tokenEndpoint: tokenURL,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
             credentialsStore: store
         )
 
@@ -940,6 +942,7 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(service.usage?.fiveHour?.utilization, 11)
         XCTAssertNil(service.profile)
         XCTAssertNil(service.profileLastFetched)
+        XCTAssertEqual(tokenRefreshCount, 0)
     }
 
     func testConcurrentUsageFetchesShareSingleProfileRequest() async throws {
@@ -955,14 +958,12 @@ final class UsageServiceTests: XCTestCase {
 
         let usageURL = URL(string: "https://example.com/api/oauth/usage")!
         let profileURL = URL(string: "https://example.com/api/oauth/profile")!
-        let profileGate = XCTestExpectation(description: "profile allowed to complete")
-        profileGate.isInverted = false
-        var profileRequestCount = 0
-        let lock = NSLock()
+        let gate = ProfileRequestGate(targetUsageCount: 2)
 
         MockURLProtocol.handler = { request in
             switch (request.httpMethod, request.url?.path) {
             case ("GET", "/api/oauth/usage"):
+                gate.noteUsage()
                 return try Self.httpResponse(
                     url: usageURL,
                     statusCode: 200,
@@ -974,11 +975,8 @@ final class UsageServiceTests: XCTestCase {
                     """
                 )
             case ("GET", "/api/oauth/profile"):
-                lock.lock()
-                profileRequestCount += 1
-                lock.unlock()
-                // Hold the first profile response until both usage fetches have started profile work.
-                _ = XCTWaiter.wait(for: [profileGate], timeout: 0.05)
+                gate.noteProfileStarted()
+                gate.waitForRelease()
                 return try Self.httpResponse(
                     url: profileURL,
                     statusCode: 200,
@@ -1001,10 +999,15 @@ final class UsageServiceTests: XCTestCase {
 
         async let first: Void = service.fetchUsage()
         async let second: Void = service.fetchUsage()
-        profileGate.fulfill()
+
+        await gate.waitUntilProfileStarted()
+        await gate.waitUntilUsagesSeen()
+        XCTAssertEqual(gate.profileRequestCount, 1, "Only one profile request while both callers await it")
+
+        gate.release()
         _ = await (first, second)
 
-        XCTAssertEqual(profileRequestCount, 1)
+        XCTAssertEqual(gate.profileRequestCount, 1)
         XCTAssertEqual(service.profile?.planLabel, "Max 20x")
         XCTAssertNil(service.lastError)
     }
@@ -1022,11 +1025,12 @@ final class UsageServiceTests: XCTestCase {
 
         let usageURL = URL(string: "https://example.com/api/oauth/usage")!
         let profileURL = URL(string: "https://example.com/api/oauth/profile")!
-        let releaseProfile = XCTestExpectation(description: "release profile response")
+        let gate = ProfileRequestGate(targetUsageCount: 1)
 
         MockURLProtocol.handler = { request in
             switch (request.httpMethod, request.url?.path) {
             case ("GET", "/api/oauth/usage"):
+                gate.noteUsage()
                 return try Self.httpResponse(
                     url: usageURL,
                     statusCode: 200,
@@ -1038,8 +1042,8 @@ final class UsageServiceTests: XCTestCase {
                     """
                 )
             case ("GET", "/api/oauth/profile"):
-                let waited = XCTWaiter.wait(for: [releaseProfile], timeout: 2.0)
-                XCTAssertEqual(waited, .completed)
+                gate.noteProfileStarted()
+                gate.waitForRelease()
                 return try Self.httpResponse(
                     url: profileURL,
                     statusCode: 200,
@@ -1061,16 +1065,17 @@ final class UsageServiceTests: XCTestCase {
         )
 
         let fetchTask = Task { await service.fetchUsage() }
-        // Let usage succeed and the profile request start, then sign out before it returns.
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await gate.waitUntilProfileStarted()
+        XCTAssertEqual(gate.profileRequestCount, 1, "Sign-out must happen while the profile request is in flight")
         service.signOut()
-        releaseProfile.fulfill()
+        gate.release()
         await fetchTask.value
 
         XCTAssertFalse(service.isAuthenticated)
         XCTAssertNil(service.profile)
         XCTAssertNil(service.profileLastFetched)
         XCTAssertNil(service.usage)
+        XCTAssertEqual(gate.profileRequestCount, 1)
     }
 
 
@@ -1155,6 +1160,88 @@ final class UsageServiceTests: XCTestCase {
             )
         )
         return (response, Data(body.utf8))
+    }
+}
+
+/// Synchronizes profile-request tests without sleeping: URLProtocol blocks on a semaphore,
+/// and the test awaits CheckedContinuations that resume when the request has actually started.
+private final class ProfileRequestGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let releaseSemaphore = DispatchSemaphore(value: 0)
+    private let targetUsageCount: Int
+
+    private var usageCount = 0
+    private var profileCount = 0
+    private var profileStartedContinuation: CheckedContinuation<Void, Never>?
+    private var usagesSeenContinuation: CheckedContinuation<Void, Never>?
+    private var profileDidStart = false
+    private var usagesDidReachTarget = false
+
+    init(targetUsageCount: Int) {
+        self.targetUsageCount = targetUsageCount
+    }
+
+    var profileRequestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return profileCount
+    }
+
+    func noteUsage() {
+        lock.lock()
+        usageCount += 1
+        let reached = usageCount >= targetUsageCount
+        let cont = reached && !usagesDidReachTarget ? usagesSeenContinuation : nil
+        if reached {
+            usagesDidReachTarget = true
+            usagesSeenContinuation = nil
+        }
+        lock.unlock()
+        cont?.resume()
+    }
+
+    func noteProfileStarted() {
+        lock.lock()
+        profileCount += 1
+        profileDidStart = true
+        let cont = profileStartedContinuation
+        profileStartedContinuation = nil
+        lock.unlock()
+        cont?.resume()
+    }
+
+    func waitUntilProfileStarted() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if profileDidStart {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                profileStartedContinuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+
+    func waitUntilUsagesSeen() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if usagesDidReachTarget {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                usagesSeenContinuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+
+    func waitForRelease() {
+        releaseSemaphore.wait()
+    }
+
+    func release() {
+        releaseSemaphore.signal()
     }
 }
 

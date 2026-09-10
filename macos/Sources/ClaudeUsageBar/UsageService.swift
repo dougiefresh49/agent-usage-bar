@@ -34,6 +34,7 @@ class UsageService: ObservableObject {
 
     private var refreshTask: Task<RefreshResult, Never>?
     private var profileFetchTask: Task<Void, Never>?
+    private var profileFetchGeneration = 0
 
     static let defaultPollingMinutes = 30
     static let pollingOptions = [5, 15, 30, 60]
@@ -250,6 +251,7 @@ class UsageService: ObservableObject {
         timer = nil
         refreshTask?.cancel()
         refreshTask = nil
+        profileFetchGeneration &+= 1
         profileFetchTask?.cancel()
         profileFetchTask = nil
         lastError = nil
@@ -316,13 +318,15 @@ class UsageService: ObservableObject {
                 currentInterval = baseInterval
                 scheduleTimer()
             }
-            await fetchOAuthProfileIfNeeded()
+            // Reuse the bearer token that just succeeded for usage. No separate refresh.
+            guard let accessToken = loadCredentials()?.accessToken else { return }
+            await fetchOAuthProfileIfNeeded(accessToken: accessToken)
         } catch {
             lastError = error.localizedDescription
         }
     }
 
-    private func fetchOAuthProfileIfNeeded() async {
+    private func fetchOAuthProfileIfNeeded(accessToken: String) async {
         if let profileLastFetched,
            Date().timeIntervalSince(profileLastFetched) < Self.profileCacheInterval {
             return
@@ -333,17 +337,22 @@ class UsageService: ObservableObject {
             return
         }
 
+        let generation = profileFetchGeneration &+ 1
+        profileFetchGeneration = generation
         let task = Task { [weak self] in
             guard let self else { return }
-            await self.performOAuthProfileFetch()
+            await self.performOAuthProfileFetch(accessToken: accessToken)
         }
         profileFetchTask = task
         await task.value
-        profileFetchTask = nil
+        // Only clear if we still own the slot. A newer fetch or sign-out may have replaced it.
+        if profileFetchGeneration == generation {
+            profileFetchTask = nil
+        }
     }
 
-    /// Soft profile fetch: never mutates `lastError`, never expires the session.
-    private func performOAuthProfileFetch() async {
+    /// Soft profile fetch: one-shot with the usage bearer token. Never refreshes, never mutates `lastError`, never expires the session.
+    private func performOAuthProfileFetch(accessToken: String) async {
         if let profileLastFetched,
            Date().timeIntervalSince(profileLastFetched) < Self.profileCacheInterval {
             return
@@ -352,12 +361,12 @@ class UsageService: ObservableObject {
         let wasAuthenticated = isAuthenticated
 
         do {
-            guard let result = try await sendSoftAuthorizedRequest(to: profileEndpoint) else {
-                print("[ClaudeProfile] fetch skipped or unauthorized")
-                return
-            }
-            let (data, http) = result
+            let (data, http) = try await performAuthorizedRequest(
+                token: accessToken,
+                url: profileEndpoint
+            )
             guard http.statusCode == 200 else {
+                // Soft failure, including 401: leave profile nil and do not refresh.
                 print("[ClaudeProfile] HTTP \(http.statusCode)")
                 return
             }
@@ -371,55 +380,6 @@ class UsageService: ObservableObject {
             profileLastFetched = Date()
         } catch {
             print("[ClaudeProfile] \(error.localizedDescription)")
-        }
-    }
-
-    /// Like `sendAuthorizedRequest`, but never sets `lastError` and never expires the session.
-    private func sendSoftAuthorizedRequest(
-        to url: URL
-    ) async throws -> (Data, HTTPURLResponse)? {
-        guard let initialCredentials = loadCredentials() else {
-            return nil
-        }
-
-        if initialCredentials.needsRefresh() {
-            let refreshResult = await refreshCredentials(force: true)
-            if refreshResult != .success, initialCredentials.isExpired() {
-                return nil
-            }
-        }
-
-        let activeCredentials = loadCredentials() ?? initialCredentials
-
-        var result = try await performAuthorizedRequest(
-            token: activeCredentials.accessToken,
-            url: url
-        )
-
-        if result.1.statusCode != 401 {
-            return result
-        }
-
-        let refreshResult = await refreshCredentials(force: true)
-        switch refreshResult {
-        case .success:
-            guard let refreshedCredentials = loadCredentials() else {
-                return nil
-            }
-
-            result = try await performAuthorizedRequest(
-                token: refreshedCredentials.accessToken,
-                url: url
-            )
-
-            if result.1.statusCode == 401 {
-                return nil
-            }
-
-            return result
-
-        case .permanentFailure, .transientFailure:
-            return nil
         }
     }
 
@@ -709,6 +669,7 @@ class UsageService: ObservableObject {
         timer = nil
         refreshTask?.cancel()
         refreshTask = nil
+        profileFetchGeneration &+= 1
         profileFetchTask?.cancel()
         profileFetchTask = nil
         lastError = "Session expired — please sign in again"
