@@ -8,6 +8,7 @@ as prose or were dropped, not backfilled.
 
 | # | date | decision | status |
 |---|------|----------|--------|
+| 32 | 2026-09-10 | Mac credential precedence flips to CLI login, then pasted token, then env var, matching the phone; raised by Doug on seeing v1.17.0 still on his old pasted tokens (https://github.com/dougiefresh49/agent-usage-bar/issues/82) | open |
 | 31 | 2026-09-10 | Fill or drain becomes an Appearance setting, and bars, orbits, capsules, and headline all follow it; the headline-only scope of row 3 is replaced (https://github.com/dougiefresh49/agent-usage-bar/issues/79) | accepted |
 | 30 | 2026-09-10 | Release immutability is recommended for this repo: both Release workflows publish the release and its assets in one step and the appcast lives on GitHub Pages, so nothing edits a published release; a Release run that fails after publishing cannot be re-run onto its tag, which the Verifying section already treats as the next release's job | open |
 | 29 | 2026-09-10 | The Codex computer-use client now has the permissions it lacked overnight; computer-use rounds go back to the codex-computer-use skill, and the orchestrator drives a round itself only when that client cannot | accepted |
