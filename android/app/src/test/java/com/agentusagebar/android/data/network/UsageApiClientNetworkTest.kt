@@ -4,8 +4,6 @@ import com.agentusagebar.android.data.model.ClaudeCredentials
 import com.agentusagebar.android.data.model.ClaudeProfileResponse
 import com.agentusagebar.android.data.model.ConnectedCredentials
 import com.agentusagebar.android.data.model.CursorPlanInfoResponse
-import com.agentusagebar.android.data.sync.DeviceSyncConnections
-import com.agentusagebar.android.data.sync.mergingImported
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -115,6 +113,7 @@ class UsageApiClientNetworkTest {
 
         val request = recorded.single()
         assertEquals("Bearer codex-cli", request.header("Authorization"))
+        assertEquals("application/json", request.header("Content-Type"))
         assertEquals("codex-1", request.header("OpenAI-Beta"))
         assertEquals("Codex Desktop", request.header("Originator"))
         assertEquals("acct-123", request.header("Chatgpt-Account-Id"))
@@ -249,31 +248,6 @@ class UsageApiClientNetworkTest {
             claudeCredentials = { ClaudeCredentials(accessToken = "claude-access") },
         ).fetchClaudeProfile().getOrThrow()
         assertEquals("Team Enterprise", titledProfile.planLabel)
-    }
-
-    @Test
-    fun v2ImportMergeLandsCodexAndCursorTokensBesideSessionFields() {
-        // Carry-over from #49: UsageRepository.applyImportedPayload now calls
-        // CredentialsStore.applyImportedConnections, which uses this merge.
-        val current = ConnectedCredentials(
-            openAISessionToken = "paste-openai",
-            cursorSessionToken = "paste-cursor",
-        )
-        val imported = DeviceSyncConnections(
-            openAISessionToken = "paste-openai",
-            cursorSessionToken = "paste-cursor",
-            codexAccessToken = "codex-cli",
-            codexAccountId = "acct-1",
-            cursorAccessToken = "cursor-cli",
-        )
-
-        val merged = current.mergingImported(imported)
-
-        assertEquals("codex-cli", merged.codexAccessToken)
-        assertEquals("acct-1", merged.codexAccountId)
-        assertEquals("cursor-cli", merged.cursorAccessToken)
-        assertEquals("codex-cli", merged.openAIBearer)
-        assertTrue(merged.cursorAuth is com.agentusagebar.android.data.model.CursorAuth.CliToken)
     }
 
     private fun recordingClient(

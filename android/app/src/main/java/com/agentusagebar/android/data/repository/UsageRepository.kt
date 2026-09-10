@@ -59,6 +59,8 @@ class UsageRepository(
 
     private var claudeProfileFetchedAtEpochMs: Long = 0L
     private var cursorPlanInfoFetchedAtEpochMs: Long = 0L
+    private val claudeProfileFetchLock = Any()
+    private val cursorPlanInfoFetchLock = Any()
 
     private val _snapshot = MutableStateFlow(
         AppUsageSnapshot(
@@ -537,14 +539,18 @@ class UsageRepository(
 
     private fun maybeRefreshClaudeProfile() {
         val now = System.currentTimeMillis()
-        if (claudeProfileFetchedAtEpochMs != 0L &&
-            now - claudeProfileFetchedAtEpochMs < ONE_HOUR_MS
-        ) {
-            return
+        synchronized(claudeProfileFetchLock) {
+            if (claudeProfileFetchedAtEpochMs != 0L &&
+                now - claudeProfileFetchedAtEpochMs < ONE_HOUR_MS
+            ) {
+                return
+            }
+            // Stamp the attempt before the call so failures and in-flight
+            // concurrent refreshes still honor at-most-once-per-hour.
+            claudeProfileFetchedAtEpochMs = now
         }
         api.fetchClaudeProfile()
             .onSuccess { profile ->
-                claudeProfileFetchedAtEpochMs = now
                 _snapshot.update { it.copy(claudeProfile = profile) }
             }
         // Soft failure: keep prior profile, never surface as provider error.
@@ -555,14 +561,18 @@ class UsageRepository(
             return
         }
         val now = System.currentTimeMillis()
-        if (cursorPlanInfoFetchedAtEpochMs != 0L &&
-            now - cursorPlanInfoFetchedAtEpochMs < ONE_HOUR_MS
-        ) {
-            return
+        synchronized(cursorPlanInfoFetchLock) {
+            if (cursorPlanInfoFetchedAtEpochMs != 0L &&
+                now - cursorPlanInfoFetchedAtEpochMs < ONE_HOUR_MS
+            ) {
+                return
+            }
+            // Stamp the attempt before the call so failures and in-flight
+            // concurrent refreshes still honor at-most-once-per-hour.
+            cursorPlanInfoFetchedAtEpochMs = now
         }
         api.fetchCursorPlanInfo()
             .onSuccess { planInfo ->
-                cursorPlanInfoFetchedAtEpochMs = now
                 _snapshot.update { it.copy(cursorPlanInfo = planInfo) }
             }
         // Soft failure: keep prior plan info.

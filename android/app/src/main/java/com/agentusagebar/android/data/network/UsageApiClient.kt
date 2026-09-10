@@ -162,6 +162,7 @@ class UsageApiClient(
         val builder = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer $token")
+            .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .header("OpenAI-Beta", "codex-1")
             .header("Originator", "Codex Desktop")
@@ -214,7 +215,7 @@ class UsageApiClient(
     }
 
     fun fetchClaudeProfile(): Result<ClaudeProfileResponse> = runCatching {
-        val data = sendAuthorizedGet(PROFILE_ENDPOINT)
+        val data = sendAuthorizedGet(PROFILE_ENDPOINT, expireOnAuthFailure = false)
         json.decodeFromString<ClaudeProfileResponse>(data)
     }
 
