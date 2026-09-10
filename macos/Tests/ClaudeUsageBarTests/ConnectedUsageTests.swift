@@ -1340,17 +1340,22 @@ final class ConnectedUsageServiceTests: XCTestCase {
         XCTAssertEqual(openAIHits, 1)
     }
 
-    func testConnectedLowPowerDoublesEffectiveInterval() throws {
+    func testConnectedLowPowerRescheduleUpdatesEffectiveInterval() {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let store = ConnectedServiceCredentialsStore(directoryURL: directory)
-        let normal = makeService(credentialsStore: store, lowPowerModeEnabled: { false })
-        normal.updatePollingInterval(15)
-        XCTAssertEqual(normal.effectivePollingInterval, 15 * 60)
+        var lowPower = false
+        let service = makeService(credentialsStore: store, lowPowerModeEnabled: { lowPower })
+        service.updatePollingInterval(15)
+        XCTAssertEqual(service.effectivePollingInterval, 15 * 60)
 
-        let lowPower = makeService(credentialsStore: store, lowPowerModeEnabled: { true })
-        lowPower.updatePollingInterval(15)
-        XCTAssertEqual(lowPower.effectivePollingInterval, 30 * 60)
+        lowPower = true
+        service.rescheduleForPowerState()
+        XCTAssertEqual(service.effectivePollingInterval, 30 * 60)
+
+        lowPower = false
+        service.rescheduleForPowerState()
+        XCTAssertEqual(service.effectivePollingInterval, 15 * 60)
     }
 
     func testCursorScheduledFetchDebouncesWhenFresh() async throws {

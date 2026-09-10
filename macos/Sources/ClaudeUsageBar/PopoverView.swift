@@ -225,9 +225,9 @@ struct PopoverView: View {
                 Button("Refresh") {
                     Task {
                         async let claude: Void = service.isAuthenticated
-                            ? service.fetchUsage(trigger: .manual)
+                            ? service.fetchUsage()
                             : ()
-                        async let connected: Void = connectedService.fetchAll(trigger: .manual)
+                        async let connected: Void = connectedService.fetchAll()
                         _ = await (claude, connected)
                     }
                 }

@@ -326,7 +326,22 @@ final class ConnectedUsageService: ObservableObject {
                     unauthorizedMessage: Self.cursorCLIUnauthorizedMessage
                 )
                 decoded = try JSONDecoder().decode(CursorUsageResponse.self, from: data)
-                await fetchCursorPlanInfoIfNeeded(token: resolved.token)
+                let planRateLimited = await fetchCursorPlanInfoIfNeeded(token: resolved.token)
+                cursorUsage = decoded
+                cursorError = nil
+                cursorLastUpdated = Date()
+                if !planRateLimited {
+                    clearBackoff(provider: .cursor)
+                }
+                snapshotStore?.update(
+                    provider: "cursor",
+                    metrics: UsageSnapshotStore.cursorMetrics(for: decoded)
+                )
+                notificationService?.checkCursor(
+                    apiPercent: decoded.planUsage?.apiPercentUsed,
+                    autoPercent: decoded.planUsage?.autoPercentUsed,
+                    creditPercent: decoded.spendLimitUsage?.utilization
+                )
             } else {
                 cursorPlanInfo = nil
                 lastCursorPlanInfoFetch = nil
@@ -342,21 +357,20 @@ final class ConnectedUsageService: ObservableObject {
                 request.setValue("WorkosCursorSessionToken=\(resolved.token)", forHTTPHeaderField: "Cookie")
                 let data = try await responseData(for: request, serviceName: "Cursor")
                 decoded = try JSONDecoder().decode(CursorUsageResponse.self, from: data)
+                cursorUsage = decoded
+                cursorError = nil
+                cursorLastUpdated = Date()
+                clearBackoff(provider: .cursor)
+                snapshotStore?.update(
+                    provider: "cursor",
+                    metrics: UsageSnapshotStore.cursorMetrics(for: decoded)
+                )
+                notificationService?.checkCursor(
+                    apiPercent: decoded.planUsage?.apiPercentUsed,
+                    autoPercent: decoded.planUsage?.autoPercentUsed,
+                    creditPercent: decoded.spendLimitUsage?.utilization
+                )
             }
-
-            cursorUsage = decoded
-            cursorError = nil
-            cursorLastUpdated = Date()
-            clearBackoff(provider: .cursor)
-            snapshotStore?.update(
-                provider: "cursor",
-                metrics: UsageSnapshotStore.cursorMetrics(for: decoded)
-            )
-            notificationService?.checkCursor(
-                apiPercent: decoded.planUsage?.apiPercentUsed,
-                autoPercent: decoded.planUsage?.autoPercentUsed,
-                creditPercent: decoded.spendLimitUsage?.utilization
-            )
         } catch let error as ConnectedUsageError {
             if case .rateLimited(_, let retryAfter) = error {
                 applyBackoff(provider: .cursor, retryAfter: retryAfter)
@@ -426,7 +440,6 @@ final class ConnectedUsageService: ObservableObject {
             }
             openAIError = nil
             openAILastUpdated = Date()
-            clearBackoff(provider: .openAI)
             snapshotStore?.update(
                 provider: "openai",
                 metrics: UsageSnapshotStore.openAIMetrics(for: decoded)
@@ -444,6 +457,7 @@ final class ConnectedUsageService: ObservableObject {
             openAIError = error.localizedDescription
         }
 
+        var creditsRateLimited = false
         do {
             let creditData = try await openAIResponseData(
                 endpoint: openAIResetCreditsEndpoint,
@@ -468,6 +482,7 @@ final class ConnectedUsageService: ObservableObject {
         } catch let error as ConnectedUsageError {
             if case .rateLimited(_, let retryAfter) = error {
                 applyBackoff(provider: .openAI, retryAfter: retryAfter)
+                creditsRateLimited = true
             }
             if openAIUsage == nil {
                 openAIError = error.localizedDescription
@@ -476,6 +491,10 @@ final class ConnectedUsageService: ObservableObject {
             if openAIUsage == nil {
                 openAIError = error.localizedDescription
             }
+        }
+
+        if openAIUsage != nil, !creditsRateLimited {
+            clearBackoff(provider: .openAI)
         }
 
         if openAIUsage != nil || openAIResetCredits != nil {
@@ -639,14 +658,16 @@ final class ConnectedUsageService: ObservableObject {
         }
     }
 
-    private func fetchCursorPlanInfoIfNeeded(token: String) async {
+    /// Returns `true` when plan info hit a 429 and applied provider backoff.
+    @discardableResult
+    private func fetchCursorPlanInfoIfNeeded(token: String) async -> Bool {
         let now = Date()
         if isFetchingCursorPlanInfo {
-            return
+            return false
         }
         if let lastCursorPlanInfoFetch,
            now.timeIntervalSince(lastCursorPlanInfoFetch) < planInfoInterval {
-            return
+            return false
         }
 
         isFetchingCursorPlanInfo = true
@@ -665,13 +686,15 @@ final class ConnectedUsageService: ObservableObject {
                 unauthorizedMessage: Self.cursorCLIUnauthorizedMessage
             )
             cursorPlanInfo = try JSONDecoder().decode(CursorPlanInfoResponse.self, from: data)
+            return false
         } catch let error as ConnectedUsageError {
             if case .rateLimited(_, let retryAfter) = error {
                 applyBackoff(provider: .cursor, retryAfter: retryAfter)
+                return true
             }
-            // Soft failure otherwise: usage still stands without plan info.
+            return false
         } catch {
-            // Soft failure: usage still stands without plan info.
+            return false
         }
     }
 

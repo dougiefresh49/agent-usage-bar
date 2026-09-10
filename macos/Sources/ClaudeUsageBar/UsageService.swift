@@ -36,7 +36,7 @@ class UsageService: ObservableObject {
 
     private var refreshTask: Task<RefreshResult, Never>?
     private var usageFetchTask: Task<Void, Never>?
-    private var profileFetchTask: Task<Void, Never>?
+    private var profileFetchTask: Task<Bool, Never>?
     private var profileFetchGeneration = 0
     private var lastWakeAt: Date?
     private var isRateLimitedBackoff = false
@@ -416,13 +416,20 @@ class UsageService: ObservableObject {
                 provider: "claude",
                 metrics: UsageSnapshotStore.claudeMetrics(for: reconciled)
             )
-            if isRateLimitedBackoff || currentInterval != baseInterval {
+            // Reuse the bearer token that just succeeded for usage. No separate refresh.
+            guard let accessToken = loadCredentials()?.accessToken else {
+                if isRateLimitedBackoff || currentInterval != baseInterval {
+                    clearRateLimitBackoff()
+                    scheduleTimer()
+                }
+                return
+            }
+            let profileRateLimited = await fetchOAuthProfileIfNeeded(accessToken: accessToken)
+            // Keep secondary (profile) 429 backoff; only clear after a clean full poll.
+            if !profileRateLimited, isRateLimitedBackoff || currentInterval != baseInterval {
                 clearRateLimitBackoff()
                 scheduleTimer()
             }
-            // Reuse the bearer token that just succeeded for usage. No separate refresh.
-            guard let accessToken = loadCredentials()?.accessToken else { return }
-            await fetchOAuthProfileIfNeeded(accessToken: accessToken)
         } catch {
             lastError = error.localizedDescription
         }
@@ -443,36 +450,38 @@ class UsageService: ObservableObject {
         currentInterval = baseInterval
     }
 
-    private func fetchOAuthProfileIfNeeded(accessToken: String) async {
+    @discardableResult
+    private func fetchOAuthProfileIfNeeded(accessToken: String) async -> Bool {
         if let profileLastFetched,
            Date().timeIntervalSince(profileLastFetched) < Self.profileCacheInterval {
-            return
+            return false
         }
 
         if let profileFetchTask {
-            await profileFetchTask.value
-            return
+            return await profileFetchTask.value
         }
 
         let generation = profileFetchGeneration &+ 1
         profileFetchGeneration = generation
         let task = Task { [weak self] in
-            guard let self else { return }
-            await self.performOAuthProfileFetch(accessToken: accessToken)
+            guard let self else { return false }
+            return await self.performOAuthProfileFetch(accessToken: accessToken)
         }
         profileFetchTask = task
-        await task.value
+        let rateLimited = await task.value
         // Only clear if we still own the slot. A newer fetch or sign-out may have replaced it.
         if profileFetchGeneration == generation {
             profileFetchTask = nil
         }
+        return rateLimited
     }
 
     /// Soft profile fetch: one-shot with the usage bearer token. Never refreshes, never mutates `lastError`, never expires the session.
-    private func performOAuthProfileFetch(accessToken: String) async {
+    /// Returns `true` when the profile endpoint returned 429 and applied backoff.
+    private func performOAuthProfileFetch(accessToken: String) async -> Bool {
         if let profileLastFetched,
            Date().timeIntervalSince(profileLastFetched) < Self.profileCacheInterval {
-            return
+            return false
         }
 
         let wasAuthenticated = isAuthenticated
@@ -488,20 +497,24 @@ class UsageService: ObservableObject {
                 if http.statusCode == 429 {
                     applyRateLimitBackoff(retryAfter: PollingBackoff.retryAfterSeconds(from: http))
                     scheduleTimer()
+                    print("[ClaudeProfile] HTTP \(http.statusCode)")
+                    return true
                 }
                 print("[ClaudeProfile] HTTP \(http.statusCode)")
-                return
+                return false
             }
             // Drop the response if the user signed out while the request was in flight.
             guard wasAuthenticated, isAuthenticated, loadCredentials() != nil else {
                 print("[ClaudeProfile] discarding response after sign-out")
-                return
+                return false
             }
             let decoded = try JSONDecoder().decode(ClaudeProfileResponse.self, from: data)
             profile = decoded
             profileLastFetched = Date()
+            return false
         } catch {
             print("[ClaudeProfile] \(error.localizedDescription)")
+            return false
         }
     }
 

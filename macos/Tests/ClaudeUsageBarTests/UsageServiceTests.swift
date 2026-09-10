@@ -1127,6 +1127,22 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertNil(service.lastError)
         XCTAssertEqual(service.effectivePollingInterval, 30 * 60)
         XCTAssertEqual(service.pollingMinutes, 15)
+
+        // Flip the injected flag and reschedule like the power-state observer does.
+        var lowPower = true
+        let flipping = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store,
+            lowPowerModeEnabled: { lowPower }
+        )
+        XCTAssertEqual(flipping.effectivePollingInterval, 30 * 60)
+        lowPower = false
+        flipping.rescheduleForPowerState()
+        XCTAssertEqual(flipping.effectivePollingInterval, 15 * 60)
     }
 
     func testSignOutDuringProfileFetchDiscardsResponse() async throws {
