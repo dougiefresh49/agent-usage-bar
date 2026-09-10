@@ -264,11 +264,22 @@ struct SettingsWindowContent: View {
 
             if service.isAuthenticated {
                 Section("Anthropic Account") {
+                    if service.claudeCredentialSource != .none {
+                        Text(claudeCredentialStatusText(
+                            source: service.claudeCredentialSource,
+                            expiry: service.claudeCodeTokenExpiry,
+                            hasStoredAppOAuth: service.hasStoredAppOAuth
+                        ))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
                     if let email = service.accountEmail {
                         ObfuscatedEmailRow(email: email)
                     }
-                    Button("Sign Out") {
-                        service.signOut()
+                    if service.hasStoredAppOAuth {
+                        Button("Sign Out") {
+                            service.signOut()
+                        }
                     }
                 }
             }
@@ -739,6 +750,31 @@ private func obfuscateDomainPart(_ domain: String) -> String {
     }.joined(separator: ".")
 
     return "\(maskedName).\(tld)"
+}
+
+func claudeCredentialStatusText(
+    source: ClaudeCredentialSource,
+    expiry: Date?,
+    now: Date = Date(),
+    hasStoredAppOAuth: Bool = false
+) -> String {
+    switch source {
+    case .claudeCode:
+        var text: String
+        if let expiry, expiry > now {
+            text = "Using Claude Code login (expires in \(credentialExpiryLabel(from: now, to: expiry)))"
+        } else {
+            text = "Claude Code login expired. Run any claude command to refresh."
+        }
+        if hasStoredAppOAuth {
+            text += " This app's own sign-in is also stored and not in use."
+        }
+        return text
+    case .appOAuth:
+        return "Using this app's sign-in"
+    case .none:
+        return ""
+    }
 }
 
 func openAICredentialStatusText(

@@ -130,4 +130,44 @@ final class SettingsViewTests: XCTestCase {
             "Using pasted token"
         )
     }
+
+    func testClaudeCredentialStatusText() {
+        let expiry = Date().addingTimeInterval(3 * 3_600 + 60)
+        XCTAssertEqual(
+            claudeCredentialStatusText(source: .claudeCode, expiry: expiry),
+            "Using Claude Code login (expires in 3h)"
+        )
+        XCTAssertEqual(
+            claudeCredentialStatusText(source: .claudeCode, expiry: Date().addingTimeInterval(-60)),
+            "Claude Code login expired. Run any claude command to refresh."
+        )
+        XCTAssertEqual(
+            claudeCredentialStatusText(source: .claudeCode, expiry: nil),
+            "Claude Code login expired. Run any claude command to refresh."
+        )
+        XCTAssertEqual(
+            claudeCredentialStatusText(
+                source: .claudeCode,
+                expiry: expiry,
+                hasStoredAppOAuth: true
+            ),
+            "Using Claude Code login (expires in 3h) This app's own sign-in is also stored and not in use."
+        )
+        XCTAssertEqual(
+            claudeCredentialStatusText(
+                source: .claudeCode,
+                expiry: nil,
+                hasStoredAppOAuth: true
+            ),
+            "Claude Code login expired. Run any claude command to refresh. This app's own sign-in is also stored and not in use."
+        )
+        XCTAssertEqual(
+            claudeCredentialStatusText(source: .appOAuth, expiry: nil),
+            "Using this app's sign-in"
+        )
+        XCTAssertEqual(
+            claudeCredentialStatusText(source: .none, expiry: nil),
+            ""
+        )
+    }
 }
