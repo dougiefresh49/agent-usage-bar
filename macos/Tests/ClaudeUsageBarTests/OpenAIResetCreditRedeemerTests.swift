@@ -160,8 +160,9 @@ final class OpenAIResetCreditRedeemerTests: XCTestCase {
 
     func testPendingAttemptSurvivesFailedSendAndIsReused() async throws {
         let creditID = "credit-retry"
+        // First attempt with unknown account so the stored id is the "local" form.
         let expectedID = OpenAIResetCreditRedemption.requestID(
-            accountID: "acct",
+            accountID: nil,
             creditID: creditID
         )
         var seenRequestIDs: [String] = []
@@ -170,15 +171,15 @@ final class OpenAIResetCreditRedeemerTests: XCTestCase {
             throw URLError(.timedOut)
         }
 
-        let redeemer = OpenAIResetCreditRedeemer(
+        let firstRedeemer = OpenAIResetCreditRedeemer(
             session: makeSession(),
             defaults: defaults
         )
 
         do {
-            _ = try await redeemer.redeem(
+            _ = try await firstRedeemer.redeem(
                 token: "tok",
-                accountID: "acct",
+                accountID: nil,
                 creditID: creditID
             )
             XCTFail("Expected timeout")
@@ -203,14 +204,72 @@ final class OpenAIResetCreditRedeemerTests: XCTestCase {
             )
         }
 
-        let outcome = try await redeemer.redeem(
+        // New instance, account now known: must still send the original stored request id.
+        let retryRedeemer = OpenAIResetCreditRedeemer(
+            session: makeSession(),
+            defaults: defaults
+        )
+        let outcome = try await retryRedeemer.redeem(
             token: "tok",
-            accountID: "acct",
+            accountID: "acct-now-known",
             creditID: creditID
         )
         XCTAssertEqual(outcome, .reset)
         XCTAssertEqual(seenRequestIDs, [expectedID.uuidString.lowercased()])
+        XCTAssertNotEqual(
+            expectedID,
+            OpenAIResetCreditRedemption.requestID(
+                accountID: "acct-now-known",
+                creditID: creditID
+            )
+        )
         XCTAssertNil(defaults.data(forKey: "openAIResetCreditPendingAttempt"))
+    }
+
+    func testPendingAttemptForOtherCreditRejectsUntilResolved() async throws {
+        RedeemerMockURLProtocol.handler = { _ in
+            throw URLError(.timedOut)
+        }
+
+        let redeemer = OpenAIResetCreditRedeemer(
+            session: makeSession(),
+            defaults: defaults
+        )
+
+        do {
+            _ = try await redeemer.redeem(
+                token: "tok",
+                accountID: "acct",
+                creditID: "credit-a"
+            )
+            XCTFail("Expected timeout")
+        } catch is URLError {
+            // Pending for credit-a remains.
+        }
+
+        RedeemerMockURLProtocol.handler = { _ in
+            XCTFail("Must not send while another credit is pending")
+            return try Self.httpResponse(
+                url: OpenAIResetCreditRedemption.consumeEndpoint,
+                statusCode: 200,
+                body: #"{"code":"reset"}"#
+            )
+        }
+
+        do {
+            _ = try await redeemer.redeem(
+                token: "tok",
+                accountID: "acct",
+                creditID: "credit-b"
+            )
+            XCTFail("Expected inFlight")
+        } catch let error as OpenAIResetCreditError {
+            XCTAssertEqual(error, .inFlight)
+        }
+
+        let pendingData = try XCTUnwrap(defaults.data(forKey: "openAIResetCreditPendingAttempt"))
+        let pending = try JSONDecoder().decode(PendingAttemptProbe.self, from: pendingData)
+        XCTAssertEqual(pending.creditID, "credit-a")
     }
 
     func testSingleFlightThrowsWhileRedeeming() async throws {

@@ -121,6 +121,11 @@ final class OpenAIResetCreditRedeemer {
         isRedeeming = true
         defer { isRedeeming = false }
 
+        if let pending = loadPending(), pending.creditID != creditID {
+            // One pending slot: do not overwrite an unresolved attempt for another credit.
+            throw OpenAIResetCreditError.inFlight
+        }
+
         let requestID = resolvedRequestID(accountID: accountID, creditID: creditID)
         persistPending(creditID: creditID, requestID: requestID)
 
