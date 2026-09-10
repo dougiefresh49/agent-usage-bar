@@ -56,6 +56,9 @@ struct PopoverView: View {
                                 service: connectedService,
                                 style: detailStyle,
                                 metrics: presentationMetrics(for: .openAI)
+                                    + UsagePresentationMetrics.openAIAdditionalLimitMetrics(
+                                        usage: connectedService.openAIUsage
+                                    )
                             )
                         case .cursor:
                             CursorUsageView(
@@ -519,22 +522,43 @@ private struct UsageMetricRow: View {
     let metric: UsagePresentationMetric
 
     var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            metricContent(now: context.date)
+        }
+    }
+
+    private func metricContent(now: Date) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(spacing: 4) {
                 Text(metric.label)
                     .usageFont(.metric)
-                Spacer()
-                Text(metric.valueText)
+                Spacer(minLength: 4)
+                if let paceImage = metric.paceSystemImage(now: now) {
+                    Image(systemName: paceImage)
+                        .usageFont(.supporting)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+                Text(headlineText)
                     .usageFont(.metric)
                     .monospacedDigit()
             }
 
             if let progress = metric.normalizedProgress {
-                ProgressView(value: progress, total: 1)
-                    .tint(colorForPct(progress))
+                PaceUsageBar(
+                    usedShare: progress,
+                    elapsedShare: metric.elapsedShare(now: now),
+                    showsRestoreHatch: metric.geometry?.resetsAt != nil,
+                    tint: colorForPct(progress),
+                    resetHelp: absoluteResetHelp
+                )
             }
 
-            if let resetDate = metric.resetDate {
+            if let restores = metric.restoresLine(now: now) {
+                Text(restores)
+                    .usageFont(.supporting)
+                    .foregroundStyle(.secondary)
+            } else if metric.showsLegacyResetLine, let resetDate = metric.resetDate {
                 Text("Resets \(resetDate, style: .relative)")
                     .usageFont(.supporting)
                     .foregroundStyle(.secondary)
@@ -545,7 +569,94 @@ private struct UsageMetricRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityValue(metric.accessibilityValue)
+        .accessibilityValue(metric.popoverAccessibilityValue(now: now))
+    }
+
+    private var headlineText: String {
+        metric.remainingHeadlineText ?? metric.valueText
+    }
+
+    private var absoluteResetHelp: String? {
+        guard let resetDate = metric.resetDate else { return nil }
+        return resetDate.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+/// Used fill with an optional elapsed hairline and a hatched restore tail over the used share.
+private struct PaceUsageBar: View {
+    let usedShare: Double
+    let elapsedShare: Double?
+    let showsRestoreHatch: Bool
+    let tint: Color
+    let resetHelp: String?
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let height = proxy.size.height
+            let usedWidth = max(0, min(1, usedShare)) * width
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.primary.opacity(0.10))
+
+                Capsule()
+                    .fill(tint)
+                    .frame(width: usedWidth)
+
+                if showsRestoreHatch, usedWidth > 0 {
+                    HatchedBarOverlay()
+                        .frame(width: usedWidth, height: height)
+                        .clipShape(Capsule())
+                        .allowsHitTesting(false)
+                }
+
+                if let elapsedShare {
+                    let rawX = max(0, min(1, elapsedShare)) * width
+                    let x = min(max(rawX, 0.5), max(0.5, width - 1))
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.85))
+                        .frame(width: 1, height: height)
+                        .offset(x: x - 0.5)
+                        .allowsHitTesting(false)
+                }
+            }
+            .clipShape(Capsule())
+        }
+        .frame(height: 6)
+        .modifier(OptionalHelpModifier(text: resetHelp))
+    }
+}
+
+private struct OptionalHelpModifier: ViewModifier {
+    let text: String?
+
+    func body(content: Content) -> some View {
+        if let text, !text.isEmpty {
+            content.help(text)
+        } else {
+            content
+        }
+    }
+}
+
+private struct HatchedBarOverlay: View {
+    var body: some View {
+        Canvas { context, size in
+            let spacing: CGFloat = 3.5
+            var x: CGFloat = -size.height
+            while x < size.width + size.height {
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: size.height))
+                path.addLine(to: CGPoint(x: x + size.height, y: 0))
+                context.stroke(
+                    path,
+                    with: .color(Color.primary.opacity(0.28)),
+                    lineWidth: 1
+                )
+                x += spacing
+            }
+        }
+        .opacity(0.9)
     }
 }
 
@@ -584,27 +695,35 @@ private struct DetailMetricCapsuleCell: View {
     let metric: UsagePresentationMetric?
 
     var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            cellContent(now: context.date)
+        }
+    }
+
+    private func cellContent(now: Date) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 4) {
                 Text(metric?.label ?? "Unavailable")
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Text(metric?.valueText ?? "—")
+                if let paceImage = metric?.paceSystemImage(now: now) {
+                    Image(systemName: paceImage)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+                Text(metric?.remainingHeadlineText ?? metric?.valueText ?? "—")
                     .monospacedDigit()
             }
             .usageFont(.legend)
 
             if let progress = metric?.normalizedProgress {
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.primary.opacity(0.10))
-                        Capsule()
-                            .fill(colorForPct(progress))
-                            .frame(width: proxy.size.width * progress)
-                    }
-                }
-                .frame(height: 4)
+                PaceUsageBar(
+                    usedShare: progress,
+                    elapsedShare: metric?.elapsedShare(now: now),
+                    showsRestoreHatch: metric?.geometry?.resetsAt != nil,
+                    tint: colorForPct(progress),
+                    resetHelp: metric?.resetDate?.formatted(date: .abbreviated, time: .shortened)
+                )
             } else {
                 Capsule()
                     .stroke(
@@ -613,9 +732,21 @@ private struct DetailMetricCapsuleCell: View {
                     )
                     .frame(height: 4)
             }
+
+            if let restores = metric?.restoresLine(now: now) {
+                Text(restores)
+                    .usageFont(.supporting)
+                    .foregroundStyle(.secondary)
+            } else if let metric, metric.showsLegacyResetLine, let resetDate = metric.resetDate {
+                Text("Resets \(resetDate, style: .relative)")
+                    .usageFont(.supporting)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(metric?.popoverAccessibilityValue(now: now) ?? "Unavailable")
     }
 }
 
@@ -626,7 +757,7 @@ private struct UsageOrbitView: View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             HStack(spacing: 16) {
                 orbit(now: context.date)
-                legend
+                legend(now: context.date)
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.vertical, 2)
@@ -689,7 +820,7 @@ private struct UsageOrbitView: View {
         }
         .frame(width: 120, height: 120)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(orbitAccessibilityLabel(time: time, countdown: countdown))
+        .accessibilityLabel(orbitAccessibilityLabel(time: time, countdown: countdown, now: now))
     }
 
     private func orbitRing(
@@ -708,7 +839,7 @@ private struct UsageOrbitView: View {
         .frame(width: diameter, height: diameter)
     }
 
-    private var legend: some View {
+    private func legend(now: Date) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             ForEach(Array(metrics.prefix(2).enumerated()), id: \.element.id) { index, metric in
                 HStack(spacing: 7) {
@@ -717,11 +848,24 @@ private struct UsageOrbitView: View {
                         Text(metric.label)
                             .usageFont(.legend)
                             .lineLimit(1)
-                        Text(metric.isCount
-                            ? "\(metric.valueText) available"
-                            : metric.valueText)
-                            .usageFont(.legendEmphasized)
-                            .monospacedDigit()
+                        HStack(spacing: 4) {
+                            if !metric.isCount, let paceImage = metric.paceSystemImage(now: now) {
+                                Image(systemName: paceImage)
+                                    .usageFont(.supporting)
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityHidden(true)
+                            }
+                            Text(metric.isCount
+                                ? "\(metric.valueText) available"
+                                : (metric.remainingHeadlineText ?? metric.valueText))
+                                .usageFont(.legendEmphasized)
+                                .monospacedDigit()
+                        }
+                        if let restores = metric.restoresLine(now: now) {
+                            Text(restores)
+                                .usageFont(.supporting)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -752,11 +896,13 @@ private struct UsageOrbitView: View {
 
     private func orbitAccessibilityLabel(
         time: String,
-        countdown: Double
+        countdown: Double,
+        now: Date
     ) -> String {
-        let values = metrics
-            .map { "\($0.label) \($0.accessibilityValue)" }
-            .joined(separator: ", ")
+        let values = metrics.map { metric in
+            "\(metric.label) \(metric.popoverAccessibilityValue(now: now))"
+        }
+        .joined(separator: ", ")
         return "\(values), \(Int(round(countdown * 100))) percent of reset time remaining, \(time)"
     }
 }
@@ -795,7 +941,7 @@ private struct OpenAIUsageView: View {
 
         if !service.isOpenAIConfigured {
             configurePrompt("Add a ChatGPT session token in Settings.")
-        } else if let usage = service.openAIUsage {
+        } else if service.openAIUsage != nil {
             let summaryMetrics = UsagePresentationMetrics.detailPair(
                 for: .openAI,
                 available: metrics
@@ -809,16 +955,6 @@ private struct OpenAIUsageView: View {
 
             ForEach(metrics.filter { !summaryIDs.contains($0.id) }) { metric in
                 UsageMetricRow(metric: metric)
-            }
-
-            ForEach(usage.additionalRateLimits ?? []) { additional in
-                if let window = additional.rateLimit?.primaryWindow {
-                    UsageValueRow(
-                        label: additional.label ?? additional.type ?? "Additional Limit",
-                        percent: window.usedPercent,
-                        resetDate: window.resetDate
-                    )
-                }
             }
 
             let announcements = service.openAIResetCredits?.credits.filter(\.isAvailable) ?? []
@@ -1037,32 +1173,6 @@ private struct ElevenLabsUsageView: View {
         rawValue
             .replacingOccurrences(of: "_", with: " ")
             .capitalized
-    }
-}
-
-private struct UsageValueRow: View {
-    let label: String
-    let percent: Double?
-    let resetDate: Date?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label)
-                    .usageFont(.metric)
-                Spacer()
-                Text(percent.map { "\(Int(round($0)))%" } ?? "—")
-                    .usageFont(.metric)
-                    .monospacedDigit()
-            }
-            ProgressView(value: (percent ?? 0) / 100, total: 1)
-                .tint(colorForPct((percent ?? 0) / 100))
-            if let resetDate {
-                Text("Resets \(resetDate, style: .relative)")
-                    .usageFont(.supporting)
-                    .foregroundStyle(.secondary)
-            }
-        }
     }
 }
 
