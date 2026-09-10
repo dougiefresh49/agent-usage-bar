@@ -37,6 +37,12 @@ final class ConnectedUsageService: ObservableObject {
     @Published private(set) var openAITokenExpiry: Date?
     @Published private(set) var cursorTokenExpiry: Date?
     @Published private(set) var cursorPlanInfo: CursorPlanInfoResponse?
+    /// Last Use reset result for the popover; the view clears it after a few seconds.
+    @Published var resetCreditOutcome: (message: String, at: Date)?
+    /// Mirrors `resetCreditRedeemer.isRedeeming` as published state so SwiftUI re-renders around a redemption.
+    @Published private(set) var isRedeemingResetCredit = false
+
+    let resetCreditRedeemer: OpenAIResetCreditRedeemer
 
     private let session: URLSession
     private let cursorEndpoint: URL
@@ -70,9 +76,12 @@ final class ConnectedUsageService: ObservableObject {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         codexAuthLoader: (() -> CodexCLICredentials?)? = nil,
         cursorKeychainRunner: CursorCLIKeychain.Runner? = nil,
-        planInfoInterval: TimeInterval = 3600
+        planInfoInterval: TimeInterval = 3600,
+        resetCreditRedeemer: OpenAIResetCreditRedeemer? = nil
     ) {
         self.session = session
+        self.resetCreditRedeemer = resetCreditRedeemer
+            ?? OpenAIResetCreditRedeemer(session: session, defaults: .standard)
         self.cursorEndpoint = cursorEndpoint
         self.openAIUsageEndpoint = openAIUsageEndpoint
         self.openAIResetCreditsEndpoint = openAIResetCreditsEndpoint
@@ -318,6 +327,89 @@ final class ConnectedUsageService: ObservableObject {
             weeklyPercent: openAIUsage?.rateLimit?.weeklyWindow?.usedPercent,
             resetCreditsRemaining: resetCreditsRemaining
         )
+    }
+
+    /// Available `codex_rate_limits` credits, soonest expiry first; credits without an expiry sort last.
+    var availableResetCredits: [OpenAIResetCredit] {
+        (openAIResetCredits?.credits ?? [])
+            .filter { $0.isAvailable && $0.resetType == Self.codexRateLimitsResetType }
+            .sorted { lhs, rhs in
+                switch (lhs.expiresAtDate, rhs.expiresAtDate) {
+                case let (left?, right?): return left < right
+                case (.some, .none): return true
+                case (.none, .some): return false
+                case (.none, .none): return false
+                }
+            }
+    }
+
+    /// The credit Use reset spends next: the soonest-expiring available one.
+    var nextResetCredit: OpenAIResetCredit? {
+        availableResetCredits.first
+    }
+
+    /// Redeems the soonest-expiring credit, then refreshes Codex usage to confirm the reset landed.
+    /// One redemption at a time; a second call while one is in flight returns without a message.
+    func redeemNextResetCredit() async {
+        guard !resetCreditRedeemer.isRedeeming, !isRedeemingResetCredit else { return }
+        guard let credit = nextResetCredit else {
+            resetCreditOutcome = (OpenAIResetCreditOutcome.noCredit.userMessage, Date())
+            return
+        }
+        guard let resolved = resolveOpenAICredential() else {
+            resetCreditOutcome = ("Codex is not connected.", Date())
+            return
+        }
+
+        isRedeemingResetCredit = true
+        defer { isRedeemingResetCredit = false }
+
+        let updatedBefore = openAILastUpdated
+        let message: String
+        do {
+            let outcome = try await resetCreditRedeemer.redeem(
+                token: resolved.token,
+                accountID: resolved.accountId ?? openAIAccountID,
+                creditID: credit.id
+            )
+            switch outcome {
+            case .reset, .alreadyRedeemed:
+                await fetchOpenAIUsage()
+                let advanced: Bool
+                if let after = openAILastUpdated {
+                    advanced = updatedBefore.map { after > $0 } ?? true
+                } else {
+                    advanced = false
+                }
+                message = advanced && openAIError == nil
+                    ? outcome.userMessage
+                    : Self.resetUnconfirmedMessage
+            case .nothingToReset, .noCredit:
+                message = outcome.userMessage
+            }
+        } catch {
+            message = Self.resetCreditErrorMessage(error)
+        }
+        resetCreditOutcome = (message, Date())
+    }
+
+    static let resetUnconfirmedMessage =
+        "The reset was applied, but Codex could not confirm the new limits. Refresh to check."
+
+    private static let codexRateLimitsResetType = "codex_rate_limits"
+
+    /// `OpenAIResetCreditError` is not `LocalizedError`, so spell its cases out; anything else keeps its own description.
+    private static func resetCreditErrorMessage(_ error: Error) -> String {
+        switch error as? OpenAIResetCreditError {
+        case .inFlight?:
+            return "A redemption is already in progress."
+        case .http(let status)?:
+            return "Codex HTTP \(status)"
+        case .invalidResponse?:
+            return "Codex returned an invalid response"
+        case nil:
+            return error.localizedDescription
+        }
     }
 
     func fetchElevenLabsUsage() async {

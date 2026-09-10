@@ -886,6 +886,219 @@ final class ConnectedUsageServiceTests: XCTestCase {
         XCTAssertEqual(cursorPasted.cursorError?.contains("Settings"), true)
     }
 
+    // MARK: - Use reset (#56)
+
+    private static let consumePath = "/backend-api/wham/rate-limit-reset-credits/consume"
+
+    /// Three available credits plus one used one. `soon` is the codex_rate_limits credit that expires first;
+    /// `other` expires sooner still but has a different reset type and must never be picked.
+    private static let resetCreditsFixture = #"""
+    {
+      "credits": [
+        {"id": "later", "reset_type": "codex_rate_limits", "status": "available", "expires_at": "2026-10-20T00:00:00Z"},
+        {"id": "soon", "reset_type": "codex_rate_limits", "status": "available", "expires_at": "2026-09-21T00:00:00Z"},
+        {"id": "other", "reset_type": "something_else", "status": "available", "expires_at": "2026-09-12T00:00:00Z"},
+        {"id": "used", "reset_type": "codex_rate_limits", "status": "redeemed", "expires_at": "2026-09-11T00:00:00Z"},
+        {"id": "undated", "reset_type": "codex_rate_limits", "status": "available"}
+      ],
+      "available_count": 4
+    }
+    """#
+
+    private struct ResetStub {
+        var consumeBodies: [[String: String]] = []
+        var consumeAccountHeaders: [String?] = []
+        var usageFetches = 0
+        var consumeResponse: (status: Int, body: String) = (200, #"{"code":"reset"}"#)
+        var usageStatusAfterConsume = 200
+    }
+
+    /// Serves usage, credits, and the consume endpoint from the fixture; records every consume body.
+    private func installResetStub(_ box: ResetStubBox) {
+        ConnectedMockURLProtocol.handler = { request in
+            func response(_ status: Int) -> HTTPURLResponse {
+                HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+            }
+            switch request.url?.path {
+            case "/openai":
+                box.stub.usageFetches += 1
+                let status = box.stub.consumeBodies.isEmpty ? 200 : box.stub.usageStatusAfterConsume
+                return (
+                    response(status),
+                    Data(#"{"plan_type":"plus","account_id":"acct-1","rate_limit":{"primary_window":{"used_percent":90}}}"#.utf8)
+                )
+            case "/credits":
+                return (response(200), Data(Self.resetCreditsFixture.utf8))
+            case Self.consumePath:
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer openai-token")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "OpenAI-Beta"), "codex-1")
+                box.stub.consumeAccountHeaders.append(request.value(forHTTPHeaderField: "Chatgpt-Account-Id"))
+                let body = try XCTUnwrap(Self.bodyData(of: request))
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+                box.stub.consumeBodies.append(object)
+                let reply = box.stub.consumeResponse
+                return (response(reply.status), Data(reply.body.utf8))
+            default:
+                throw URLError(.badURL)
+            }
+        }
+    }
+
+    private final class ResetStubBox {
+        var stub = ResetStub()
+    }
+
+    private static func bodyData(of request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1_024)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            if read <= 0 { break }
+            data.append(buffer, count: read)
+        }
+        return data
+    }
+
+    private func makeResetService(box: ResetStubBox) throws -> (ConnectedUsageService, UserDefaults, String) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(openAISessionToken: "openai-token"))
+        let suiteName = "ConnectedUsageServiceTests.reset.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        installResetStub(box)
+        let session = makeSession()
+        let redeemer = OpenAIResetCreditRedeemer(session: session, defaults: defaults)
+        let service = makeService(session: session, credentialsStore: store, resetCreditRedeemer: redeemer)
+        return (service, defaults, suiteName)
+    }
+
+    func testRedeemPicksSoonestExpiringCodexCreditAndReportsReset() async throws {
+        let box = ResetStubBox()
+        let (service, defaults, suiteName) = try makeResetService(box: box)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        await service.fetchOpenAIUsage()
+        XCTAssertEqual(service.availableResetCredits.map(\.id), ["soon", "later", "undated"])
+        XCTAssertEqual(service.nextResetCredit?.id, "soon")
+        XCTAssertEqual(service.openAIAccountID, "acct-1")
+        let updatedBefore = try XCTUnwrap(service.openAILastUpdated)
+
+        await service.redeemNextResetCredit()
+
+        XCTAssertEqual(box.stub.consumeBodies.count, 1)
+        XCTAssertEqual(box.stub.consumeBodies.first?["credit_id"], "soon")
+        XCTAssertEqual(
+            box.stub.consumeBodies.first?["redeem_request_id"],
+            OpenAIResetCreditRedemption.requestID(accountID: "acct-1", creditID: "soon").uuidString.lowercased()
+        )
+        XCTAssertEqual(box.stub.consumeAccountHeaders, ["acct-1"])
+        XCTAssertEqual(box.stub.usageFetches, 2)
+        XCTAssertEqual(service.resetCreditOutcome?.message, "Limits reset")
+        let updatedAfter = try XCTUnwrap(service.openAILastUpdated)
+        XCTAssertGreaterThan(updatedAfter, updatedBefore)
+        XCTAssertFalse(service.isRedeemingResetCredit)
+    }
+
+    func testRedeemReportsCouldNotConfirmWhenUsageDoesNotAdvance() async throws {
+        let box = ResetStubBox()
+        let (service, defaults, suiteName) = try makeResetService(box: box)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        box.stub.usageStatusAfterConsume = 500
+
+        await service.fetchOpenAIUsage()
+        let updatedBefore = service.openAILastUpdated
+
+        await service.redeemNextResetCredit()
+
+        XCTAssertEqual(box.stub.consumeBodies.count, 1)
+        XCTAssertEqual(service.openAILastUpdated, updatedBefore)
+        XCTAssertEqual(service.resetCreditOutcome?.message, ConnectedUsageService.resetUnconfirmedMessage)
+        XCTAssertEqual(
+            service.resetCreditOutcome?.message,
+            "The reset was applied, but Codex could not confirm the new limits. Refresh to check."
+        )
+    }
+
+    func testRedeemOtherOutcomesAndErrorsSetTheirOwnMessages() async throws {
+        let box = ResetStubBox()
+        let (service, defaults, suiteName) = try makeResetService(box: box)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        await service.fetchOpenAIUsage()
+
+        box.stub.consumeResponse = (200, #"{"code":"nothing_to_reset"}"#)
+        await service.redeemNextResetCredit()
+        XCTAssertEqual(service.resetCreditOutcome?.message, "Nothing to reset yet")
+        XCTAssertEqual(box.stub.usageFetches, 1, "no confirming refresh for nothing_to_reset")
+
+        box.stub.consumeResponse = (200, #"{"code":"no_credit"}"#)
+        await service.redeemNextResetCredit()
+        XCTAssertEqual(service.resetCreditOutcome?.message, "No credit available")
+
+        box.stub.consumeResponse = (503, "nope")
+        await service.redeemNextResetCredit()
+        XCTAssertEqual(service.resetCreditOutcome?.message, "Codex HTTP 503")
+
+        box.stub.consumeResponse = (200, "not json")
+        await service.redeemNextResetCredit()
+        XCTAssertEqual(service.resetCreditOutcome?.message, "Codex returned an invalid response")
+
+        box.stub.consumeResponse = (200, #"{"code":"already_redeemed"}"#)
+        await service.redeemNextResetCredit()
+        XCTAssertEqual(service.resetCreditOutcome?.message, "Already redeemed")
+        XCTAssertEqual(box.stub.usageFetches, 2, "already_redeemed refreshes to confirm, like reset")
+    }
+
+    func testRedeemWithoutAnEligibleCreditReportsNoCreditWithoutCalling() async throws {
+        let box = ResetStubBox()
+        let (service, defaults, suiteName) = try makeResetService(box: box)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        await service.redeemNextResetCredit()
+
+        XCTAssertEqual(service.resetCreditOutcome?.message, "No credit available")
+        XCTAssertTrue(box.stub.consumeBodies.isEmpty)
+    }
+
+    func testRedeemInFlightGuardDropsASecondCall() async throws {
+        let box = ResetStubBox()
+        let (service, defaults, suiteName) = try makeResetService(box: box)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        await service.fetchOpenAIUsage()
+
+        let started = expectation(description: "consume started")
+        let gate = DispatchSemaphore(value: 0)
+        let inner = ConnectedMockURLProtocol.handler
+        ConnectedMockURLProtocol.handler = { request in
+            if request.url?.path == Self.consumePath {
+                started.fulfill()
+                gate.wait()
+            }
+            return try inner!(request)
+        }
+
+        let first = Task { await service.redeemNextResetCredit() }
+        await fulfillment(of: [started], timeout: 5)
+        XCTAssertTrue(service.isRedeemingResetCredit)
+        XCTAssertTrue(service.resetCreditRedeemer.isRedeeming)
+
+        await service.redeemNextResetCredit()
+        XCTAssertNil(service.resetCreditOutcome, "the dropped call leaves no message")
+
+        gate.signal()
+        await first.value
+
+        XCTAssertEqual(box.stub.consumeBodies.count, 1)
+        XCTAssertEqual(service.resetCreditOutcome?.message, "Limits reset")
+        XCTAssertFalse(service.isRedeemingResetCredit)
+    }
+
     private func makeService(
         session: URLSession? = nil,
         cursorEndpoint: URL = URL(string: "https://example.com/cursor")!,
@@ -896,7 +1109,8 @@ final class ConnectedUsageServiceTests: XCTestCase {
         environment: [String: String] = [:],
         codexAuthLoader: (() -> CodexCLICredentials?)? = nil,
         cursorKeychainRunner: CursorCLIKeychain.Runner? = nil,
-        planInfoInterval: TimeInterval = 3600
+        planInfoInterval: TimeInterval = 3600,
+        resetCreditRedeemer: OpenAIResetCreditRedeemer? = nil
     ) -> ConnectedUsageService {
         ConnectedUsageService(
             session: session ?? makeSession(),
@@ -908,7 +1122,8 @@ final class ConnectedUsageServiceTests: XCTestCase {
             environment: environment,
             codexAuthLoader: codexAuthLoader ?? { nil },
             cursorKeychainRunner: cursorKeychainRunner ?? { _, _ in "" },
-            planInfoInterval: planInfoInterval
+            planInfoInterval: planInfoInterval,
+            resetCreditRedeemer: resetCreditRedeemer
         )
     }
 

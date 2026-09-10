@@ -558,6 +558,122 @@ final class UsagePresentationTests: XCTestCase {
         )
     }
 
+    // MARK: - Detail rows (#56)
+
+    func testResetCreditsLineCountsAndNamesTheSoonestExpiry() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let expiry = now.addingTimeInterval(10 * 86_400 + 22 * 3_600 + 30 * 60)
+
+        XCTAssertEqual(
+            UsageDetailRows.resetCreditsLine(count: 3, nextExpiry: expiry, now: now),
+            "3 banked · next expires in 10d 22h"
+        )
+        XCTAssertEqual(UsageDetailRows.resetCreditsLine(count: 1, nextExpiry: nil, now: now), "1 banked")
+        XCTAssertNil(UsageDetailRows.resetCreditsLine(count: 0, nextExpiry: expiry, now: now))
+    }
+
+    func testCodexPlanAndSourceLines() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        XCTAssertEqual(UsageDetailRows.codexPlanLine(planType: "plus"), "Plan: Plus")
+        XCTAssertEqual(UsageDetailRows.codexPlanLine(planType: "Team"), "Plan: Team")
+        XCTAssertNil(UsageDetailRows.codexPlanLine(planType: ""))
+        XCTAssertNil(UsageDetailRows.codexPlanLine(planType: nil))
+
+        XCTAssertEqual(
+            UsageDetailRows.codexSourceLine(
+                source: .codexCLI,
+                tokenExpiry: now.addingTimeInterval(4 * 86_400 + 5 * 3_600),
+                now: now
+            ),
+            "Source: Codex CLI login · expires in 4d"
+        )
+        XCTAssertEqual(
+            UsageDetailRows.codexSourceLine(source: .codexCLI, tokenExpiry: now.addingTimeInterval(-60), now: now),
+            "Source: Codex CLI login · expired"
+        )
+        XCTAssertEqual(
+            UsageDetailRows.codexSourceLine(source: .codexCLI, tokenExpiry: nil, now: now),
+            "Source: Codex CLI login"
+        )
+        XCTAssertEqual(
+            UsageDetailRows.codexSourceLine(source: .pasted, tokenExpiry: nil, now: now),
+            "Source: pasted token"
+        )
+        XCTAssertEqual(
+            UsageDetailRows.codexSourceLine(source: .environment, tokenExpiry: nil, now: now),
+            "Source: environment variable"
+        )
+        XCTAssertNil(UsageDetailRows.codexSourceLine(source: .none, tokenExpiry: nil, now: now))
+    }
+
+    func testCursorPlanSpendAndSourceLines() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let renewsAt = now.addingTimeInterval(12 * 86_400 + 7 * 3_600)
+        let planInfo = try JSONDecoder().decode(
+            CursorPlanInfoResponse.self,
+            from: Data(
+                #"{"planInfo":{"planName":"Pro","includedAmountCents":2000,"price":"$20/mo","billingCycleEnd":"\#(Int(renewsAt.timeIntervalSince1970 * 1_000))","planOwner":"PLAN_OWNER_STRIPE"}}"#.utf8
+            )
+        )
+        let usage = try JSONDecoder().decode(
+            CursorUsageResponse.self,
+            from: Data(#"{"planUsage":{"totalPercentUsed":20.3}}"#.utf8)
+        )
+
+        XCTAssertEqual(
+            UsageDetailRows.cursorPlanLine(planInfo.planInfo, now: now),
+            "Pro · $20/mo · renews in 12d"
+        )
+        XCTAssertEqual(
+            UsageDetailRows.cursorSpendLine(planUsage: usage.planUsage, includedAmountCents: 2000),
+            "used $4.06 of $20.00"
+        )
+        XCTAssertNil(UsageDetailRows.cursorSpendLine(planUsage: usage.planUsage, includedAmountCents: nil))
+        XCTAssertNil(UsageDetailRows.cursorSpendLine(planUsage: nil, includedAmountCents: 2000))
+        XCTAssertNil(UsageDetailRows.cursorPlanLine(nil, now: now))
+
+        let renewed = CursorPlanInfo(
+            planName: "Pro",
+            includedAmountCents: nil,
+            price: nil,
+            billingCycleEnd: "\(Int(now.addingTimeInterval(-2 * 86_400).timeIntervalSince1970 * 1_000))",
+            planOwner: nil
+        )
+        XCTAssertEqual(UsageDetailRows.cursorPlanLine(renewed, now: now), "Pro · renewed 2d ago")
+
+        XCTAssertEqual(
+            UsageDetailRows.cursorSourceLine(
+                source: .cursorCLI,
+                tokenExpiry: now.addingTimeInterval(9 * 86_400 + 60),
+                now: now
+            ),
+            "Source: Cursor CLI login · expires in 9d"
+        )
+        XCTAssertEqual(
+            UsageDetailRows.cursorSourceLine(source: .pasted, tokenExpiry: nil, now: now),
+            "Source: pasted cookie"
+        )
+        XCTAssertNil(UsageDetailRows.cursorSourceLine(source: .none, tokenExpiry: nil, now: now))
+    }
+
+    func testClaudePlanLineJoinsTierAndStatus() {
+        XCTAssertEqual(
+            UsageDetailRows.claudePlanLine(planLabel: "Max 20x", subscriptionStatus: "active"),
+            "Max 20x · active"
+        )
+        XCTAssertEqual(UsageDetailRows.claudePlanLine(planLabel: "Pro", subscriptionStatus: nil), "Pro")
+        XCTAssertEqual(UsageDetailRows.claudePlanLine(planLabel: "", subscriptionStatus: "active"), "active")
+        XCTAssertNil(UsageDetailRows.claudePlanLine(planLabel: "", subscriptionStatus: nil))
+    }
+
+    func testCoarseDurationUsesOneUnit() {
+        XCTAssertEqual(UsageDetailRows.coarseDuration(12 * 86_400 + 23 * 3_600), "12d")
+        XCTAssertEqual(UsageDetailRows.coarseDuration(9 * 3_600 + 59 * 60), "9h")
+        XCTAssertEqual(UsageDetailRows.coarseDuration(40 * 60 + 59), "40m")
+        XCTAssertEqual(UsageDetailRows.coarseDuration(-5), "0m")
+    }
+
     private func percentageMetric(
         id: String,
         label: String,

@@ -132,6 +132,13 @@ struct PopoverView: View {
                 ExtraUsageRow(extra: extra)
             }
 
+            if let plan = UsageDetailRows.claudePlanLine(
+                planLabel: service.profile?.planLabel,
+                subscriptionStatus: service.profile?.organization?.subscriptionStatus
+            ) {
+                providerDetailRow(plan)
+            }
+
             DisclosureGroup("Usage history") {
                 UsageChartView(historyService: historyService)
                     .padding(.top, 4)
@@ -935,6 +942,7 @@ private struct OpenAIUsageView: View {
     @ObservedObject var service: ConnectedUsageService
     let style: DetailVisualizationStyle
     let metrics: [UsagePresentationMetric]
+    @State private var isConfirmingReset = false
 
     var body: some View {
         ProviderHeader(provider: .openAI)
@@ -957,30 +965,30 @@ private struct OpenAIUsageView: View {
                 UsageMetricRow(metric: metric)
             }
 
-            let announcements = service.openAIResetCredits?.credits.filter(\.isAvailable) ?? []
-            if !announcements.isEmpty {
-                DisclosureGroup("Announcements (\(announcements.count))") {
-                    VStack(alignment: .leading, spacing: 7) {
-                        ForEach(announcements) { credit in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(credit.title ?? "Available reset")
-                                    .usageFont(.legendEmphasized)
-                                if let description = credit.description {
-                                    Text(description)
-                                        .usageFont(.supporting)
-                                        .foregroundStyle(.secondary)
-                                }
-                                if let expiry = credit.expiresAtDate {
-                                    Text("Expires \(expiry, style: .relative)")
-                                        .usageFont(.supporting)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
+            resetCreditsRow
+
+            if let outcome = service.resetCreditOutcome {
+                Text(outcome.message)
+                    .usageFont(.supporting)
+                    .foregroundStyle(.secondary)
+                    .task(id: outcome.at) {
+                        try? await Task.sleep(for: .seconds(6))
+                        if service.resetCreditOutcome?.at == outcome.at {
+                            service.resetCreditOutcome = nil
                         }
                     }
-                    .padding(.top, 4)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                if let plan = UsageDetailRows.codexPlanLine(planType: service.openAIUsage?.planType) {
+                    providerDetailRow(plan)
                 }
-                .usageFont(.supporting)
+                if let source = UsageDetailRows.codexSourceLine(
+                    source: service.openAICredentialSource,
+                    tokenExpiry: service.openAITokenExpiry
+                ) {
+                    providerDetailRow(source)
+                }
             }
         } else {
             loadingOrError(service.openAIError)
@@ -989,6 +997,53 @@ private struct OpenAIUsageView: View {
         if let error = service.openAIError, service.openAIUsage != nil {
             errorLabel(error)
         }
+    }
+
+    /// "3 banked · next expires in 10d 22h" plus the Use reset button; hidden at zero credits.
+    @ViewBuilder
+    private var resetCreditsRow: some View {
+        let credits = service.availableResetCredits
+        if let line = UsageDetailRows.resetCreditsLine(
+            count: credits.count,
+            nextExpiry: credits.first?.expiresAtDate
+        ) {
+            HStack {
+                Text(line)
+                    .usageFont(.legend)
+                Spacer()
+                Button("Use reset") {
+                    isConfirmingReset = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(service.resetCreditRedeemer.isRedeeming)
+            }
+            .help(creditsTooltip(credits))
+            .confirmationDialog(
+                "Use a reset credit?",
+                isPresented: $isConfirmingReset,
+                titleVisibility: .visible
+            ) {
+                Button("Use credit") {
+                    Task { await service.redeemNextResetCredit() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(
+                    "This redeems one credit on your account and clears the current rate-limit windows. It cannot be undone."
+                )
+            }
+        }
+    }
+
+    /// The per-credit title and description, one credit per line.
+    private func creditsTooltip(_ credits: [OpenAIResetCredit]) -> String {
+        credits.map { credit in
+            let title = credit.title ?? "Available reset"
+            guard let description = credit.description, !description.isEmpty else { return title }
+            return "\(title): \(description)"
+        }
+        .joined(separator: "\n")
     }
 }
 
@@ -1032,6 +1087,25 @@ private struct CursorUsageView: View {
                     }
                     ProgressView(value: (spend.utilization ?? 0) / 100, total: 1)
                         .tint(colorForPct((spend.utilization ?? 0) / 100))
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                let planInfo = service.cursorPlanInfo?.planInfo
+                if let plan = UsageDetailRows.cursorPlanLine(planInfo) {
+                    providerDetailRow(plan)
+                }
+                if let spend = UsageDetailRows.cursorSpendLine(
+                    planUsage: usage.planUsage,
+                    includedAmountCents: planInfo?.includedAmountCents
+                ) {
+                    providerDetailRow(spend)
+                }
+                if let source = UsageDetailRows.cursorSourceLine(
+                    source: service.cursorCredentialSource,
+                    tokenExpiry: service.cursorTokenExpiry
+                ) {
+                    providerDetailRow(source)
                 }
             }
         } else {
@@ -1209,6 +1283,14 @@ private func errorLabel(_ error: String) -> some View {
     Label(error, systemImage: "exclamationmark.triangle")
         .usageFont(.supporting)
         .foregroundStyle(.red)
+}
+
+/// One plan, renewal, or credential-source line under a provider's bars.
+private func providerDetailRow(_ text: String) -> some View {
+    Text(text)
+        .usageFont(.supporting)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
 }
 
 // MARK: - Setup (first launch)
