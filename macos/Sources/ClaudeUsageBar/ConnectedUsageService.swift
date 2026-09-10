@@ -71,6 +71,9 @@ final class ConnectedUsageService: ObservableObject {
     private var cursorFetchTask: Task<Void, Never>?
     private var openAIFetchTask: Task<Void, Never>?
     private var elevenLabsFetchTask: Task<Void, Never>?
+    private var pendingManualCursorRefresh = false
+    private var pendingManualOpenAIRefresh = false
+    private var pendingManualElevenLabsRefresh = false
     private let lowPowerModeEnabled: () -> Bool
     private var lastWakeAt: Date?
 
@@ -85,6 +88,10 @@ final class ConnectedUsageService: ObservableObject {
             isLowPower: lowPowerModeEnabled()
         )
     }
+
+    /// Interval last installed on the polling timer; nil when no timer is scheduled.
+    /// Test seam for low-power reschedule (distinct from the dynamic `effectivePollingInterval`).
+    private(set) var installedPollingInterval: TimeInterval?
 
     var hasAnyConfiguredService: Bool {
         isCursorConfigured || isOpenAIConfigured || isElevenLabsConfigured
@@ -140,6 +147,7 @@ final class ConnectedUsageService: ObservableObject {
         isPollingPaused = true
         timer?.invalidate()
         timer = nil
+        installedPollingInterval = nil
     }
 
     func handleWake() {
@@ -281,6 +289,17 @@ final class ConnectedUsageService: ObservableObject {
     }
 
     func fetchCursorUsage(trigger: PollingBackoff.Trigger = .manual) async {
+        if let cursorFetchTask {
+            if trigger == .manual {
+                pendingManualCursorRefresh = true
+            }
+            await cursorFetchTask.value
+            if trigger == .manual, pendingManualCursorRefresh {
+                await fetchCursorUsage(trigger: .manual)
+            }
+            return
+        }
+
         if !trigger.skipsBackoff,
            PollingBackoff.shouldSkipForBackoff(until: cursorBackoffUntil) {
             return
@@ -290,18 +309,19 @@ final class ConnectedUsageService: ObservableObject {
             return
         }
 
-        if let cursorFetchTask {
-            await cursorFetchTask.value
-            return
-        }
-
         let task = Task { [weak self] in
             guard let self else { return }
-            await self.performFetchCursorUsage()
+            repeat {
+                self.pendingManualCursorRefresh = false
+                await self.performFetchCursorUsage()
+            } while self.pendingManualCursorRefresh
         }
         cursorFetchTask = task
         await task.value
         cursorFetchTask = nil
+        if pendingManualCursorRefresh {
+            await fetchCursorUsage(trigger: .manual)
+        }
     }
 
     func fetchCursorUsage(force: Bool) async {
@@ -382,6 +402,17 @@ final class ConnectedUsageService: ObservableObject {
     }
 
     func fetchOpenAIUsage(trigger: PollingBackoff.Trigger = .manual) async {
+        if let openAIFetchTask {
+            if trigger == .manual {
+                pendingManualOpenAIRefresh = true
+            }
+            await openAIFetchTask.value
+            if trigger == .manual, pendingManualOpenAIRefresh {
+                await fetchOpenAIUsage(trigger: .manual)
+            }
+            return
+        }
+
         if !trigger.skipsBackoff,
            PollingBackoff.shouldSkipForBackoff(until: openAIBackoffUntil) {
             return
@@ -391,18 +422,19 @@ final class ConnectedUsageService: ObservableObject {
             return
         }
 
-        if let openAIFetchTask {
-            await openAIFetchTask.value
-            return
-        }
-
         let task = Task { [weak self] in
             guard let self else { return }
-            await self.performFetchOpenAIUsage()
+            repeat {
+                self.pendingManualOpenAIRefresh = false
+                await self.performFetchOpenAIUsage()
+            } while self.pendingManualOpenAIRefresh
         }
         openAIFetchTask = task
         await task.value
         openAIFetchTask = nil
+        if pendingManualOpenAIRefresh {
+            await fetchOpenAIUsage(trigger: .manual)
+        }
     }
 
     func fetchOpenAIUsage(force: Bool) async {
@@ -422,6 +454,7 @@ final class ConnectedUsageService: ObservableObject {
             token: resolved.token
         )
 
+        var usageSucceededThisInvocation = false
         do {
             let usageData = try await openAIResponseData(
                 endpoint: openAIUsageEndpoint,
@@ -434,6 +467,7 @@ final class ConnectedUsageService: ObservableObject {
             // Spark rule: model-specific `additional_rate_limits` stay on the decoded
             // value as extra rows; primary/secondary windows come only from `rate_limit`.
             openAIUsage = decoded
+            usageSucceededThisInvocation = true
             if requestCredentialIdentity == currentOpenAICredentialIdentity(),
                let discovered = resolved.accountId ?? decoded.accountId {
                 openAIAccountID = discovered
@@ -493,7 +527,9 @@ final class ConnectedUsageService: ObservableObject {
             }
         }
 
-        if openAIUsage != nil, !creditsRateLimited {
+        // Clear only when this invocation's usage succeeded and credits were not 429.
+        // A stale prior `openAIUsage` must not clear backoff after a failed usage retry.
+        if usageSucceededThisInvocation, !creditsRateLimited {
             clearBackoff(provider: .openAI)
         }
 
@@ -597,6 +633,17 @@ final class ConnectedUsageService: ObservableObject {
     }
 
     func fetchElevenLabsUsage(trigger: PollingBackoff.Trigger = .manual) async {
+        if let elevenLabsFetchTask {
+            if trigger == .manual {
+                pendingManualElevenLabsRefresh = true
+            }
+            await elevenLabsFetchTask.value
+            if trigger == .manual, pendingManualElevenLabsRefresh {
+                await fetchElevenLabsUsage(trigger: .manual)
+            }
+            return
+        }
+
         if !trigger.skipsBackoff,
            PollingBackoff.shouldSkipForBackoff(until: elevenLabsBackoffUntil) {
             return
@@ -606,18 +653,19 @@ final class ConnectedUsageService: ObservableObject {
             return
         }
 
-        if let elevenLabsFetchTask {
-            await elevenLabsFetchTask.value
-            return
-        }
-
         let task = Task { [weak self] in
             guard let self else { return }
-            await self.performFetchElevenLabsUsage()
+            repeat {
+                self.pendingManualElevenLabsRefresh = false
+                await self.performFetchElevenLabsUsage()
+            } while self.pendingManualElevenLabsRefresh
         }
         elevenLabsFetchTask = task
         await task.value
         elevenLabsFetchTask = nil
+        if pendingManualElevenLabsRefresh {
+            await fetchElevenLabsUsage(trigger: .manual)
+        }
     }
 
     func fetchElevenLabsUsage(force: Bool) async {
@@ -796,6 +844,7 @@ final class ConnectedUsageService: ObservableObject {
     private func scheduleTimer() {
         timer?.invalidate()
         timer = nil
+        installedPollingInterval = nil
         guard !isPollingPaused else { return }
         let interval = effectivePollingInterval
         let newTimer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
@@ -806,6 +855,7 @@ final class ConnectedUsageService: ObservableObject {
         }
         RunLoop.main.add(newTimer, forMode: .common)
         timer = newTimer
+        installedPollingInterval = interval
     }
 
     /// Pasted or environment tokens only. Device sync stays on the v1 fields until #53.

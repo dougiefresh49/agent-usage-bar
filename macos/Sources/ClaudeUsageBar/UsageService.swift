@@ -36,6 +36,8 @@ class UsageService: ObservableObject {
 
     private var refreshTask: Task<RefreshResult, Never>?
     private var usageFetchTask: Task<Void, Never>?
+    /// Set when a manual refresh arrives during an in-flight fetch; drained as one trailing run.
+    private var pendingManualUsageRefresh = false
     private var profileFetchTask: Task<Bool, Never>?
     private var profileFetchGeneration = 0
     private var lastWakeAt: Date?
@@ -349,8 +351,21 @@ class UsageService: ObservableObject {
     // MARK: - API Fetch
 
     /// - Parameter trigger: `.scheduled` debounces; `.automatic` still honours 429
-    ///   backoff; `.manual` (Refresh) always runs.
+    ///   backoff; `.manual` (Refresh) always runs. A manual that arrives during an
+    ///   in-flight fetch sets a pending flag and runs exactly one trailing request.
     func fetchUsage(trigger: PollingBackoff.Trigger = .manual) async {
+        if let usageFetchTask {
+            if trigger == .manual {
+                pendingManualUsageRefresh = true
+            }
+            await usageFetchTask.value
+            // Race: flag set after the flight drained pending but before task cleared.
+            if trigger == .manual, pendingManualUsageRefresh {
+                await fetchUsage(trigger: .manual)
+            }
+            return
+        }
+
         if !trigger.skipsBackoff,
            PollingBackoff.shouldSkipForBackoff(until: rateLimitBackoffUntil) {
             return
@@ -360,18 +375,19 @@ class UsageService: ObservableObject {
             return
         }
 
-        if let usageFetchTask {
-            await usageFetchTask.value
-            return
-        }
-
         let task = Task { [weak self] in
             guard let self else { return }
-            await self.performFetchUsage()
+            repeat {
+                self.pendingManualUsageRefresh = false
+                await self.performFetchUsage()
+            } while self.pendingManualUsageRefresh
         }
         usageFetchTask = task
         await task.value
         usageFetchTask = nil
+        if pendingManualUsageRefresh {
+            await fetchUsage(trigger: .manual)
+        }
     }
 
     /// Backward-compatible wrapper used by older call sites and tests.

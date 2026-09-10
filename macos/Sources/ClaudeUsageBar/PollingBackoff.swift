@@ -30,8 +30,27 @@ enum PollingBackoff {
         min(max(retryAfter ?? currentInterval, currentInterval * 2), maxInterval)
     }
 
-    nonisolated static func retryAfterSeconds(from response: HTTPURLResponse) -> TimeInterval? {
-        response.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init)
+    /// Parses `Retry-After` as delay-seconds or an HTTP-date (IMF-fixdate).
+    /// - Parameter now: injected for deterministic HTTP-date tests.
+    nonisolated static func retryAfterSeconds(
+        from response: HTTPURLResponse,
+        now: Date = Date()
+    ) -> TimeInterval? {
+        guard let raw = response.value(forHTTPHeaderField: "Retry-After")?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !raw.isEmpty
+        else { return nil }
+
+        if let seconds = TimeInterval(raw) {
+            return max(0, seconds)
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        guard let date = formatter.date(from: raw) else { return nil }
+        return max(0, date.timeIntervalSince(now))
     }
 
     nonisolated static func pollingInterval(
