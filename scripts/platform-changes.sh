@@ -4,14 +4,19 @@ set -euo pipefail
 # Report whether commits since the last platform tag touch platform-relevant paths.
 # Usage: bash scripts/platform-changes.sh <macos|android>
 # Outputs (GITHUB_OUTPUT): skip=true|false, last_tag=<tag or empty>
+#
+# Range mode: bash scripts/platform-changes.sh <macos|android> --touches <from> <to>
+# Exits 0 when any commit in <from>..<to> touches a platform-relevant path,
+# 1 when none does. Writes nothing to GITHUB_OUTPUT. Bump uses it to decide
+# whether a build that is no longer the tip of main still deserves its tag.
 
 PLATFORM="${1:-}"
 if [[ "$PLATFORM" != "macos" && "$PLATFORM" != "android" ]]; then
-  echo "Usage: $0 <macos|android>" >&2
+  echo "Usage: $0 <macos|android> [--touches <from> <to>]" >&2
   exit 1
 fi
 
-if [ -z "${GITHUB_OUTPUT:-}" ]; then
+if [ -z "${GITHUB_OUTPUT:-}" ] && [[ "${2:-}" != "--touches" ]]; then
   _PLATFORM_CHANGES_OUT="$(mktemp)"
   export GITHUB_OUTPUT="$_PLATFORM_CHANGES_OUT"
   trap 'echo "--- GITHUB_OUTPUT (local) ---"; cat "$_PLATFORM_CHANGES_OUT" 2>/dev/null || true; rm -f "$_PLATFORM_CHANGES_OUT"' EXIT
@@ -35,6 +40,21 @@ path_regex_for_platform() {
       ;;
   esac
 }
+
+if [[ "${2:-}" == "--touches" ]]; then
+  FROM="${3:-}"; TO="${4:-}"
+  if [ -z "$FROM" ] || [ -z "$TO" ]; then
+    echo "Usage: $0 <macos|android> --touches <from> <to>" >&2
+    exit 1
+  fi
+  CHANGED="$(git diff --name-only "${FROM}..${TO}" || true)"
+  if echo "$CHANGED" | grep -qE "$(path_regex_for_platform "$PLATFORM")"; then
+    echo "${FROM}..${TO} touches ${PLATFORM}-relevant paths."
+    exit 0
+  fi
+  echo "${FROM}..${TO} touches no ${PLATFORM}-relevant paths."
+  exit 1
+fi
 
 if [[ "$PLATFORM" == "macos" ]]; then
   LAST_TAG="$(latest_macos_tag)"
