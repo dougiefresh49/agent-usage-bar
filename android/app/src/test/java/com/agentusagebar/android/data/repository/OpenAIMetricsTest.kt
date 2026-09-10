@@ -1,5 +1,6 @@
 package com.agentusagebar.android.data.repository
 
+import com.agentusagebar.android.data.model.AppUsageSnapshot
 import com.agentusagebar.android.data.model.OpenAIRateLimit
 import com.agentusagebar.android.data.model.OpenAIResetCredit
 import com.agentusagebar.android.data.model.OpenAIResetCreditSummary
@@ -10,6 +11,7 @@ import com.agentusagebar.android.data.model.UsageMetricPreferences
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.ui.components.compactWindowLabel
 import com.agentusagebar.android.ui.components.orbitLegendMetrics
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -187,5 +189,38 @@ class CompactWindowLabelTest {
         assertEquals("7d", compactWindowLabel(7L * 24L * 60L * 60L * 1000L))
         assertNull(compactWindowLabel(null))
         assertNull(compactWindowLabel(0L))
+    }
+}
+
+class OpenAIPlanTypeMappingTest {
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+    }
+
+    @Test
+    fun planTypePlusFromUsageFixtureReachesSnapshot() {
+        // Mirrors UsageApiClient decoding, then the UsageRepository.refreshOpenAI
+        // assignment: openAIPlanType = usage.planType?.takeIf { it.isNotBlank() }
+        val usage = json.decodeFromString<OpenAIUsageResponse>(
+            """
+            {
+              "plan_type": "plus",
+              "rate_limit": {
+                "primary_window": {
+                  "used_percent": 43.0,
+                  "limit_window_seconds": 604800.0
+                }
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val snapshot = AppUsageSnapshot(
+            openAIPlanType = usage.planType?.takeIf { it.isNotBlank() },
+        )
+
+        assertEquals("plus", usage.planType)
+        assertEquals("plus", snapshot.openAIPlanType)
     }
 }

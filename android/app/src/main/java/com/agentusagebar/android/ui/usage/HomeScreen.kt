@@ -49,6 +49,10 @@ import com.agentusagebar.android.ui.components.ProviderDetailSection
 import com.agentusagebar.android.ui.components.ProviderOverviewGrid
 import com.agentusagebar.android.ui.components.formatUpdated
 import com.agentusagebar.android.ui.settings.SettingsScreen
+import com.agentusagebar.android.widget.cursorTotalPercent
+import com.agentusagebar.android.widget.formatClaudePlanRow
+import com.agentusagebar.android.widget.formatCursorPlanRow
+import com.agentusagebar.android.widget.formatCursorSpendRow
 
 @Composable
 fun UsageApp(
@@ -260,6 +264,59 @@ private fun HomeScreen(
                 else -> {
                     val usesPreferredStats = selected == appSettings.widgetProvider
                     val defaults = UsageMetricPreferences.defaults(selected)
+
+                    when (selected) {
+                        UsageProvider.CURSOR -> {
+                            val planInfo = snapshot.cursorPlanInfo?.planInfo
+                            val renewsAt = planInfo?.billingCycleEnd?.toDoubleOrNull()?.toLong()
+                            formatCursorPlanRow(
+                                planName = planInfo?.planName,
+                                price = planInfo?.price,
+                                renewsAtEpochMs = renewsAt,
+                            )?.let { line ->
+                                Text(
+                                    text = line,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            formatCursorSpendRow(
+                                percentUsed = cursorTotalPercent(selectedState),
+                                includedAmountCents = planInfo?.includedAmountCents,
+                            )?.let { line ->
+                                Text(
+                                    text = line,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        UsageProvider.CLAUDE -> {
+                            formatClaudePlanRow(
+                                planLabel = snapshot.claudeProfile?.planLabel,
+                                subscriptionStatus = snapshot.claudeProfile
+                                    ?.organization
+                                    ?.subscriptionStatus,
+                            )?.let { line ->
+                                Text(
+                                    text = line,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        UsageProvider.OPENAI -> {
+                            snapshot.openAIPlanType?.takeIf { it.isNotBlank() }?.let { planType ->
+                                Text(
+                                    text = planType,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        else -> Unit
+                    }
+
                     ProviderDetailSection(
                         metrics = selectedState?.metrics.orEmpty(),
                         style = appSettings.detailStyle,
