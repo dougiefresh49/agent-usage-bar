@@ -15,7 +15,7 @@ final class DeviceSyncManagerTests: XCTestCase {
         }
 
         let store = DeviceSyncStore(directoryURL: directory)
-        let trusted = PairedDevice(
+        let trustedA = PairedDevice(
             id: "phone-1",
             name: "Pixel",
             publicKey: P256.KeyAgreement.PrivateKey()
@@ -25,8 +25,18 @@ final class DeviceSyncManagerTests: XCTestCase {
             revokedAt: nil,
             wipeAcknowledgedAt: nil
         )
-        let revoked = PairedDevice(
+        let trustedB = PairedDevice(
             id: "phone-2",
+            name: "Pixel 2",
+            publicKey: P256.KeyAgreement.PrivateKey()
+                .publicKey.x963Representation.base64URLEncodedString(),
+            pairedAt: Date(timeIntervalSince1970: 1_750_000_050),
+            lastSeenAt: nil,
+            revokedAt: nil,
+            wipeAcknowledgedAt: nil
+        )
+        let revoked = PairedDevice(
+            id: "phone-3",
             name: "Old",
             publicKey: P256.KeyAgreement.PrivateKey()
                 .publicKey.x963Representation.base64URLEncodedString(),
@@ -35,7 +45,7 @@ final class DeviceSyncManagerTests: XCTestCase {
             revokedAt: Date(timeIntervalSince1970: 1_750_000_200),
             wipeAcknowledgedAt: nil
         )
-        try? store.saveDevices([trusted, revoked])
+        try? store.saveDevices([trustedA, trustedB, revoked])
 
         let manager = DeviceSyncManager(
             store: store,
@@ -55,8 +65,12 @@ final class DeviceSyncManagerTests: XCTestCase {
         manager.noteCredentialFingerprint("fingerprint-a")
 
         let afterFirst = manager.devices
-        XCTAssertNotNil(afterFirst.first { $0.id == "phone-1" }?.pendingSync)
-        XCTAssertNil(afterFirst.first { $0.id == "phone-2" }?.pendingSync)
+        let syncA = afterFirst.first { $0.id == "phone-1" }?.pendingSync
+        let syncB = afterFirst.first { $0.id == "phone-2" }?.pendingSync
+        XCTAssertNotNil(syncA)
+        XCTAssertNotNil(syncB)
+        XCTAssertNotEqual(syncA?.id, syncB?.id)
+        XCTAssertNil(afterFirst.first { $0.id == "phone-3" }?.pendingSync)
         XCTAssertEqual(
             defaults.string(forKey: DeviceSyncManager.credentialFingerprintDefaultsKey),
             "fingerprint-a"

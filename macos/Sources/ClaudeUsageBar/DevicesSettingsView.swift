@@ -161,10 +161,10 @@ struct DevicesSettingsView: View {
             CursorCLIKeychain.load().flatMap { JWTClaims.expiry(of: $0.accessToken) }
         ].compactMap { $0 }
         guard let soonest = expiries.min() else { return nil }
-        let days = Calendar.current.dateComponents([.day], from: Date(), to: soonest).day ?? 0
-        if days < 0 {
+        if soonest <= Date() {
             return "phone tokens expired"
         }
+        let days = Calendar.current.dateComponents([.day], from: Date(), to: soonest).day ?? 0
         return "phone tokens expire in \(days)d"
     }
 
@@ -289,12 +289,12 @@ private struct AddDeviceSheet: View {
                 connectionToggle(
                     "OpenAI / Codex session",
                     isOn: $syncOpenAI,
-                    available: connectedService.isOpenAIConfigured
+                    available: canSyncOpenAI
                 )
                 connectionToggle(
                     "Cursor session",
                     isOn: $syncCursor,
-                    available: connectedService.isCursorConfigured
+                    available: canSyncCursor
                 )
                 connectionToggle(
                     "ElevenLabs API key",
@@ -339,7 +339,7 @@ private struct AddDeviceSheet: View {
 
     private func qrStep(_ transfer: DeviceSyncTransfer) -> some View {
         VStack(spacing: 14) {
-            Text("On your phone, open Settings → Devices → Scan QR Code. Both devices must be on the same local network.")
+            Text("On your phone, open Settings → Devices → Scan QR Code. Both devices must be on the same LAN or a Tailscale network.")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
@@ -453,6 +453,14 @@ private struct AddDeviceSheet: View {
         .disabled(!available)
     }
 
+    private var canSyncOpenAI: Bool {
+        connectedService.isOpenAIConfigured || CodexAuthFile.load() != nil
+    }
+
+    private var canSyncCursor: Bool {
+        connectedService.isCursorConfigured || CursorCLIKeychain.load() != nil
+    }
+
     private var hasSelection: Bool {
         syncPolling || syncAppearance || syncNotifications
             || syncOpenAI || syncCursor || syncElevenLabs
@@ -510,9 +518,9 @@ private struct AddDeviceSheet: View {
                         openAISessionToken: syncOpenAI ? credentials.openAISessionToken : nil,
                         cursorSessionToken: syncCursor ? credentials.cursorSessionToken : nil,
                         elevenLabsAPIKey: syncElevenLabs ? credentials.elevenLabsAPIKey : nil,
-                        codexAccessToken: codex?.accessToken,
-                        codexAccountId: codex?.accountId,
-                        cursorAccessToken: cursorCLI?.accessToken
+                        codexAccessToken: syncOpenAI ? codex?.accessToken : nil,
+                        codexAccountId: syncOpenAI ? codex?.accountId : nil,
+                        cursorAccessToken: syncCursor ? cursorCLI?.accessToken : nil
                     )
                     : nil
             )
