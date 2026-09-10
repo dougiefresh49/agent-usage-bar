@@ -82,7 +82,6 @@ final class ConnectedUsageService: ObservableObject {
     private var lastWakeAt: Date?
 
     /// Incremented once at the end of each full `fetchAll`, success or failure.
-    /// `AgentUsageBarApp` watches this to re-check CLI token rotation after skipped polls too.
     @Published private(set) var pollCompletionCount: UInt = 0
 
     /// Timer cadence currently scheduled (includes low-power doubling).
@@ -284,14 +283,6 @@ final class ConnectedUsageService: ObservableObject {
         updateConfiguredState()
     }
 
-    func deviceSyncCredentials() -> ConnectedServiceCredentials {
-        ConnectedServiceCredentials(
-            openAISessionToken: openAIToken,
-            cursorSessionToken: cursorToken,
-            elevenLabsAPIKey: elevenLabsAPIKey
-        )
-    }
-
     func fetchCursorUsage(trigger: PollingBackoff.Trigger = .manual) async {
         if let cursorFetchTask {
             if trigger == .manual {
@@ -357,7 +348,8 @@ final class ConnectedUsageService: ObservableObject {
                 }
                 snapshotStore?.update(
                     provider: "cursor",
-                    metrics: UsageSnapshotStore.cursorMetrics(for: decoded)
+                    metrics: UsageSnapshotStore.cursorMetrics(for: decoded),
+                    plan: cursorSnapshotPlan(from: decoded)
                 )
                 notificationService?.checkCursor(
                     apiPercent: decoded.planUsage?.apiPercentUsed,
@@ -385,7 +377,8 @@ final class ConnectedUsageService: ObservableObject {
                 clearBackoff(provider: .cursor)
                 snapshotStore?.update(
                     provider: "cursor",
-                    metrics: UsageSnapshotStore.cursorMetrics(for: decoded)
+                    metrics: UsageSnapshotStore.cursorMetrics(for: decoded),
+                    plan: cursorSnapshotPlan(from: decoded)
                 )
                 notificationService?.checkCursor(
                     apiPercent: decoded.planUsage?.apiPercentUsed,
@@ -398,8 +391,10 @@ final class ConnectedUsageService: ObservableObject {
                 applyBackoff(provider: .cursor, retryAfter: retryAfter)
             }
             cursorError = error.localizedDescription
+            writeCursorSnapshotError()
         } catch {
             cursorError = error.localizedDescription
+            writeCursorSnapshotError()
         }
     }
 
@@ -474,21 +469,20 @@ final class ConnectedUsageService: ObservableObject {
             }
             openAIError = nil
             openAILastUpdated = Date()
-            snapshotStore?.update(
-                provider: "openai",
-                metrics: UsageSnapshotStore.openAIMetrics(for: decoded)
-            )
+            writeOpenAISnapshot()
         } catch let error as ConnectedUsageError {
             if case .rateLimited(_, let retryAfter) = error {
                 applyBackoff(provider: .openAI, retryAfter: retryAfter)
             }
             openAIError = error.localizedDescription
+            writeOpenAISnapshotError()
             // Stop the provider poll after the first 429; do not hit credits while backing off.
             if case .rateLimited = error {
                 return
             }
         } catch {
             openAIError = error.localizedDescription
+            writeOpenAISnapshotError()
         }
 
         var creditsRateLimited = false
@@ -504,14 +498,8 @@ final class ConnectedUsageService: ObservableObject {
                 OpenAIResetCreditsResponse.self,
                 from: creditData
             )
-            if let openAIUsage {
-                snapshotStore?.update(
-                    provider: "openai",
-                    metrics: UsageSnapshotStore.openAIMetrics(
-                        for: openAIUsage,
-                        resetCredits: openAIResetCredits
-                    )
-                )
+            if openAIUsage != nil {
+                writeOpenAISnapshot()
             }
         } catch let error as ConnectedUsageError {
             if case .rateLimited(_, let retryAfter) = error {
@@ -576,21 +564,38 @@ final class ConnectedUsageService: ObservableObject {
             resetCreditOutcome = (OpenAIResetCreditOutcome.noCredit.userMessage, Date())
             return
         }
-        guard let resolved = resolveOpenAICredential() else {
+        guard resolveOpenAICredential() != nil else {
             resetCreditOutcome = ("Codex is not connected.", Date())
             return
+        }
+
+        let result = await redeemResetCredit(id: credit.id)
+        if let message = result.message, result.error == nil {
+            resetCreditOutcome = (message, Date())
+        } else if let error = result.error {
+            resetCreditOutcome = (Self.popoverMessage(forDeviceRedeemError: error), Date())
+        }
+    }
+
+    /// Redeems a specific credit for the phone endpoint (and the popover wrapper).
+    /// One redemption at a time; a second call returns the in-flight error.
+    func redeemResetCredit(id: String) async -> DeviceRedeemResult {
+        guard let resolved = resolveOpenAICredential() else {
+            return .failure("The Mac has no OpenAI login.")
+        }
+        if resetCreditRedeemer.isRedeeming || isRedeemingResetCredit {
+            return .failure("A redeem is already in progress on the Mac.")
         }
 
         isRedeemingResetCredit = true
         defer { isRedeemingResetCredit = false }
 
         let updatedBefore = openAILastUpdated
-        let message: String
         do {
             let outcome = try await resetCreditRedeemer.redeem(
                 token: resolved.token,
                 accountID: resolved.accountId ?? openAIAccountID,
-                creditID: credit.id
+                creditID: id
             )
             switch outcome {
             case .reset, .alreadyRedeemed:
@@ -601,16 +606,16 @@ final class ConnectedUsageService: ObservableObject {
                 } else {
                     advanced = false
                 }
-                message = advanced && openAIError == nil
-                    ? outcome.userMessage
-                    : Self.resetUnconfirmedMessage
+                if advanced && openAIError == nil {
+                    return .success(outcome)
+                }
+                return .failure(Self.resetUnconfirmedMessage)
             case .nothingToReset, .noCredit:
-                message = outcome.userMessage
+                return .success(outcome)
             }
         } catch {
-            message = Self.resetCreditErrorMessage(error)
+            return .failure(Self.deviceRedeemErrorMessage(error))
         }
-        resetCreditOutcome = (message, Date())
     }
 
     static let resetUnconfirmedMessage =
@@ -618,15 +623,93 @@ final class ConnectedUsageService: ObservableObject {
 
     private static let codexRateLimitsResetType = "codex_rate_limits"
 
-    /// `OpenAIResetCreditError` is not `LocalizedError`, so spell its cases out; anything else keeps its own description.
-    private static func resetCreditErrorMessage(_ error: Error) -> String {
+    /// Map endpoint/contract strings back to the popover copy for the Mac UI.
+    private static func popoverMessage(forDeviceRedeemError error: String) -> String {
+        if error == "The Mac has no OpenAI login." {
+            return "Codex is not connected."
+        }
+        if error == "A redeem is already in progress on the Mac." {
+            return "A redemption is already in progress."
+        }
+        if error.hasPrefix("OpenAI returned "), error.hasSuffix(".") {
+            let status = error.dropFirst("OpenAI returned ".count).dropLast()
+            if status != "an invalid response" {
+                return "Codex HTTP \(status)"
+            }
+            return "Codex returned an invalid response"
+        }
+        return error
+    }
+
+    private func writeOpenAISnapshot() {
+        guard let openAIUsage else { return }
+        snapshotStore?.update(
+            provider: "openai",
+            metrics: UsageSnapshotStore.openAIMetrics(
+                for: openAIUsage,
+                resetCredits: openAIResetCredits
+            ),
+            plan: openAIUsage.planType.map { UsageSnapshotPlan(label: $0) },
+            credits: openAISnapshotCredits()
+        )
+    }
+
+    private func openAISnapshotCredits() -> UsageSnapshotCredits? {
+        let items = availableResetCredits.map {
+            UsageSnapshotCreditItem(id: $0.id, expiresAt: $0.expiresAtDate)
+        }
+        if items.isEmpty, openAIResetCredits == nil {
+            return nil
+        }
+        return UsageSnapshotCredits(available: items.count, items: items)
+    }
+
+    private func writeOpenAISnapshotError() {
+        guard let openAIError else { return }
+        snapshotStore?.update(provider: "openai", error: openAIError)
+    }
+
+    private func writeCursorSnapshotError() {
+        guard let cursorError else { return }
+        snapshotStore?.update(provider: "cursor", error: cursorError)
+    }
+
+    private func writeElevenLabsSnapshotError() {
+        guard let elevenLabsError else { return }
+        snapshotStore?.update(provider: "elevenlabs", error: elevenLabsError)
+    }
+
+    private func cursorSnapshotPlan(from usage: CursorUsageResponse) -> UsageSnapshotPlan? {
+        let info = cursorPlanInfo?.planInfo
+        let renewsAt = Self.millisecondDate(from: info?.billingCycleEnd) ?? usage.billingCycleEndDate
+        let plan = UsageSnapshotPlan(
+            label: info?.planName,
+            priceText: info?.price,
+            renewsAt: renewsAt,
+            includedAmountCents: info?.includedAmountCents
+        )
+        if plan.label == nil,
+           plan.priceText == nil,
+           plan.renewsAt == nil,
+           plan.includedAmountCents == nil {
+            return nil
+        }
+        return plan
+    }
+
+    private static func millisecondDate(from value: String?) -> Date? {
+        guard let value, let milliseconds = Double(value) else { return nil }
+        return Date(timeIntervalSince1970: milliseconds / 1_000)
+    }
+
+    private static func deviceRedeemErrorMessage(_ error: Error) -> String {
         switch error as? OpenAIResetCreditError {
         case .inFlight?:
-            return "A redemption is already in progress."
+            return "A redeem is already in progress on the Mac."
         case .http(let status)?:
-            return "Codex HTTP \(status)"
+            return "OpenAI returned \(status)."
         case .invalidResponse?:
-            return "Codex returned an invalid response"
+            return "OpenAI returned an invalid response."
         case nil:
             return error.localizedDescription
         }
@@ -692,15 +775,18 @@ final class ConnectedUsageService: ObservableObject {
             clearBackoff(provider: .elevenLabs)
             snapshotStore?.update(
                 provider: "elevenlabs",
-                metrics: UsageSnapshotStore.elevenLabsMetrics(for: decoded)
+                metrics: UsageSnapshotStore.elevenLabsMetrics(for: decoded),
+                plan: decoded.tier.map { UsageSnapshotPlan(label: $0) }
             )
         } catch let error as ConnectedUsageError {
             if case .rateLimited(_, let retryAfter) = error {
                 applyBackoff(provider: .elevenLabs, retryAfter: retryAfter)
             }
             elevenLabsError = error.localizedDescription
+            writeElevenLabsSnapshotError()
         } catch {
             elevenLabsError = error.localizedDescription
+            writeElevenLabsSnapshotError()
         }
     }
 
@@ -856,18 +942,7 @@ final class ConnectedUsageService: ObservableObject {
         installedPollingInterval = interval
     }
 
-    /// Pasted or environment tokens only. Device sync stays on the v1 fields until #53.
-    private var cursorToken: String? {
-        credentialsStore.load().cursorSessionToken
-            ?? environment["CURSOR_SESSION_TOKEN"].flatMap(ConnectedTokenNormalizer.cursor)
-    }
-
-    /// Pasted or environment tokens only. Device sync stays on the v1 fields until #53.
-    private var openAIToken: String? {
-        credentialsStore.load().openAISessionToken
-            ?? environment["OPENAI_SESSION_TOKEN"].flatMap(ConnectedTokenNormalizer.openAI)
-    }
-
+    /// Pasted or environment tokens only.
     private var elevenLabsAPIKey: String? {
         credentialsStore.load().elevenLabsAPIKey
             ?? environment["ELEVENLABS_API_KEY"].flatMap(ConnectedTokenNormalizer.elevenLabs)

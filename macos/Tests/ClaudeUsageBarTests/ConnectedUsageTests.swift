@@ -649,54 +649,99 @@ final class ConnectedUsageServiceTests: XCTestCase {
         XCTAssertNil(service.openAIAccountID)
     }
 
-    func testDeviceSyncCredentialsExcludeCLITokens() throws {
+    func testOpenAISnapshotWriteIncludesCreditsAndPlan() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(openAISessionToken: "openai-token"))
+        let snapshotDirectory = directory.appendingPathComponent("snapshot")
+        let snapshotStore = UsageSnapshotStore(directory: snapshotDirectory, now: {
+            Date(timeIntervalSince1970: 1_757_521_026)
+        })
+        let session = makeSession()
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            if request.url?.path == "/openai" {
+                return (
+                    response,
+                    Data(#"{"plan_type":"plus","account_id":"acct-1","rate_limit":{"primary_window":{"used_percent":43}}}"#.utf8)
+                )
+            }
+            if request.url?.path == "/credits" {
+                return (response, Data(Self.resetCreditsFixture.utf8))
+            }
+            throw URLError(.badURL)
+        }
+        let service = makeService(session: session, credentialsStore: store)
+        service.snapshotStore = snapshotStore
 
-        let cliOnly = makeService(
-            credentialsStore: store,
-            environment: [:],
-            codexAuthLoader: {
-                CodexCLICredentials(accessToken: "cli-openai", accountId: "acct", lastRefresh: nil)
-            },
-            cursorKeychainRunner: { _, _ in "cli-cursor" }
-        )
-        let cliSync = cliOnly.deviceSyncCredentials()
-        XCTAssertNil(cliSync.openAISessionToken)
-        XCTAssertNil(cliSync.cursorSessionToken)
-        XCTAssertTrue(cliOnly.isOpenAIConfigured)
-        XCTAssertTrue(cliOnly.isCursorConfigured)
+        await service.fetchOpenAIUsage()
 
-        try store.save(
-            ConnectedServiceCredentials(
-                openAISessionToken: "pasted-openai",
-                cursorSessionToken: "pasted-cursor"
-            )
-        )
-        let pasted = makeService(
-            credentialsStore: store,
-            environment: [:],
-            codexAuthLoader: {
-                CodexCLICredentials(accessToken: "cli-openai", accountId: "acct", lastRefresh: nil)
-            },
-            cursorKeychainRunner: { _, _ in "cli-cursor" }
-        )
-        let pastedSync = pasted.deviceSyncCredentials()
-        XCTAssertEqual(pastedSync.openAISessionToken, "pasted-openai")
-        XCTAssertEqual(pastedSync.cursorSessionToken, "pasted-cursor")
+        let snapshot = snapshotStore.currentSnapshot()
+        let provider = try XCTUnwrap(snapshot.providers["openai"])
+        XCTAssertEqual(provider.plan?.label, "plus")
+        XCTAssertEqual(provider.credits?.available, 3)
+        XCTAssertEqual(provider.credits?.items.map(\.id), ["soon", "later", "undated"])
+        XCTAssertNil(provider.error)
+        XCTAssertEqual(provider.metrics.first(where: { $0.id == "primary" })?.percentUsed, 43)
+    }
 
-        try store.save(ConnectedServiceCredentials())
-        let envOnly = makeService(
-            credentialsStore: store,
-            environment: [
-                "OPENAI_SESSION_TOKEN": "env-openai",
-                "CURSOR_SESSION_TOKEN": "env-cursor"
-            ]
-        )
-        let envSync = envOnly.deviceSyncCredentials()
-        XCTAssertEqual(envSync.openAISessionToken, "env-openai")
-        XCTAssertEqual(envSync.cursorSessionToken, "env-cursor")
+    func testFailedOpenAIFetchWritesErrorAndKeepsMetrics() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(openAISessionToken: "openai-token"))
+        let snapshotDirectory = directory.appendingPathComponent("snapshot")
+        var now = Date(timeIntervalSince1970: 1_000)
+        let snapshotStore = UsageSnapshotStore(directory: snapshotDirectory, now: { now })
+        var usageCalls = 0
+        ConnectedMockURLProtocol.handler = { request in
+            func response(_ status: Int) -> HTTPURLResponse {
+                HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+            }
+            switch request.url?.path {
+            case "/openai":
+                usageCalls += 1
+                if usageCalls == 1 {
+                    return (
+                        response(200),
+                        Data(#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":70}}}"#.utf8)
+                    )
+                }
+                return (response(401), Data(#"{"error":"unauthorized"}"#.utf8))
+            case "/credits":
+                if usageCalls == 1 {
+                    return (response(200), Data(Self.resetCreditsFixture.utf8))
+                }
+                return (response(401), Data(#"{"error":"unauthorized"}"#.utf8))
+            default:
+                throw URLError(.badURL)
+            }
+        }
+        let service = makeService(credentialsStore: store)
+        service.snapshotStore = snapshotStore
+
+        await service.fetchOpenAIUsage()
+        let first = try XCTUnwrap(snapshotStore.currentSnapshot().providers["openai"])
+        XCTAssertEqual(first.metrics.first(where: { $0.id == "primary" })?.percentUsed, 70)
+        XCTAssertEqual(first.plan?.label, "plus")
+        XCTAssertNil(first.error)
+        let firstUpdatedAt = first.updatedAt
+
+        now = Date(timeIntervalSince1970: 2_000)
+        await service.fetchOpenAIUsage()
+
+        let second = try XCTUnwrap(snapshotStore.currentSnapshot().providers["openai"])
+        XCTAssertEqual(second.metrics.first(where: { $0.id == "primary" })?.percentUsed, 70)
+        XCTAssertEqual(second.plan?.label, "plus")
+        XCTAssertEqual(second.updatedAt, firstUpdatedAt)
+        XCTAssertEqual(second.error, service.openAIError)
+        XCTAssertNotNil(second.error)
     }
 
     func testCursorCredentialPrecedencePrefersCLIOverPastedAndEnvironment() async throws {

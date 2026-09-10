@@ -1582,6 +1582,134 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(gate.profileRequestCount, 1)
     }
 
+    func testClaudeSnapshotWriteIncludesPlan() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let profileURL = URL(string: "https://example.com/api/oauth/profile")!
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 15, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 25, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: profileURL,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+        let snapshotDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let snapshotStore = UsageSnapshotStore(directory: snapshotDirectory)
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: profileURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
+        )
+        service.snapshotStore = snapshotStore
+
+        await service.fetchUsage()
+
+        let provider = try XCTUnwrap(snapshotStore.currentSnapshot().providers["claude"])
+        XCTAssertEqual(provider.plan?.label, "Max 20x")
+        XCTAssertEqual(provider.plan?.status, "active")
+        XCTAssertNil(provider.error)
+        XCTAssertEqual(provider.metrics.first?.percentUsed, 15)
+    }
+
+    func testClaudeFailedFetchWritesErrorAndKeepsMetrics() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let profileURL = URL(string: "https://example.com/api/oauth/profile")!
+        var usageCalls = 0
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                usageCalls += 1
+                if usageCalls == 1 {
+                    return try Self.httpResponse(
+                        url: usageURL,
+                        statusCode: 200,
+                        body: """
+                        {
+                          "five_hour": { "utilization": 15, "resets_at": "2026-03-08T18:00:00Z" },
+                          "seven_day": { "utilization": 25, "resets_at": "2026-03-15T18:00:00Z" }
+                        }
+                        """
+                    )
+                }
+                return try Self.httpResponse(url: usageURL, statusCode: 500)
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: profileURL,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+        let snapshotDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let snapshotStore = UsageSnapshotStore(directory: snapshotDirectory)
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: profileURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
+        )
+        service.snapshotStore = snapshotStore
+
+        await service.fetchUsage()
+        let first = try XCTUnwrap(snapshotStore.currentSnapshot().providers["claude"])
+        XCTAssertEqual(first.metrics.first?.percentUsed, 15)
+        XCTAssertNil(first.error)
+        let firstUpdatedAt = first.updatedAt
+
+        await service.fetchUsage()
+        let second = try XCTUnwrap(snapshotStore.currentSnapshot().providers["claude"])
+        XCTAssertEqual(second.metrics.first?.percentUsed, 15)
+        XCTAssertEqual(second.updatedAt, firstUpdatedAt)
+        XCTAssertEqual(second.error, "HTTP 500")
+        XCTAssertEqual(service.lastError, "HTTP 500")
+    }
+
 
     private static let profileFixtureBody = """
     {

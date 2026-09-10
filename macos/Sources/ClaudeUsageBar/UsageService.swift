@@ -435,11 +435,17 @@ class UsageService: ObservableObject {
             if http.statusCode == 429 {
                 applyRateLimitBackoff(retryAfter: PollingBackoff.retryAfterSeconds(from: http))
                 lastError = "Rate limited — backing off to \(Int(currentInterval))s"
+                if let lastError {
+                    snapshotStore?.update(provider: "claude", error: lastError)
+                }
                 scheduleTimer()
                 return
             }
             guard http.statusCode == 200 else {
                 lastError = "HTTP \(http.statusCode)"
+                if let lastError {
+                    snapshotStore?.update(provider: "claude", error: lastError)
+                }
                 return
             }
             let decoded = try JSONDecoder().decode(UsageResponse.self, from: data)
@@ -453,12 +459,13 @@ class UsageService: ObservableObject {
                 sevenDayPercent: (usage?.sevenDay?.utilization ?? 0),
                 fablePercent: usage?.fableUtilization
             )
-            snapshotStore?.update(
-                provider: "claude",
-                metrics: UsageSnapshotStore.claudeMetrics(for: reconciled)
-            )
             // Reuse the bearer token that just succeeded for usage. No separate refresh.
             guard let accessToken = resolveClaudeCredential()?.accessToken else {
+                snapshotStore?.update(
+                    provider: "claude",
+                    metrics: UsageSnapshotStore.claudeMetrics(for: reconciled),
+                    plan: claudeSnapshotPlan()
+                )
                 if isRateLimitedBackoff || currentInterval != baseInterval {
                     clearRateLimitBackoff()
                     scheduleTimer()
@@ -466,6 +473,11 @@ class UsageService: ObservableObject {
                 return
             }
             let profileRateLimited = await fetchOAuthProfileIfNeeded(accessToken: accessToken)
+            snapshotStore?.update(
+                provider: "claude",
+                metrics: UsageSnapshotStore.claudeMetrics(for: reconciled),
+                plan: claudeSnapshotPlan()
+            )
             // Keep secondary (profile) 429 backoff; only clear after a clean full poll.
             if !profileRateLimited, isRateLimitedBackoff || currentInterval != baseInterval {
                 clearRateLimitBackoff()
@@ -473,7 +485,22 @@ class UsageService: ObservableObject {
             }
         } catch {
             lastError = error.localizedDescription
+            if let lastError {
+                snapshotStore?.update(provider: "claude", error: lastError)
+            }
         }
+    }
+
+    private func claudeSnapshotPlan() -> UsageSnapshotPlan? {
+        let label: String?
+        if let planLabel = profile?.planLabel, !planLabel.isEmpty {
+            label = planLabel
+        } else {
+            label = nil
+        }
+        let status = profile?.organization?.subscriptionStatus
+        if label == nil, status == nil { return nil }
+        return UsageSnapshotPlan(label: label, status: status)
     }
 
     private func applyRateLimitBackoff(retryAfter: TimeInterval?) {

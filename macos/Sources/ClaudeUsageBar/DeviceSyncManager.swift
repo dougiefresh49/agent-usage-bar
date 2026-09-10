@@ -100,8 +100,6 @@ enum DeviceSyncHostSelection {
 
 @MainActor
 final class DeviceSyncManager: ObservableObject {
-    static let credentialFingerprintDefaultsKey = "deviceSyncCLICredentialFingerprint"
-
     @Published private(set) var devices: [PairedDevice] = []
     @Published private(set) var pendingPair: PendingDevicePair?
     @Published private(set) var completedSessionID: String?
@@ -115,53 +113,45 @@ final class DeviceSyncManager: ObservableObject {
         var approved = false
     }
 
+    private struct AuthenticatedDevice {
+        let index: Int
+        let secret: SharedSecret
+    }
+
+    private enum DeviceAuth {
+        case accepted(AuthenticatedDevice)
+        case rejected(LocalHTTPResponse)
+    }
+
     private let store: DeviceSyncStore
-    private let defaults: UserDefaults
-    private let makeRotationPayload: () -> DeviceSyncPayload
     private let listNetworkInterfaces: () -> [DeviceSyncNetworkInterface]
-    private let desktopID: String
+    let desktopID: String
     private let privateKey: P256.KeyAgreement.PrivateKey
     private var sessions: [String: PairingSession] = [:]
     private var server: LocalDeviceSyncServer?
+    var snapshotProvider: () -> UsageSnapshot
+    var redeemer: (String) async -> DeviceRedeemResult
 
     init(
         store: DeviceSyncStore = DeviceSyncStore(),
-        defaults: UserDefaults = .standard,
-        makeRotationPayload: @escaping () -> DeviceSyncPayload = {
-            DeviceSyncRotationPayload.make()
-        },
         listNetworkInterfaces: @escaping () -> [DeviceSyncNetworkInterface] = {
             DeviceSyncNetworkEnumerator.ipv4Interfaces()
+        },
+        snapshotProvider: @escaping () -> UsageSnapshot = {
+            UsageSnapshot(generatedAt: Date(), providers: [:])
+        },
+        redeemer: @escaping (String) async -> DeviceRedeemResult = { _ in
+            .failure("The Mac has no OpenAI login.")
         }
     ) {
         self.store = store
-        self.defaults = defaults
-        self.makeRotationPayload = makeRotationPayload
         self.listNetworkInterfaces = listNetworkInterfaces
+        self.snapshotProvider = snapshotProvider
+        self.redeemer = redeemer
         let identity = store.loadOrCreateIdentity()
         desktopID = identity.desktopID
         privateKey = identity.privateKey
         devices = store.loadDevices()
-    }
-
-    static func cliCredentialFingerprint(
-        codexAccessToken: String? = CodexAuthFile.load()?.accessToken,
-        cursorAccessToken: String? = CursorCLIKeychain.load()?.accessToken
-    ) -> String {
-        let concatenated = (codexAccessToken ?? "") + (cursorAccessToken ?? "")
-        return SHA256.hash(data: Data(concatenated.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
-    }
-
-    func noteCredentialFingerprint(_ fingerprint: String) {
-        let previous = defaults.string(forKey: Self.credentialFingerprintDefaultsKey)
-        guard previous != fingerprint else { return }
-        defaults.set(fingerprint, forKey: Self.credentialFingerprintDefaultsKey)
-        let payload = makeRotationPayload()
-        for device in devices where !device.isRevoked {
-            queueSync(payload, for: device)
-        }
     }
 
     func startServer() {
@@ -282,7 +272,7 @@ final class DeviceSyncManager: ObservableObject {
         persistDevices()
     }
 
-    private func handle(_ request: LocalHTTPRequest) async -> LocalHTTPResponse {
+    func handle(_ request: LocalHTTPRequest) async -> LocalHTTPResponse {
         switch (request.method, request.path) {
         case ("POST", "/v2/pair"):
             return handlePairStart(request)
@@ -290,6 +280,10 @@ final class DeviceSyncManager: ObservableObject {
             return handlePairPoll(request)
         case ("GET", "/v2/status"):
             return handleStatus(request)
+        case ("GET", "/v2/snapshot"):
+            return handleSnapshot(request)
+        case ("POST", "/v2/redeem"):
+            return await handleRedeem(request)
         case ("POST", "/v2/status/ack"):
             return handleWipeAcknowledgement(request)
         case ("POST", "/v2/status/sync-ack"):
@@ -417,6 +411,115 @@ final class DeviceSyncManager: ObservableObject {
     }
 
     private func handleStatus(_ request: LocalHTTPRequest) -> LocalHTTPResponse {
+        switch authenticate(request, proofPrefix: "status") {
+        case .rejected(let response):
+            return response
+        case .accepted(let auth):
+            do {
+                devices[auth.index].lastSeenAt = Date()
+                let command: DeviceStatusCommand
+                if devices[auth.index].isRevoked {
+                    command = DeviceStatusCommand(
+                        action: "wipe",
+                        issuedAtEpochSeconds: Int64(Date().timeIntervalSince1970),
+                        syncID: nil,
+                        syncEnvelope: nil
+                    )
+                } else if let pendingSync = devices[auth.index].pendingSync {
+                    command = DeviceStatusCommand(
+                        action: "sync",
+                        issuedAtEpochSeconds: Int64(Date().timeIntervalSince1970),
+                        syncID: pendingSync.id,
+                        syncEnvelope: pendingSync.envelope
+                    )
+                } else {
+                    command = DeviceStatusCommand(
+                        action: "none",
+                        issuedAtEpochSeconds: Int64(Date().timeIntervalSince1970),
+                        syncID: nil,
+                        syncEnvelope: nil
+                    )
+                }
+                let envelope = try DeviceSyncCrypto.seal(
+                    command,
+                    sharedSecret: auth.secret,
+                    salt: desktopID,
+                    info: DeviceSyncCrypto.statusInfo
+                )
+                persistDevices()
+                return .json(envelope)
+            } catch {
+                return .json(["error": "Could not create device status."], status: 400)
+            }
+        }
+    }
+
+    private func handleSnapshot(_ request: LocalHTTPRequest) -> LocalHTTPResponse {
+        switch authenticate(request, proofPrefix: "snapshot") {
+        case .rejected(let response):
+            return response
+        case .accepted(let auth):
+            if devices[auth.index].isRevoked {
+                return .json(["error": "Device removed."], status: 404)
+            }
+            do {
+                devices[auth.index].lastSeenAt = Date()
+                let envelope = try DeviceSyncCrypto.seal(
+                    snapshotProvider(),
+                    sharedSecret: auth.secret,
+                    salt: desktopID,
+                    info: DeviceSyncCrypto.snapshotInfo
+                )
+                persistDevices()
+                return .json(envelope)
+            } catch {
+                return .json(["error": "Could not create snapshot."], status: 400)
+            }
+        }
+    }
+
+    private func handleRedeem(_ request: LocalHTTPRequest) async -> LocalHTTPResponse {
+        switch authenticate(request, proofPrefix: "redeem") {
+        case .rejected(let response):
+            return response
+        case .accepted(let auth):
+            if devices[auth.index].isRevoked {
+                return .json(["error": "Device removed."], status: 404)
+            }
+            guard let envelope = try? JSONDecoder().decode(
+                DeviceEncryptedEnvelope.self,
+                from: request.body
+            ),
+            let redeemRequest = try? DeviceSyncCrypto.open(
+                envelope,
+                as: DeviceRedeemRequest.self,
+                sharedSecret: auth.secret,
+                salt: desktopID,
+                info: DeviceSyncCrypto.redeemInfo
+            ) else {
+                return .json(["error": "Could not decrypt the redeem request."], status: 400)
+            }
+            let result = await redeemer(redeemRequest.creditId)
+            do {
+                devices[auth.index].lastSeenAt = Date()
+                let responseEnvelope = try DeviceSyncCrypto.seal(
+                    result,
+                    sharedSecret: auth.secret,
+                    salt: desktopID,
+                    info: DeviceSyncCrypto.redeemInfo
+                )
+                persistDevices()
+                return .json(responseEnvelope)
+            } catch {
+                return .json(["error": "Could not encrypt the redeem response."], status: 400)
+            }
+        }
+    }
+
+    private func authenticate(
+        _ request: LocalHTTPRequest,
+        proofPrefix: String
+    ) -> DeviceAuth {
         guard let deviceID = request.queryItems["device"],
               let claimedDesktopID = request.queryItems["desktop"],
               let timestampString = request.queryItems["ts"],
@@ -426,7 +529,7 @@ final class DeviceSyncManager: ObservableObject {
               claimedDesktopID == desktopID,
               let index = devices.firstIndex(where: { $0.id == deviceID }),
               let publicKey = Data(base64URLEncoded: devices[index].publicKey) else {
-            return .json(["error": "Unknown device."], status: 404)
+            return .rejected(.json(["error": "Unknown device."], status: 404))
         }
 
         do {
@@ -438,45 +541,14 @@ final class DeviceSyncManager: ObservableObject {
                 sharedSecret: secret,
                 salt: desktopID,
                 info: DeviceSyncCrypto.statusInfo,
-                message: "status:\(desktopID):\(deviceID):\(timestamp)"
+                message: "\(proofPrefix):\(desktopID):\(deviceID):\(timestamp)"
             )
             guard suppliedProof == expectedProof else {
-                return .json(["error": "Device proof is invalid."], status: 404)
+                return .rejected(.json(["error": "Device proof is invalid."], status: 404))
             }
-            devices[index].lastSeenAt = Date()
-            let command: DeviceStatusCommand
-            if devices[index].isRevoked {
-                command = DeviceStatusCommand(
-                    action: "wipe",
-                    issuedAtEpochSeconds: Int64(Date().timeIntervalSince1970),
-                    syncID: nil,
-                    syncEnvelope: nil
-                )
-            } else if let pendingSync = devices[index].pendingSync {
-                command = DeviceStatusCommand(
-                    action: "sync",
-                    issuedAtEpochSeconds: Int64(Date().timeIntervalSince1970),
-                    syncID: pendingSync.id,
-                    syncEnvelope: pendingSync.envelope
-                )
-            } else {
-                command = DeviceStatusCommand(
-                    action: "none",
-                    issuedAtEpochSeconds: Int64(Date().timeIntervalSince1970),
-                    syncID: nil,
-                    syncEnvelope: nil
-                )
-            }
-            let envelope = try DeviceSyncCrypto.seal(
-                command,
-                sharedSecret: secret,
-                salt: desktopID,
-                info: DeviceSyncCrypto.statusInfo
-            )
-            persistDevices()
-            return .json(envelope)
+            return .accepted(AuthenticatedDevice(index: index, secret: secret))
         } catch {
-            return .json(["error": "Could not create device status."], status: 400)
+            return .rejected(.json(["error": "Unknown device."], status: 404))
         }
     }
 
@@ -651,28 +723,6 @@ struct DeviceSyncStore {
     private func ensureDirectory() throws {
         try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directoryURL.path)
-    }
-}
-
-private extension JSONDecoder {
-    static let deviceSyncDecoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }()
-}
-
-enum DeviceSyncRotationPayload {
-    static func make() -> DeviceSyncPayload {
-        let codex = CodexAuthFile.load()
-        let cursor = CursorCLIKeychain.load()
-        return DeviceSyncPayload(
-            connections: DeviceSyncConnections(
-                codexAccessToken: codex?.accessToken,
-                codexAccountId: codex?.accountId,
-                cursorAccessToken: cursor?.accessToken
-            )
-        )
     }
 }
 

@@ -18,12 +18,6 @@ struct DevicesSettingsView: View {
                         .font(.title3.weight(.semibold))
                     Text("Pair a phone over your local network. The QR code contains no credentials, and the Mac must approve every new device.")
                         .foregroundStyle(.secondary)
-                    if let phoneTokenExpiryText {
-                        Text(phoneTokenExpiryText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
                     Button("Add Device") {
                         showingAddDevice = true
                     }
@@ -44,7 +38,7 @@ struct DevicesSettingsView: View {
             }
 
             Section("If a device is lost") {
-                Text("Removing a device stops future sync and queues deletion of credentials transferred by this Mac. The phone receives the wipe when it next reaches this Mac.")
+                Text("Removing a device stops future sync and tells the phone to forget this Mac and the usage it showed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -109,7 +103,7 @@ struct DevicesSettingsView: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                 if device.isRevoked {
-                    Text("Removed — credential wipe queued")
+                    Text("Removed — waiting for phone")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 } else if device.pendingSync != nil {
@@ -155,27 +149,11 @@ struct DevicesSettingsView: View {
         .padding(.vertical, 3)
     }
 
-    private var phoneTokenExpiryText: String? {
-        let expiries = [
-            CodexAuthFile.load().flatMap { JWTClaims.expiry(of: $0.accessToken) },
-            CursorCLIKeychain.load().flatMap { JWTClaims.expiry(of: $0.accessToken) }
-        ].compactMap { $0 }
-        guard let soonest = expiries.min() else { return nil }
-        if soonest <= Date() {
-            return "phone tokens expired"
-        }
-        let days = Calendar.current.dateComponents([.day], from: Date(), to: soonest).day ?? 0
-        return "phone tokens expire in \(days)d"
-    }
-
     private func wipeWasDelivered(to device: PairedDevice) -> Bool {
         device.wipeAcknowledgedAt != nil
     }
 
     private func queueSync(to device: PairedDevice) {
-        let credentials = connectedService.deviceSyncCredentials()
-        let codex = CodexAuthFile.load()
-        let cursorCLI = CursorCLIKeychain.load()
         let payload = DeviceSyncPayload(
             general: DeviceSyncGeneral(pollingMinutes: service.pollingMinutes),
             appearance: DeviceSyncAppearance(
@@ -207,14 +185,6 @@ struct DevicesSettingsView: View {
                 cursorAPI: notificationService.cursorAPIThreshold,
                 cursorAuto: notificationService.cursorAutoThreshold,
                 cursorCredit: notificationService.cursorCreditThreshold
-            ),
-            connections: DeviceSyncConnections(
-                openAISessionToken: credentials.openAISessionToken,
-                cursorSessionToken: credentials.cursorSessionToken,
-                elevenLabsAPIKey: credentials.elevenLabsAPIKey,
-                codexAccessToken: codex?.accessToken,
-                codexAccountId: codex?.accountId,
-                cursorAccessToken: cursorCLI?.accessToken
             )
         )
         deviceSyncManager.queueSync(payload, for: device)
@@ -231,9 +201,6 @@ private struct AddDeviceSheet: View {
     @State private var syncPolling = true
     @State private var syncAppearance = true
     @State private var syncNotifications = true
-    @State private var syncOpenAI = false
-    @State private var syncCursor = false
-    @State private var syncElevenLabs = false
     @State private var transfer: DeviceSyncTransfer?
     @State private var errorMessage: String?
     @State private var approved = false
@@ -285,35 +252,8 @@ private struct AddDeviceSheet: View {
                 Toggle("Notification thresholds", isOn: $syncNotifications)
             }
 
-            Section("Providers") {
-                connectionToggle(
-                    "OpenAI / Codex session",
-                    isOn: $syncOpenAI,
-                    available: canSyncOpenAI
-                )
-                connectionToggle(
-                    "Cursor session",
-                    isOn: $syncCursor,
-                    available: canSyncCursor
-                )
-                connectionToggle(
-                    "ElevenLabs API key",
-                    isOn: $syncElevenLabs,
-                    available: connectedService.isElevenLabsConfigured
-                )
-
-                LabeledContent("Claude") {
-                    Text("Sign in on phone")
-                        .foregroundStyle(.secondary)
-                }
-
-                Text("Claude uses rotating OAuth credentials, so Android signs in separately instead of risking either device's session.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
             Section("Security") {
-                Text("The QR code contains only a one-time handshake and this Mac's public key. Selected credentials are encrypted for the approved phone after the codes match.")
+                Text("The QR code contains only a one-time handshake and this Mac's public key. Selected settings are encrypted for the approved phone after the codes match.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -434,47 +374,12 @@ private struct AddDeviceSheet: View {
         .frame(maxWidth: .infinity)
     }
 
-    @ViewBuilder
-    private func connectionToggle(
-        _ title: String,
-        isOn: Binding<Bool>,
-        available: Bool
-    ) -> some View {
-        Toggle(isOn: isOn) {
-            HStack {
-                Text(title)
-                if !available {
-                    Text("Not configured")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .disabled(!available)
-    }
-
-    private var canSyncOpenAI: Bool {
-        connectedService.isOpenAIConfigured || CodexAuthFile.load() != nil
-    }
-
-    private var canSyncCursor: Bool {
-        connectedService.isCursorConfigured || CursorCLIKeychain.load() != nil
-    }
-
     private var hasSelection: Bool {
         syncPolling || syncAppearance || syncNotifications
-            || syncOpenAI || syncCursor || syncElevenLabs
-    }
-
-    private var hasSelectedConnection: Bool {
-        syncOpenAI || syncCursor || syncElevenLabs
     }
 
     private func generateTransfer() {
         do {
-            let credentials = connectedService.deviceSyncCredentials()
-            let codex = CodexAuthFile.load()
-            let cursorCLI = CursorCLIKeychain.load()
             let payload = DeviceSyncPayload(
                 general: syncPolling
                     ? DeviceSyncGeneral(pollingMinutes: service.pollingMinutes)
@@ -511,16 +416,6 @@ private struct AddDeviceSheet: View {
                         cursorAPI: notificationService.cursorAPIThreshold,
                         cursorAuto: notificationService.cursorAutoThreshold,
                         cursorCredit: notificationService.cursorCreditThreshold
-                    )
-                    : nil,
-                connections: hasSelectedConnection
-                    ? DeviceSyncConnections(
-                        openAISessionToken: syncOpenAI ? credentials.openAISessionToken : nil,
-                        cursorSessionToken: syncCursor ? credentials.cursorSessionToken : nil,
-                        elevenLabsAPIKey: syncElevenLabs ? credentials.elevenLabsAPIKey : nil,
-                        codexAccessToken: syncOpenAI ? codex?.accessToken : nil,
-                        codexAccountId: syncOpenAI ? codex?.accountId : nil,
-                        cursorAccessToken: syncCursor ? cursorCLI?.accessToken : nil
                     )
                     : nil
             )
