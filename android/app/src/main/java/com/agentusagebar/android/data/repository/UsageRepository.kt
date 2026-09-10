@@ -90,6 +90,7 @@ class UsageRepository(
 
     private suspend fun applyImportedPayload(payload: DeviceSyncPayload) {
         settingsStore.applyDeviceSync(payload)
+        publishWidgets()
     }
 
     suspend fun checkForSync(desktopID: String): Result<DeviceSyncCheckResult> =
@@ -238,6 +239,11 @@ class UsageRepository(
 
     suspend fun setDetailStyle(style: com.agentusagebar.android.data.model.DetailVisualizationStyle) {
         settingsStore.setDetailStyle(style)
+        publishWidgets()
+    }
+
+    suspend fun setFillMode(mode: com.agentusagebar.android.data.model.UsageFillMode) {
+        settingsStore.setFillMode(mode)
         publishWidgets()
     }
 

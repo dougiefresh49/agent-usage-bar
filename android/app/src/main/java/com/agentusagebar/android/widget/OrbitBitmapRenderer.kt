@@ -1,5 +1,6 @@
 package com.agentusagebar.android.widget
 
+import com.agentusagebar.android.data.model.UsageFillMode
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -21,6 +22,7 @@ object OrbitBitmapRenderer {
         secondaryPercent: Double?,
         centerLabel: String,
         countdownFraction: Float = 0f,
+        fillMode: UsageFillMode = UsageFillMode.DRAIN,
     ): Bitmap {
         val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -54,9 +56,9 @@ object OrbitBitmapRenderer {
             }
         }
 
-        val p = ((primaryPercent ?: 0.0) / 100.0).toFloat()
+        val p = fillMode.barFraction(primaryPercent)
         if (hasSecondary) {
-            ring(((secondaryPercent ?: 0.0) / 100.0).toFloat(), secondaryColor, outerDiameter)
+            ring(fillMode.barFraction(secondaryPercent), secondaryColor, outerDiameter)
             ring(p, primaryColor, innerDiameter)
         } else {
             ring(p, primaryColor, outerDiameter)

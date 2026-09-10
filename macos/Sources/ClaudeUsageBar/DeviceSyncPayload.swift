@@ -12,6 +12,7 @@ struct DeviceSyncAppearance: Codable, Equatable {
     let secondaryMetric: String
     let detailStyle: String
     let textSize: String
+    let fillMode: String
 }
 
 struct DeviceSyncNotifications: Codable, Equatable {
