@@ -562,6 +562,15 @@ enum UsagePresentationMetrics {
         return metrics
     }
 
+    /// Popover Codex metrics without the legacy reset-credit count row.
+    /// The banked-credit row replaces that metric in the popover; menu-bar and
+    /// widgets keep `openAIResetCreditsID` via `openAIMetrics`.
+    static func openAIPopoverMetrics(
+        _ metrics: [UsagePresentationMetric]
+    ) -> [UsagePresentationMetric] {
+        metrics.filter { $0.id != openAIResetCreditsID }
+    }
+
     /// Codex additional rate-limit rows for the popover only. Kept out of `openAIMetrics` so the menu-bar metric picker stays unchanged.
     static func openAIAdditionalLimitMetrics(
         usage: OpenAIUsageResponse?
@@ -718,5 +727,112 @@ enum UsagePresentationMetrics {
         let letters = label.filter(\.isLetter)
         guard !letters.isEmpty else { return "M" }
         return String(letters.prefix(3))
+    }
+}
+
+/// Plain-text detail rows under each provider's bars: plan, tier, renewal, credits, credential source.
+/// Every helper returns nil when its data is absent so the row hides instead of showing a blank.
+enum UsageDetailRows {
+    /// "3 banked · next expires in 10d 22h"; nil at zero.
+    static func resetCreditsLine(count: Int, nextExpiry: Date?, now: Date = Date()) -> String? {
+        guard count > 0 else { return nil }
+        var line = "\(count) banked"
+        if let nextExpiry {
+            line += " · next expires in \(UsagePace.formatDuration(nextExpiry.timeIntervalSince(now)))"
+        }
+        return line
+    }
+
+    /// "Plan: Plus" from Codex `plan_type`.
+    static func codexPlanLine(planType: String?) -> String? {
+        guard let planType, let first = planType.first else { return nil }
+        return "Plan: " + first.uppercased() + planType.dropFirst()
+    }
+
+    /// "Source: Codex CLI login · expires in 4d" or "Source: pasted token". Never carries the token.
+    static func codexSourceLine(
+        source: OpenAICredentialSource,
+        tokenExpiry: Date?,
+        now: Date = Date()
+    ) -> String? {
+        switch source {
+        case .none: return nil
+        case .pasted: return "Source: pasted token"
+        case .environment: return "Source: environment variable"
+        case .codexCLI: return sourceLine("Codex CLI login", expiry: tokenExpiry, now: now)
+        }
+    }
+
+    /// "Source: Cursor CLI login · expires in 9d" or "Source: pasted cookie". Never carries the cookie.
+    static func cursorSourceLine(
+        source: CursorCredentialSource,
+        tokenExpiry: Date?,
+        now: Date = Date()
+    ) -> String? {
+        switch source {
+        case .none: return nil
+        case .pasted: return "Source: pasted cookie"
+        case .environment: return "Source: environment variable"
+        case .cursorCLI: return sourceLine("Cursor CLI login", expiry: tokenExpiry, now: now)
+        }
+    }
+
+    /// "Pro · $20/mo · renews in 12d"; parts drop out as their fields are absent.
+    static func cursorPlanLine(_ planInfo: CursorPlanInfo?, now: Date = Date()) -> String? {
+        guard let planInfo else { return nil }
+        var parts: [String] = []
+        if let name = planInfo.planName, !name.isEmpty {
+            parts.append(name)
+        }
+        if let price = planInfo.price, !price.isEmpty {
+            parts.append(price)
+        }
+        if let raw = planInfo.billingCycleEnd, let milliseconds = Double(raw) {
+            let renewsAt = Date(timeIntervalSince1970: milliseconds / 1_000)
+            let delta = renewsAt.timeIntervalSince(now)
+            parts.append(
+                delta >= 0
+                    ? "renews in \(coarseDuration(delta))"
+                    : "renewed \(coarseDuration(-delta)) ago"
+            )
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// "used $4.06 of $20.00": the plan's included amount times the total percent used (same math as Android).
+    static func cursorSpendLine(planUsage: CursorPlanUsage?, includedAmountCents: Int?) -> String? {
+        guard let cents = includedAmountCents, cents >= 0,
+              let percent = planUsage?.totalPercentUsed else { return nil }
+        let limit = Double(cents) / 100
+        let used = limit * (percent / 100)
+        return "used \(ExtraUsage.formatUSD(used)) of \(ExtraUsage.formatUSD(limit))"
+    }
+
+    /// "Max 20x · active"; nil when both parts are blank.
+    static func claudePlanLine(planLabel: String?, subscriptionStatus: String?) -> String? {
+        let parts = [planLabel, subscriptionStatus]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private static func sourceLine(_ name: String, expiry: Date?, now: Date) -> String {
+        guard let expiry else { return "Source: \(name)" }
+        let delta = expiry.timeIntervalSince(now)
+        return delta > 0
+            ? "Source: \(name) · expires in \(coarseDuration(delta))"
+            : "Source: \(name) · expired"
+    }
+
+    /// One unit only, the way T3 and the Android caption show renewal and login expiry: `12d`, `9h`, `40m`.
+    static func coarseDuration(_ interval: TimeInterval) -> String {
+        let remaining = max(0, interval)
+        if remaining >= 86_400 {
+            return "\(Int(remaining / 86_400))d"
+        }
+        if remaining >= 3_600 {
+            return "\(Int(remaining / 3_600))h"
+        }
+        return "\(Int(remaining / 60))m"
     }
 }
