@@ -1,5 +1,20 @@
 import Combine
+import CryptoKit
 import Foundation
+
+enum OpenAICredentialSource: Equatable {
+    case pasted
+    case codexCLI
+    case environment
+    case none
+}
+
+enum CursorCredentialSource: Equatable {
+    case pasted
+    case cursorCLI
+    case environment
+    case none
+}
 
 @MainActor
 final class ConnectedUsageService: ObservableObject {
@@ -16,6 +31,12 @@ final class ConnectedUsageService: ObservableObject {
     @Published private(set) var isCursorConfigured = false
     @Published private(set) var isOpenAIConfigured = false
     @Published private(set) var isElevenLabsConfigured = false
+    @Published private(set) var openAICredentialSource: OpenAICredentialSource = .none
+    @Published private(set) var cursorCredentialSource: CursorCredentialSource = .none
+    @Published private(set) var openAIAccountID: String?
+    @Published private(set) var openAITokenExpiry: Date?
+    @Published private(set) var cursorTokenExpiry: Date?
+    @Published private(set) var cursorPlanInfo: CursorPlanInfoResponse?
 
     private let session: URLSession
     private let cursorEndpoint: URL
@@ -24,6 +45,12 @@ final class ConnectedUsageService: ObservableObject {
     private let elevenLabsSubscriptionEndpoint: URL
     private let credentialsStore: ConnectedServiceCredentialsStore
     private let environment: [String: String]
+    private let codexAuthLoader: () -> CodexCLICredentials?
+    private let cursorKeychainRunner: CursorCLIKeychain.Runner
+    private let planInfoInterval: TimeInterval
+    private var lastCursorPlanInfoFetch: Date?
+    private var isFetchingCursorPlanInfo = false
+    private var openAIAccountIDCredentialIdentity: String?
     var snapshotStore: UsageSnapshotStore?
     var notificationService: NotificationService?
     private var timer: Timer?
@@ -40,7 +67,10 @@ final class ConnectedUsageService: ObservableObject {
         openAIResetCreditsEndpoint: URL = URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")!,
         elevenLabsSubscriptionEndpoint: URL = URL(string: "https://api.elevenlabs.io/v1/user/subscription")!,
         credentialsStore: ConnectedServiceCredentialsStore = ConnectedServiceCredentialsStore(),
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        codexAuthLoader: (() -> CodexCLICredentials?)? = nil,
+        cursorKeychainRunner: CursorCLIKeychain.Runner? = nil,
+        planInfoInterval: TimeInterval = 3600
     ) {
         self.session = session
         self.cursorEndpoint = cursorEndpoint
@@ -49,6 +79,11 @@ final class ConnectedUsageService: ObservableObject {
         self.elevenLabsSubscriptionEndpoint = elevenLabsSubscriptionEndpoint
         self.credentialsStore = credentialsStore
         self.environment = environment
+        self.codexAuthLoader = codexAuthLoader ?? {
+            CodexAuthFile.load(environment: environment)
+        }
+        self.cursorKeychainRunner = cursorKeychainRunner ?? CursorCLIKeychain.defaultRunner
+        self.planInfoInterval = planInfoInterval
 
         let storedMinutes = UserDefaults.standard.integer(forKey: "pollingMinutes")
         pollingMinutes = UsageService.pollingOptions.contains(storedMinutes)
@@ -107,23 +142,36 @@ final class ConnectedUsageService: ObservableObject {
         var credentials = credentialsStore.load()
         credentials.cursorSessionToken = nil
         try? credentialsStore.save(credentials)
-        snapshotStore?.remove(provider: "cursor")
-        cursorUsage = nil
         cursorError = nil
-        cursorLastUpdated = nil
         updateConfiguredState()
+        if isCursorConfigured {
+            Task { await fetchCursorUsage() }
+        } else {
+            snapshotStore?.remove(provider: "cursor")
+            cursorUsage = nil
+            cursorLastUpdated = nil
+            cursorPlanInfo = nil
+            lastCursorPlanInfoFetch = nil
+            cursorTokenExpiry = nil
+        }
     }
 
     func clearOpenAIToken() {
         var credentials = credentialsStore.load()
         credentials.openAISessionToken = nil
         try? credentialsStore.save(credentials)
-        snapshotStore?.remove(provider: "openai")
-        openAIUsage = nil
-        openAIResetCredits = nil
         openAIError = nil
-        openAILastUpdated = nil
         updateConfiguredState()
+        if isOpenAIConfigured {
+            Task { await fetchOpenAIUsage() }
+        } else {
+            snapshotStore?.remove(provider: "openai")
+            openAIUsage = nil
+            openAIResetCredits = nil
+            openAILastUpdated = nil
+            openAIAccountID = nil
+            openAITokenExpiry = nil
+        }
     }
 
     func clearElevenLabsAPIKey() {
@@ -146,19 +194,37 @@ final class ConnectedUsageService: ObservableObject {
     }
 
     func fetchCursorUsage() async {
-        guard let token = cursorToken else { return }
-
-        var request = URLRequest(url: cursorEndpoint)
-        request.httpMethod = "POST"
-        request.httpBody = Data("{}".utf8)
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("https://cursor.com", forHTTPHeaderField: "Origin")
-        request.setValue("https://cursor.com/dashboard?tab=spending", forHTTPHeaderField: "Referer")
-        request.setValue("WorkosCursorSessionToken=\(token)", forHTTPHeaderField: "Cookie")
+        updateConfiguredState()
+        guard let resolved = resolveCursorCredential() else { return }
 
         do {
-            let data = try await responseData(for: request, serviceName: "Cursor")
-            let decoded = try JSONDecoder().decode(CursorUsageResponse.self, from: data)
+            let decoded: CursorUsageResponse
+            if resolved.source == .cursorCLI {
+                let request = CursorConnectAPI.request(
+                    method: CursorConnectAPI.getCurrentPeriodUsage,
+                    token: resolved.token
+                )
+                let data = try await responseData(
+                    for: request,
+                    serviceName: "Cursor",
+                    unauthorizedMessage: Self.cursorCLIUnauthorizedMessage
+                )
+                decoded = try JSONDecoder().decode(CursorUsageResponse.self, from: data)
+                await fetchCursorPlanInfoIfNeeded(token: resolved.token)
+            } else {
+                cursorPlanInfo = nil
+                lastCursorPlanInfoFetch = nil
+                var request = URLRequest(url: cursorEndpoint)
+                request.httpMethod = "POST"
+                request.httpBody = Data("{}".utf8)
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("https://cursor.com", forHTTPHeaderField: "Origin")
+                request.setValue("https://cursor.com/dashboard?tab=spending", forHTTPHeaderField: "Referer")
+                request.setValue("WorkosCursorSessionToken=\(resolved.token)", forHTTPHeaderField: "Cookie")
+                let data = try await responseData(for: request, serviceName: "Cursor")
+                decoded = try JSONDecoder().decode(CursorUsageResponse.self, from: data)
+            }
+
             cursorUsage = decoded
             cursorError = nil
             cursorLastUpdated = Date()
@@ -177,15 +243,31 @@ final class ConnectedUsageService: ObservableObject {
     }
 
     func fetchOpenAIUsage() async {
-        guard let token = openAIToken else { return }
+        updateConfiguredState()
+        guard let resolved = resolveOpenAICredential() else { return }
+
+        let unauthorizedMessage = resolved.source == .codexCLI
+            ? Self.openAICLIUnauthorizedMessage
+            : nil
+        let accountId = resolved.accountId ?? openAIAccountID
+        let requestCredentialIdentity = Self.openAICredentialIdentity(
+            source: resolved.source,
+            token: resolved.token
+        )
 
         do {
             let usageData = try await openAIResponseData(
                 endpoint: openAIUsageEndpoint,
-                token: token
+                token: resolved.token,
+                accountId: accountId,
+                unauthorizedMessage: unauthorizedMessage
             )
             let decoded = try JSONDecoder().decode(OpenAIUsageResponse.self, from: usageData)
             openAIUsage = decoded
+            if requestCredentialIdentity == currentOpenAICredentialIdentity(),
+               let discovered = resolved.accountId ?? decoded.accountId {
+                openAIAccountID = discovered
+            }
             openAIError = nil
             openAILastUpdated = Date()
             snapshotStore?.update(
@@ -199,7 +281,9 @@ final class ConnectedUsageService: ObservableObject {
         do {
             let creditData = try await openAIResponseData(
                 endpoint: openAIResetCreditsEndpoint,
-                token: token
+                token: resolved.token,
+                accountId: resolved.accountId ?? openAIAccountID,
+                unauthorizedMessage: unauthorizedMessage
             )
             openAIResetCredits = try JSONDecoder().decode(
                 OpenAIResetCreditsResponse.self,
@@ -261,19 +345,72 @@ final class ConnectedUsageService: ObservableObject {
         }
     }
 
-    private func openAIResponseData(endpoint: URL, token: String) async throws -> Data {
-        var request = URLRequest(url: endpoint)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        return try await responseData(for: request, serviceName: "OpenAI")
+    private func fetchCursorPlanInfoIfNeeded(token: String) async {
+        let now = Date()
+        if isFetchingCursorPlanInfo {
+            return
+        }
+        if let lastCursorPlanInfoFetch,
+           now.timeIntervalSince(lastCursorPlanInfoFetch) < planInfoInterval {
+            return
+        }
+
+        isFetchingCursorPlanInfo = true
+        lastCursorPlanInfoFetch = now
+        defer { isFetchingCursorPlanInfo = false }
+
+        do {
+            let request = CursorConnectAPI.request(
+                method: CursorConnectAPI.getPlanInfo,
+                token: token
+            )
+            let data = try await responseData(
+                for: request,
+                serviceName: "Cursor",
+                unauthorizedMessage: Self.cursorCLIUnauthorizedMessage
+            )
+            cursorPlanInfo = try JSONDecoder().decode(CursorPlanInfoResponse.self, from: data)
+        } catch {
+            // Soft failure: usage still stands without plan info.
+        }
     }
 
-    private func responseData(for request: URLRequest, serviceName: String) async throws -> Data {
+    private func openAIResponseData(
+        endpoint: URL,
+        token: String,
+        accountId: String?,
+        unauthorizedMessage: String?
+    ) async throws -> Data {
+        var request = URLRequest(url: endpoint)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("codex-1", forHTTPHeaderField: "OpenAI-Beta")
+        request.setValue("Codex Desktop", forHTTPHeaderField: "Originator")
+        if let accountId, accountId.isEmpty == false {
+            request.setValue(accountId, forHTTPHeaderField: "Chatgpt-Account-Id")
+        }
+        return try await responseData(
+            for: request,
+            serviceName: "OpenAI",
+            unauthorizedMessage: unauthorizedMessage
+        )
+    }
+
+    private func responseData(
+        for request: URLRequest,
+        serviceName: String,
+        unauthorizedMessage: String? = nil
+    ) async throws -> Data {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw ConnectedUsageError.invalidResponse(serviceName)
         }
         guard http.statusCode == 200 else {
+            if (http.statusCode == 401 || http.statusCode == 403),
+               let unauthorizedMessage {
+                throw ConnectedUsageError.unauthorized(unauthorizedMessage)
+            }
             throw ConnectedUsageError.http(serviceName, http.statusCode)
         }
         return data
@@ -292,11 +429,13 @@ final class ConnectedUsageService: ObservableObject {
         timer = newTimer
     }
 
+    /// Pasted or environment tokens only. Device sync stays on the v1 fields until #53.
     private var cursorToken: String? {
         credentialsStore.load().cursorSessionToken
             ?? environment["CURSOR_SESSION_TOKEN"].flatMap(ConnectedTokenNormalizer.cursor)
     }
 
+    /// Pasted or environment tokens only. Device sync stays on the v1 fields until #53.
     private var openAIToken: String? {
         credentialsStore.load().openAISessionToken
             ?? environment["OPENAI_SESSION_TOKEN"].flatMap(ConnectedTokenNormalizer.openAI)
@@ -307,21 +446,129 @@ final class ConnectedUsageService: ObservableObject {
             ?? environment["ELEVENLABS_API_KEY"].flatMap(ConnectedTokenNormalizer.elevenLabs)
     }
 
+    private func resolveOpenAICredential() -> ResolvedOpenAICredential? {
+        if let pasted = credentialsStore.load().openAISessionToken {
+            return ResolvedOpenAICredential(
+                token: pasted,
+                source: .pasted,
+                accountId: nil,
+                expiry: nil
+            )
+        }
+        if let cli = codexAuthLoader() {
+            return ResolvedOpenAICredential(
+                token: cli.accessToken,
+                source: .codexCLI,
+                accountId: cli.accountId,
+                expiry: JWTClaims.expiry(of: cli.accessToken)
+            )
+        }
+        if let env = environment["OPENAI_SESSION_TOKEN"].flatMap(ConnectedTokenNormalizer.openAI) {
+            return ResolvedOpenAICredential(
+                token: env,
+                source: .environment,
+                accountId: nil,
+                expiry: nil
+            )
+        }
+        return nil
+    }
+
+    private func resolveCursorCredential() -> ResolvedCursorCredential? {
+        if let pasted = credentialsStore.load().cursorSessionToken {
+            return ResolvedCursorCredential(token: pasted, source: .pasted, expiry: nil)
+        }
+        if let cli = CursorCLIKeychain.load(runner: cursorKeychainRunner) {
+            return ResolvedCursorCredential(
+                token: cli.accessToken,
+                source: .cursorCLI,
+                expiry: JWTClaims.expiry(of: cli.accessToken)
+            )
+        }
+        if let env = environment["CURSOR_SESSION_TOKEN"].flatMap(ConnectedTokenNormalizer.cursor) {
+            return ResolvedCursorCredential(token: env, source: .environment, expiry: nil)
+        }
+        return nil
+    }
+
     private func updateConfiguredState() {
-        isCursorConfigured = cursorToken != nil
-        isOpenAIConfigured = openAIToken != nil
+        if let openAI = resolveOpenAICredential() {
+            isOpenAIConfigured = true
+            openAICredentialSource = openAI.source
+            openAITokenExpiry = openAI.source == .codexCLI ? openAI.expiry : nil
+            let identity = Self.openAICredentialIdentity(source: openAI.source, token: openAI.token)
+            if identity != openAIAccountIDCredentialIdentity {
+                openAIAccountIDCredentialIdentity = identity
+                openAIAccountID = openAI.accountId
+            } else if let accountId = openAI.accountId {
+                openAIAccountID = accountId
+            }
+        } else {
+            isOpenAIConfigured = false
+            openAICredentialSource = .none
+            openAITokenExpiry = nil
+            openAIAccountID = nil
+            openAIAccountIDCredentialIdentity = nil
+        }
+
+        if let cursor = resolveCursorCredential() {
+            isCursorConfigured = true
+            cursorCredentialSource = cursor.source
+            cursorTokenExpiry = cursor.source == .cursorCLI ? cursor.expiry : nil
+        } else {
+            isCursorConfigured = false
+            cursorCredentialSource = .none
+            cursorTokenExpiry = nil
+            cursorPlanInfo = nil
+            lastCursorPlanInfoFetch = nil
+        }
+
         isElevenLabsConfigured = elevenLabsAPIKey != nil
     }
+
+    private func currentOpenAICredentialIdentity() -> String? {
+        guard let openAI = resolveOpenAICredential() else { return nil }
+        return Self.openAICredentialIdentity(source: openAI.source, token: openAI.token)
+    }
+
+    /// Source plus a SHA-256 of the token so an in-flight response can tell whether the
+    /// credential that started the request is still current, without keeping the raw token.
+    private static func openAICredentialIdentity(source: OpenAICredentialSource, token: String) -> String {
+        let digest = SHA256.hash(data: Data(token.utf8))
+        let hash = digest.map { String(format: "%02x", $0) }.joined()
+        return "\(source)|\(hash)"
+    }
+
+    private static let openAICLIUnauthorizedMessage =
+        "Codex login expired. Run any codex command or `codex login` to refresh."
+    private static let cursorCLIUnauthorizedMessage =
+        "Cursor CLI login expired. Run `cursor-agent login`."
+}
+
+private struct ResolvedOpenAICredential {
+    let token: String
+    let source: OpenAICredentialSource
+    let accountId: String?
+    let expiry: Date?
+}
+
+private struct ResolvedCursorCredential {
+    let token: String
+    let source: CursorCredentialSource
+    let expiry: Date?
 }
 
 enum ConnectedUsageError: LocalizedError {
     case invalidResponse(String)
     case http(String, Int)
+    case unauthorized(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse(let service):
             return "\(service) returned an invalid response"
+        case .unauthorized(let message):
+            return message
         case .http(let service, let status):
             if status == 401 || status == 403 {
                 if service == "ElevenLabs" {
