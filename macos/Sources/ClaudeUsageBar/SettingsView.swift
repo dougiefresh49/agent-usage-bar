@@ -168,7 +168,7 @@ struct SettingsWindowContent: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                DisclosureGroup("Use a pasted token instead") {
+                DisclosureGroup(openAIPastedTokenDisclosureTitle(source: connectedService.openAICredentialSource)) {
                     Text("Use the bearer token from the Authorization header of a ChatGPT usage request. OpenAI API keys do not expose ChatGPT subscription limits.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -203,7 +203,7 @@ struct SettingsWindowContent: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                DisclosureGroup("Use a pasted token instead") {
+                DisclosureGroup(cursorPastedTokenDisclosureTitle(source: connectedService.cursorCredentialSource)) {
                     Text("Paste the WorkosCursorSessionToken cookie value from cursor.com. You can also paste a full Cookie header or copied cURL request.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -757,6 +757,24 @@ func openAICredentialStatusText(
     case .none:
         return "Run `codex login` to connect without pasting a token."
     }
+}
+
+/// Disclosure label for the pasted-token controls, following the active source: the pasted
+/// token is managed when it is in use, offered as an alternative when a CLI or environment
+/// credential is in use, and plainly offered when nothing is connected.
+func pastedTokenDisclosureTitle(isPasted: Bool, hasOtherSource: Bool) -> String {
+    if isPasted {
+        return "Manage pasted token"
+    }
+    return hasOtherSource ? "Use a pasted token instead" : "Use a pasted token"
+}
+
+func openAIPastedTokenDisclosureTitle(source: OpenAICredentialSource) -> String {
+    pastedTokenDisclosureTitle(isPasted: source == .pasted, hasOtherSource: source != .none)
+}
+
+func cursorPastedTokenDisclosureTitle(source: CursorCredentialSource) -> String {
+    pastedTokenDisclosureTitle(isPasted: source == .pasted, hasOtherSource: source != .none)
 }
 
 func cursorCredentialStatusText(
