@@ -8,7 +8,8 @@ as prose or were dropped, not backfilled.
 
 | # | date | decision | status |
 |---|------|----------|--------|
-| 33 | 2026-09-10 | The phone stops signing in to Claude itself and consumes the Mac's Claude access token read-only over sync, re-sent on rotation; the Mac reads the Claude Code login the same read-only way (#84, #85); raised by Doug after repeated phone logouts (#83 is the logout bug) | open |
+| 34 | 2026-09-10 | The phone displays the Mac's credential-free usage snapshot pulled over the tailnet and holds no provider credentials; the Mac fetches, the phone shows, redemption from the phone is a request to the Mac; tailnet only, no relay; replaces the phone-fetches-itself half of row 2 and the token-sync direction of row 33 (https://github.com/dougiefresh49/agent-usage-bar/issues/86) | accepted |
+| 33 | 2026-09-10 | The phone stops signing in to Claude itself and consumes the Mac's Claude access token read-only over sync, re-sent on rotation; the Mac reads the Claude Code login the same read-only way (#84, #85); raised by Doug after repeated phone logouts (#83 is the logout bug) | superseded by 34 |
 | 32 | 2026-09-10 | Mac credential precedence flips to CLI login, then pasted token, then env var, matching the phone; raised by Doug on seeing v1.17.0 still on his old pasted tokens (https://github.com/dougiefresh49/agent-usage-bar/issues/82) | open |
 | 31 | 2026-09-10 | Fill or drain becomes an Appearance setting, and bars, orbits, capsules, and headline all follow it; the headline-only scope of row 3 is replaced (https://github.com/dougiefresh49/agent-usage-bar/issues/79) | accepted |
 | 30 | 2026-09-10 | Release immutability is recommended for this repo: both Release workflows publish the release and its assets in one step and the appcast lives on GitHub Pages, so nothing edits a published release; a Release run that fails after publishing cannot be re-run onto its tag, which the Verifying section already treats as the next release's job | open |
@@ -39,5 +40,5 @@ as prose or were dropped, not backfilled.
 | 5 | 2026-09-09 | No billing-cycle date is shown for Claude or Codex, since neither exposes one; Cursor shows renewal from `billingCycleEnd` (#58 owner decision 5) | accepted |
 | 4 | 2026-09-09 | No `codex app-server` refresh fallback until a real expired-token report; the plan doc keeps the recipe (#58 owner decision 4) | accepted |
 | 3 | 2026-09-09 | "Left" replaces "used" in the popover headline only; the menu bar icon and widgets keep used-percent semantics (#58 owner decision 3) | superseded by 31 |
-| 2 | 2026-09-09 | Keep the phone-fetches-itself sync model; Tailscale is only the transport, no relay, no Mac-as-server (#58 owner decision 2) | accepted |
+| 2 | 2026-09-09 | Keep the phone-fetches-itself sync model; Tailscale is only the transport, no relay, no Mac-as-server (#58 owner decision 2) | superseded by 34 |
 | 1 | 2026-09-09 | Credential precedence on the Mac: pasted token, then CLI login, then env var; on the phone the CLI token wins because the Mac keeps it fresh (#58 owner decision 1) | accepted |
