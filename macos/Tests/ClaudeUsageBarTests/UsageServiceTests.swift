@@ -1432,6 +1432,14 @@ final class UsageServiceTests: XCTestCase {
         service.usage = lastGood
         let previousUpdated = Date(timeIntervalSince1970: 1_700_000_000)
         service.lastUpdated = previousUpdated
+        let snapshotDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let snapshotStore = UsageSnapshotStore(directory: snapshotDirectory)
+        snapshotStore.update(
+            provider: "claude",
+            metrics: UsageSnapshotStore.claudeMetrics(for: lastGood)
+        )
+        service.snapshotStore = snapshotStore
 
         XCTAssertEqual(service.claudeCredentialSource, .claudeCode)
 
@@ -1444,6 +1452,11 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(service.lastUpdated, previousUpdated)
         XCTAssertEqual(requestCount, 0)
         XCTAssertNil(store.load(defaultScopes: UsageService.defaultOAuthScopes))
+
+        // The snapshot (phone, ai-usage skill) must see the expiry too, not healthy last-good.
+        let provider = try XCTUnwrap(snapshotStore.currentSnapshot().providers["claude"])
+        XCTAssertEqual(provider.error, UsageService.claudeCodeExpiredMessage)
+        XCTAssertEqual(provider.metrics.first { $0.id == "five_hour" }?.percentUsed, 41)
     }
 
     func testClaudeCode401KeepsLastGoodAndDoesNotRefreshOrSignOut() async throws {

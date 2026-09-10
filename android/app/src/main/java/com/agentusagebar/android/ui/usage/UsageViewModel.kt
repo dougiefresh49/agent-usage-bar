@@ -93,8 +93,8 @@ class UsageViewModel(
                 _resetCreditSummary.value = summaryFrom(snap)
             }
         }
+        // The home screen pulls on every resume (and then every 60 s), so init only arms the worker.
         viewModelScope.launch {
-            repository.refreshAll()
             UsageRefreshScheduler.ensureScheduled(AgentUsageBarAppHolder.context())
         }
     }

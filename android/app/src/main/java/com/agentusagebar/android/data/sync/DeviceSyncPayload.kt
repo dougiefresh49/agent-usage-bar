@@ -226,10 +226,6 @@ object DeviceSyncCodec {
 
     fun base64URLDecode(value: String): ByteArray = Base64.getUrlDecoder().decode(value)
 
-    fun credentialHash(value: String?): String? = value
-        ?.takeIf { it.isNotBlank() }
-        ?.let { base64URLEncode(MessageDigest.getInstance("SHA-256").digest(it.toByteArray())) }
-
     private fun queryItems(rawQuery: String?): Map<String, String> =
         rawQuery.orEmpty().split("&").mapNotNull { item ->
             val split = item.indexOf('=')

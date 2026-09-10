@@ -122,8 +122,8 @@ private fun HomeScreen(
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
-                delay(60_000)
                 viewModel.refresh()
+                delay(60_000)
             }
         }
     }

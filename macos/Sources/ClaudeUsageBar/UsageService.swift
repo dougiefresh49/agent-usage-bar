@@ -429,6 +429,9 @@ class UsageService: ObservableObject {
 
         do {
             guard let result = try await sendAuthorizedRequest(to: usageEndpoint) else {
+                if claudeCredentialSource == .claudeCode, let lastError {
+                    snapshotStore?.update(provider: "claude", error: lastError)
+                }
                 return
             }
             let (data, http) = result

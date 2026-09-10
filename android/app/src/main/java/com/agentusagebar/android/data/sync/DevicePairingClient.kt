@@ -217,7 +217,8 @@ class DevicePairingClient(
                 "&device=${url(device.deviceID)}&ts=$timestamp&proof=${url(proof)}",
             body = DeviceSyncCodec.json.encodeToString(requestEnvelope).toByteArray(),
             connectTimeoutMs = 1_500,
-            readTimeoutMs = 8_000,
+            // The Mac consumes the credit (20 s budget) and re-fetches usage before answering.
+            readTimeoutMs = 45_000,
         )
         require(response.status in 200..299) { response.errorMessage() }
         val envelope = DeviceSyncCodec.json.decodeFromString<DeviceEncryptedEnvelope>(

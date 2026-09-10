@@ -5,7 +5,6 @@ import SwiftUI
 struct DevicesSettingsView: View {
     @ObservedObject var service: UsageService
     @ObservedObject var notificationService: NotificationService
-    @ObservedObject var connectedService: ConnectedUsageService
     @ObservedObject var deviceSyncManager: DeviceSyncManager
     @State private var showingAddDevice = false
     @State private var deviceToRemove: PairedDevice?
@@ -41,18 +40,6 @@ struct DevicesSettingsView: View {
                 Text("Removing a device stops future sync and tells the phone to forget this Mac and the usage it showed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                DisclosureGroup("Emergency provider revocation") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("For immediate protection, invalidate the credentials at their source:")
-                        Link("OpenAI — review active sessions", destination: URL(string: "https://chatgpt.com/")!)
-                        Link("Claude — log out all sessions", destination: URL(string: "https://claude.ai/settings/account")!)
-                        Link("Cursor — sign out and re-authenticate", destination: URL(string: "https://cursor.com/settings")!)
-                        Link("ElevenLabs — replace the API key", destination: URL(string: "https://elevenlabs.io/app/settings/api-keys")!)
-                    }
-                    .font(.caption)
-                    .padding(.top, 6)
-                }
             }
 
             if let message = deviceSyncManager.serverMessage {
@@ -68,7 +55,6 @@ struct DevicesSettingsView: View {
             AddDeviceSheet(
                 service: service,
                 notificationService: notificationService,
-                connectedService: connectedService,
                 deviceSyncManager: deviceSyncManager
             )
         }
@@ -86,7 +72,7 @@ struct DevicesSettingsView: View {
                 deviceToRemove = nil
             }
         } message: { _ in
-            Text("Future sync will stop immediately. A credential wipe will be delivered when the phone next contacts this Mac.")
+            Text("Future sync will stop immediately. The phone forgets this Mac the next time it checks in.")
         }
     }
 
@@ -195,7 +181,6 @@ private struct AddDeviceSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var service: UsageService
     @ObservedObject var notificationService: NotificationService
-    @ObservedObject var connectedService: ConnectedUsageService
     @ObservedObject var deviceSyncManager: DeviceSyncManager
 
     @State private var syncPolling = true
@@ -363,7 +348,7 @@ private struct AddDeviceSheet: View {
                 .foregroundStyle(.green)
             Text("Settings transferred securely")
                 .font(.title3.weight(.semibold))
-            Text("The phone is now listed in Devices. You can remove it later to stop future sync and queue a credential wipe.")
+            Text("The phone is now listed in Devices. You can remove it later to stop future sync and have the phone forget this Mac.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 380)

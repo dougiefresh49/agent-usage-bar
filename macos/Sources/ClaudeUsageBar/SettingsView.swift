@@ -53,7 +53,6 @@ struct SettingsWindowContent: View {
             DevicesSettingsView(
                 service: service,
                 notificationService: notificationService,
-                connectedService: connectedService,
                 deviceSyncManager: deviceSyncManager
             )
             .tabItem { Label("Devices", systemImage: "laptopcomputer.and.iphone") }

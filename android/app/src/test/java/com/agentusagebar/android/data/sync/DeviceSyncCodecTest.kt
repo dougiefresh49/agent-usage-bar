@@ -183,7 +183,6 @@ class DeviceSyncCodecTest {
         assertNull(device.openAITokenHash)
         assertNull(device.cursorTokenHash)
         assertNull(device.elevenLabsKeyHash)
-        assertNull(DeviceSyncCodec.credentialHash(null))
     }
 
     @Test

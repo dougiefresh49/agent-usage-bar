@@ -98,7 +98,7 @@ fun UsageSnapshotDocument.toAppUsageSnapshot(
                 provider = provider,
                 isConfigured = true,
                 metrics = entry.metrics.map { it.toUsageMetric(provider) },
-                error = entry.error,
+                error = entry.error?.let { "On the Mac: $it" },
                 updatedAtEpochMs = parseIsoToEpochMs(entry.updatedAt),
             )
         }

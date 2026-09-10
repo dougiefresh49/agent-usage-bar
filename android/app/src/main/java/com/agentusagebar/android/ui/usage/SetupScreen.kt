@@ -70,13 +70,6 @@ fun SetupScreen(
                 )
             }
         }
-        if (settings.pollingMinutes <= 5) {
-            Text(
-                "Frequent polling may cause rate limiting",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.tertiary,
-            )
-        }
 
         Text("Provider widget focus", style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

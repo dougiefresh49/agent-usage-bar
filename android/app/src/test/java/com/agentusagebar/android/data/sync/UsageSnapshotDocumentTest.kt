@@ -92,7 +92,7 @@ class UsageSnapshotDocumentTest {
         )
 
         assertEquals(
-            "OpenAI session expired — update it in Settings",
+            "On the Mac: OpenAI session expired — update it in Settings",
             snapshot.providers.getValue(UsageProvider.OPENAI).error,
         )
         assertEquals("Max 20x", snapshot.claudeProfile?.planLabel)
