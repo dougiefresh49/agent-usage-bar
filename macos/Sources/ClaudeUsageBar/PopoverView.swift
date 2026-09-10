@@ -949,20 +949,31 @@ private struct OpenAIUsageView: View {
 
         if !service.isOpenAIConfigured {
             configurePrompt("Add a ChatGPT session token in Settings.")
-        } else if service.openAIUsage != nil {
-            let summaryMetrics = UsagePresentationMetrics.detailPair(
-                for: .openAI,
-                available: metrics
-            )
-            let summaryIDs = Set(summaryMetrics.map(\.id))
+        } else {
+            // Reset credits and credential source are known independently of a
+            // successful usage fetch; keep plan and bars gated on usage.
+            if service.openAIUsage != nil {
+                let popoverMetrics = UsagePresentationMetrics.openAIPopoverMetrics(metrics)
+                let summaryMetrics = UsagePresentationMetrics.detailPair(
+                    for: .openAI,
+                    available: popoverMetrics
+                )
+                let summaryIDs = Set(summaryMetrics.map(\.id))
 
-            DetailUsageVisualization(
-                style: style,
-                metrics: summaryMetrics
-            )
+                DetailUsageVisualization(
+                    style: style,
+                    metrics: summaryMetrics
+                )
 
-            ForEach(metrics.filter { !summaryIDs.contains($0.id) }) { metric in
-                UsageMetricRow(metric: metric)
+                ForEach(popoverMetrics.filter { !summaryIDs.contains($0.id) }) { metric in
+                    UsageMetricRow(metric: metric)
+                }
+
+                if let plan = UsageDetailRows.codexPlanLine(planType: service.openAIUsage?.planType) {
+                    providerDetailRow(plan)
+                }
+            } else {
+                loadingOrError(service.openAIError)
             }
 
             resetCreditsRow
@@ -979,19 +990,12 @@ private struct OpenAIUsageView: View {
                     }
             }
 
-            VStack(alignment: .leading, spacing: 2) {
-                if let plan = UsageDetailRows.codexPlanLine(planType: service.openAIUsage?.planType) {
-                    providerDetailRow(plan)
-                }
-                if let source = UsageDetailRows.codexSourceLine(
-                    source: service.openAICredentialSource,
-                    tokenExpiry: service.openAITokenExpiry
-                ) {
-                    providerDetailRow(source)
-                }
+            if let source = UsageDetailRows.codexSourceLine(
+                source: service.openAICredentialSource,
+                tokenExpiry: service.openAITokenExpiry
+            ) {
+                providerDetailRow(source)
             }
-        } else {
-            loadingOrError(service.openAIError)
         }
 
         if let error = service.openAIError, service.openAIUsage != nil {
@@ -1057,40 +1061,42 @@ private struct CursorUsageView: View {
 
         if !service.isCursorConfigured {
             configurePrompt("Add a Cursor session token in Settings.")
-        } else if let usage = service.cursorUsage {
-            let summaryMetrics = UsagePresentationMetrics.detailPair(
-                for: .cursor,
-                available: metrics
-            )
-            let summaryIDs = Set(summaryMetrics.map(\.id))
+        } else {
+            // Credential source is known independently of a successful usage
+            // fetch; keep plan and spend gated on usage data.
+            if let usage = service.cursorUsage {
+                let summaryMetrics = UsagePresentationMetrics.detailPair(
+                    for: .cursor,
+                    available: metrics
+                )
+                let summaryIDs = Set(summaryMetrics.map(\.id))
 
-            DetailUsageVisualization(
-                style: style,
-                metrics: summaryMetrics
-            )
+                DetailUsageVisualization(
+                    style: style,
+                    metrics: summaryMetrics
+                )
 
-            ForEach(metrics.filter { !summaryIDs.contains($0.id) }) { metric in
-                UsageMetricRow(metric: metric)
-            }
-
-            if let spend = usage.spendLimitUsage,
-               let used = spend.spent,
-               let limit = spend.individualLimit {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("On-Demand")
-                            .usageFont(.metric)
-                        Spacer()
-                        Text("\(UsageMoney.minorUnits(used)) / \(UsageMoney.minorUnits(limit))")
-                            .usageFont(.metric)
-                            .monospacedDigit()
-                    }
-                    ProgressView(value: (spend.utilization ?? 0) / 100, total: 1)
-                        .tint(colorForPct((spend.utilization ?? 0) / 100))
+                ForEach(metrics.filter { !summaryIDs.contains($0.id) }) { metric in
+                    UsageMetricRow(metric: metric)
                 }
-            }
 
-            VStack(alignment: .leading, spacing: 2) {
+                if let spend = usage.spendLimitUsage,
+                   let used = spend.spent,
+                   let limit = spend.individualLimit {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("On-Demand")
+                                .usageFont(.metric)
+                            Spacer()
+                            Text("\(UsageMoney.minorUnits(used)) / \(UsageMoney.minorUnits(limit))")
+                                .usageFont(.metric)
+                                .monospacedDigit()
+                        }
+                        ProgressView(value: (spend.utilization ?? 0) / 100, total: 1)
+                            .tint(colorForPct((spend.utilization ?? 0) / 100))
+                    }
+                }
+
                 let planInfo = service.cursorPlanInfo?.planInfo
                 if let plan = UsageDetailRows.cursorPlanLine(planInfo) {
                     providerDetailRow(plan)
@@ -1101,15 +1107,16 @@ private struct CursorUsageView: View {
                 ) {
                     providerDetailRow(spend)
                 }
-                if let source = UsageDetailRows.cursorSourceLine(
-                    source: service.cursorCredentialSource,
-                    tokenExpiry: service.cursorTokenExpiry
-                ) {
-                    providerDetailRow(source)
-                }
+            } else {
+                loadingOrError(service.cursorError)
             }
-        } else {
-            loadingOrError(service.cursorError)
+
+            if let source = UsageDetailRows.cursorSourceLine(
+                source: service.cursorCredentialSource,
+                tokenExpiry: service.cursorTokenExpiry
+            ) {
+                providerDetailRow(source)
+            }
         }
 
         if let error = service.cursorError, service.cursorUsage != nil {

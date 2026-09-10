@@ -562,6 +562,15 @@ enum UsagePresentationMetrics {
         return metrics
     }
 
+    /// Popover Codex metrics without the legacy reset-credit count row.
+    /// The banked-credit row replaces that metric in the popover; menu-bar and
+    /// widgets keep `openAIResetCreditsID` via `openAIMetrics`.
+    static func openAIPopoverMetrics(
+        _ metrics: [UsagePresentationMetric]
+    ) -> [UsagePresentationMetric] {
+        metrics.filter { $0.id != openAIResetCreditsID }
+    }
+
     /// Codex additional rate-limit rows for the popover only. Kept out of `openAIMetrics` so the menu-bar metric picker stays unchanged.
     static func openAIAdditionalLimitMetrics(
         usage: OpenAIUsageResponse?

@@ -572,6 +572,62 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertNil(UsageDetailRows.resetCreditsLine(count: 0, nextExpiry: expiry, now: now))
     }
 
+    func testOpenAIPopoverMetricsDropsResetCreditsRow() {
+        let session = percentageMetric(
+            id: UsagePresentationMetrics.openAIPrimaryID,
+            label: "5-Hour Window",
+            value: 12
+        )
+        let weekly = percentageMetric(
+            id: UsagePresentationMetrics.openAISecondaryID,
+            label: "7-Day Window",
+            value: 37
+        )
+        let resets = UsagePresentationMetric(
+            id: UsagePresentationMetrics.openAIResetCreditsID,
+            label: "Reset Credits",
+            shortLabel: "R",
+            kind: .count(3),
+            resetDate: nil,
+            resetInterval: nil
+        )
+        let additional = percentageMetric(
+            id: "openai.additional.code_review.0",
+            label: "Code Review",
+            value: 18
+        )
+
+        let popover = UsagePresentationMetrics.openAIPopoverMetrics(
+            [session, weekly, resets, additional]
+        )
+        XCTAssertEqual(popover.map(\.id), [session.id, weekly.id, additional.id])
+
+        let pair = UsagePresentationMetrics.detailPair(for: .openAI, available: popover)
+        XCTAssertEqual(pair.map(\.id), [session.id, weekly.id])
+        XCTAssertFalse(popover.contains { $0.id == UsagePresentationMetrics.openAIResetCreditsID })
+    }
+
+    func testOpenAIPopoverMetricsWithoutWeeklyLeavesResetCreditsOutOfOrbit() {
+        let session = percentageMetric(
+            id: UsagePresentationMetrics.openAIPrimaryID,
+            label: "5-Hour Window",
+            value: 12
+        )
+        let resets = UsagePresentationMetric(
+            id: UsagePresentationMetrics.openAIResetCreditsID,
+            label: "Reset Credits",
+            shortLabel: "R",
+            kind: .count(3),
+            resetDate: nil,
+            resetInterval: nil
+        )
+
+        let popover = UsagePresentationMetrics.openAIPopoverMetrics([session, resets])
+        let pair = UsagePresentationMetrics.detailPair(for: .openAI, available: popover)
+        XCTAssertEqual(pair.map(\.id), [session.id])
+        XCTAssertNil(pair.first { $0.id == UsagePresentationMetrics.openAIResetCreditsID })
+    }
+
     func testCodexPlanAndSourceLines() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
 
@@ -605,6 +661,9 @@ final class UsagePresentationTests: XCTestCase {
             "Source: environment variable"
         )
         XCTAssertNil(UsageDetailRows.codexSourceLine(source: .none, tokenExpiry: nil, now: now))
+        // Source lines depend only on the credential source, not on usage success.
+        XCTAssertNotNil(UsageDetailRows.codexSourceLine(source: .pasted, tokenExpiry: nil, now: now))
+        XCTAssertNil(UsageDetailRows.codexPlanLine(planType: nil))
     }
 
     func testCursorPlanSpendAndSourceLines() throws {
@@ -655,6 +714,8 @@ final class UsagePresentationTests: XCTestCase {
             "Source: pasted cookie"
         )
         XCTAssertNil(UsageDetailRows.cursorSourceLine(source: .none, tokenExpiry: nil, now: now))
+        // Source lines depend only on the credential source, not on usage success.
+        XCTAssertNotNil(UsageDetailRows.cursorSourceLine(source: .cursorCLI, tokenExpiry: nil, now: now))
     }
 
     func testClaudePlanLineJoinsTierAndStatus() {

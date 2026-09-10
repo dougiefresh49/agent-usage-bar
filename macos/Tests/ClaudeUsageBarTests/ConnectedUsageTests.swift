@@ -890,8 +890,9 @@ final class ConnectedUsageServiceTests: XCTestCase {
 
     private static let consumePath = "/backend-api/wham/rate-limit-reset-credits/consume"
 
-    /// Three available credits plus one used one. `soon` is the codex_rate_limits credit that expires first;
-    /// `other` expires sooner still but has a different reset type and must never be picked.
+    /// Three eligible `codex_rate_limits` credits plus one used one and one other reset type.
+    /// `available_count` matches the eligible set redemption picks from (not every available credit).
+    /// `soon` expires first among eligible credits; `other` expires sooner still but must never be picked.
     private static let resetCreditsFixture = #"""
     {
       "credits": [
@@ -901,7 +902,7 @@ final class ConnectedUsageServiceTests: XCTestCase {
         {"id": "used", "reset_type": "codex_rate_limits", "status": "redeemed", "expires_at": "2026-09-11T00:00:00Z"},
         {"id": "undated", "reset_type": "codex_rate_limits", "status": "available"}
       ],
-      "available_count": 4
+      "available_count": 3
     }
     """#
 
@@ -986,6 +987,14 @@ final class ConnectedUsageServiceTests: XCTestCase {
 
         await service.fetchOpenAIUsage()
         XCTAssertEqual(service.availableResetCredits.map(\.id), ["soon", "later", "undated"])
+        XCTAssertEqual(service.availableResetCredits.count, service.openAIResetCredits?.availableCount)
+        XCTAssertEqual(
+            UsageDetailRows.resetCreditsLine(
+                count: service.availableResetCredits.count,
+                nextExpiry: service.availableResetCredits.first?.expiresAtDate
+            )?.hasPrefix("3 banked"),
+            true
+        )
         XCTAssertEqual(service.nextResetCredit?.id, "soon")
         XCTAssertEqual(service.openAIAccountID, "acct-1")
         let updatedBefore = try XCTUnwrap(service.openAILastUpdated)
@@ -1097,6 +1106,89 @@ final class ConnectedUsageServiceTests: XCTestCase {
         XCTAssertEqual(box.stub.consumeBodies.count, 1)
         XCTAssertEqual(service.resetCreditOutcome?.message, "Limits reset")
         XCTAssertFalse(service.isRedeemingResetCredit)
+    }
+
+    /// Credits and credential source stay available when the usage endpoint fails.
+    func testResetCreditsAndSourceSurviveUsageFetchFailure() async throws {
+        let box = ResetStubBox()
+        let (service, defaults, suiteName) = try makeResetService(box: box)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        ConnectedMockURLProtocol.handler = { request in
+            func response(_ status: Int) -> HTTPURLResponse {
+                HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+            }
+            switch request.url?.path {
+            case "/openai":
+                return (response(401), Data(#"{"error":"unauthorized"}"#.utf8))
+            case "/credits":
+                return (response(200), Data(Self.resetCreditsFixture.utf8))
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        await service.fetchOpenAIUsage()
+
+        XCTAssertNil(service.openAIUsage)
+        XCTAssertNotNil(service.openAIError)
+        XCTAssertEqual(service.openAICredentialSource, .pasted)
+        XCTAssertEqual(service.availableResetCredits.map(\.id), ["soon", "later", "undated"])
+        XCTAssertEqual(service.availableResetCredits.count, 3)
+        XCTAssertEqual(
+            UsageDetailRows.codexSourceLine(
+                source: service.openAICredentialSource,
+                tokenExpiry: service.openAITokenExpiry
+            ),
+            "Source: pasted token"
+        )
+        XCTAssertEqual(
+            UsageDetailRows.resetCreditsLine(
+                count: service.availableResetCredits.count,
+                nextExpiry: service.availableResetCredits.first?.expiresAtDate
+            )?.hasPrefix("3 banked"),
+            true
+        )
+    }
+
+    /// Cursor credential source stays known when the usage endpoint fails.
+    func testCursorSourceSurvivesUsageFetchFailure() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(cursorSessionToken: "pasted-cursor"))
+        let session = makeSession()
+
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 401,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            if request.url?.path == "/cursor" {
+                return (response, Data(#"{"error":"unauthorized"}"#.utf8))
+            }
+            throw URLError(.badURL)
+        }
+
+        let service = makeService(
+            session: session,
+            cursorEndpoint: URL(string: "https://example.com/cursor")!,
+            credentialsStore: store
+        )
+        await service.fetchCursorUsage()
+
+        XCTAssertNil(service.cursorUsage)
+        XCTAssertNotNil(service.cursorError)
+        XCTAssertEqual(service.cursorCredentialSource, .pasted)
+        XCTAssertEqual(
+            UsageDetailRows.cursorSourceLine(
+                source: service.cursorCredentialSource,
+                tokenExpiry: service.cursorTokenExpiry
+            ),
+            "Source: pasted cookie"
+        )
     }
 
     private func makeService(
