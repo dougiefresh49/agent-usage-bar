@@ -70,6 +70,19 @@ struct AgentUsageBarApp: App {
 
                     service.startPolling()
                     connectedService.startPolling()
+                    deviceSyncManager.noteCredentialFingerprint(
+                        DeviceSyncManager.cliCredentialFingerprint()
+                    )
+                }
+                .onChange(of: connectedService.openAILastUpdated) { _, _ in
+                    deviceSyncManager.noteCredentialFingerprint(
+                        DeviceSyncManager.cliCredentialFingerprint()
+                    )
+                }
+                .onChange(of: connectedService.cursorLastUpdated) { _, _ in
+                    deviceSyncManager.noteCredentialFingerprint(
+                        DeviceSyncManager.cliCredentialFingerprint()
+                    )
                 }
         }
         .menuBarExtraStyle(.window)

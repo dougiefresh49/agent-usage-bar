@@ -18,6 +18,11 @@ struct DevicesSettingsView: View {
                         .font(.title3.weight(.semibold))
                     Text("Pair a phone over your local network. The QR code contains no credentials, and the Mac must approve every new device.")
                         .foregroundStyle(.secondary)
+                    if let phoneTokenExpiryText {
+                        Text(phoneTokenExpiryText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
 
                     Button("Add Device") {
                         showingAddDevice = true
@@ -150,12 +155,27 @@ struct DevicesSettingsView: View {
         .padding(.vertical, 3)
     }
 
+    private var phoneTokenExpiryText: String? {
+        let expiries = [
+            CodexAuthFile.load().flatMap { JWTClaims.expiry(of: $0.accessToken) },
+            CursorCLIKeychain.load().flatMap { JWTClaims.expiry(of: $0.accessToken) }
+        ].compactMap { $0 }
+        guard let soonest = expiries.min() else { return nil }
+        let days = Calendar.current.dateComponents([.day], from: Date(), to: soonest).day ?? 0
+        if days < 0 {
+            return "phone tokens expired"
+        }
+        return "phone tokens expire in \(days)d"
+    }
+
     private func wipeWasDelivered(to device: PairedDevice) -> Bool {
         device.wipeAcknowledgedAt != nil
     }
 
     private func queueSync(to device: PairedDevice) {
         let credentials = connectedService.deviceSyncCredentials()
+        let codex = CodexAuthFile.load()
+        let cursorCLI = CursorCLIKeychain.load()
         let payload = DeviceSyncPayload(
             general: DeviceSyncGeneral(pollingMinutes: service.pollingMinutes),
             appearance: DeviceSyncAppearance(
@@ -191,7 +211,10 @@ struct DevicesSettingsView: View {
             connections: DeviceSyncConnections(
                 openAISessionToken: credentials.openAISessionToken,
                 cursorSessionToken: credentials.cursorSessionToken,
-                elevenLabsAPIKey: credentials.elevenLabsAPIKey
+                elevenLabsAPIKey: credentials.elevenLabsAPIKey,
+                codexAccessToken: codex?.accessToken,
+                codexAccountId: codex?.accountId,
+                cursorAccessToken: cursorCLI?.accessToken
             )
         )
         deviceSyncManager.queueSync(payload, for: device)
@@ -442,6 +465,8 @@ private struct AddDeviceSheet: View {
     private func generateTransfer() {
         do {
             let credentials = connectedService.deviceSyncCredentials()
+            let codex = CodexAuthFile.load()
+            let cursorCLI = CursorCLIKeychain.load()
             let payload = DeviceSyncPayload(
                 general: syncPolling
                     ? DeviceSyncGeneral(pollingMinutes: service.pollingMinutes)
@@ -484,7 +509,10 @@ private struct AddDeviceSheet: View {
                     ? DeviceSyncConnections(
                         openAISessionToken: syncOpenAI ? credentials.openAISessionToken : nil,
                         cursorSessionToken: syncCursor ? credentials.cursorSessionToken : nil,
-                        elevenLabsAPIKey: syncElevenLabs ? credentials.elevenLabsAPIKey : nil
+                        elevenLabsAPIKey: syncElevenLabs ? credentials.elevenLabsAPIKey : nil,
+                        codexAccessToken: codex?.accessToken,
+                        codexAccountId: codex?.accountId,
+                        cursorAccessToken: cursorCLI?.accessToken
                     )
                     : nil
             )
