@@ -9,8 +9,7 @@ import com.agentusagebar.android.data.model.AppUsageSnapshot
 import com.agentusagebar.android.data.model.OpenAIResetCredit
 import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.data.network.ResetCreditClient
-import com.agentusagebar.android.data.network.ResetCreditRedeemResult
-import com.agentusagebar.android.data.network.UsageApiClient
+import com.agentusagebar.android.data.network.ResetCreditFailure
 import com.agentusagebar.android.data.repository.DeviceSyncCheckResult
 import com.agentusagebar.android.data.repository.UsageRepository
 import com.agentusagebar.android.worker.UsageRefreshScheduler
@@ -69,7 +68,6 @@ class UsageViewModel(
     private val credentialsStore: CredentialsStore = CredentialsStore(
         AgentUsageBarAppHolder.context(),
     ),
-    private val usageApiClient: UsageApiClient = UsageApiClient(credentialsStore),
 ) : ViewModel() {
     val snapshot: StateFlow<AppUsageSnapshot> = repository.snapshot
     val settings: StateFlow<AppSettings> = repository.settings.stateIn(
@@ -154,35 +152,33 @@ class UsageViewModel(
         outcomeClearJob?.cancel()
         _resetCreditState.value = ResetCreditUiState.InFlight
         viewModelScope.launch {
-            val bearer = credentialsStore.loadConnected().openAISessionToken
+            val credentials = credentialsStore.loadConnected()
+            val bearer = credentials.openAIBearer
+            val accountId = credentials.openAIAccountId
             if (bearer.isNullOrBlank()) {
                 _resetCreditState.value =
                     ResetCreditUiState.Error("OpenAI session token missing.")
                 scheduleOutcomeClear()
                 return@launch
             }
-            // ConnectedCredentials has no account id field (Models.kt out of ownership).
-            val accountId: String? = null
-            val result = withContext(Dispatchers.IO) {
-                resetCreditClient.redeem(
-                    bearer = bearer,
-                    accountId = accountId,
-                    creditId = creditId,
-                )
-            }
-            when (result) {
-                is ResetCreditRedeemResult.Completed -> {
-                    _resetCreditState.value =
-                        ResetCreditUiState.Outcome(result.outcome.message)
-                    repository.refreshAll()
-                    refreshResetCreditSummary()
+            try {
+                val outcome = withContext(Dispatchers.IO) {
+                    resetCreditClient.redeem(
+                        bearer = bearer,
+                        accountId = accountId,
+                        creditId = creditId,
+                    )
                 }
-                ResetCreditRedeemResult.InFlight -> {
-                    _resetCreditState.value = ResetCreditUiState.InFlight
-                }
-                is ResetCreditRedeemResult.Failed -> {
-                    _resetCreditState.value = ResetCreditUiState.Error(result.message)
-                }
+                _resetCreditState.value = ResetCreditUiState.Outcome(outcome.message)
+                repository.refreshAll()
+                refreshResetCreditSummary()
+            } catch (_: ResetCreditFailure.InFlight) {
+                _resetCreditState.value = ResetCreditUiState.InFlight
+            } catch (error: ResetCreditFailure.SendFailed) {
+                _resetCreditState.value = ResetCreditUiState.Error(error.message ?: "Redeem failed")
+            } catch (error: Exception) {
+                _resetCreditState.value =
+                    ResetCreditUiState.Error(error.message ?: "Redeem failed")
             }
             scheduleOutcomeClear()
         }
@@ -203,8 +199,16 @@ class UsageViewModel(
     private suspend fun refreshResetCreditSummary() {
         val summary = withContext(Dispatchers.IO) {
             runCatching {
-                val response = usageApiClient.fetchOpenAIResetCredits().getOrThrow()
-                val available = response.credits.filter { it.isAvailable }
+                val credentials = credentialsStore.loadConnected()
+                val bearer = credentials.openAIBearer
+                    ?: error("OpenAI not configured")
+                val response = resetCreditClient.fetchCredits(
+                    bearer = bearer,
+                    accountId = credentials.openAIAccountId,
+                )
+                val available = response.credits.filter {
+                    it.isAvailable && it.resetType == CODEX_RATE_LIMITS_RESET_TYPE
+                }
                 val soonest = available.minByOrNull { credit ->
                     expiresEpochMs(credit) ?: Long.MAX_VALUE
                 }
@@ -490,6 +494,10 @@ class UsageViewModel(
 
     fun showMessage(message: String) {
         _message.value = message
+    }
+
+    companion object {
+        private const val CODEX_RATE_LIMITS_RESET_TYPE = "codex_rate_limits"
     }
 }
 

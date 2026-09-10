@@ -262,29 +262,30 @@ private fun HomeScreen(
                         },
                     )
 
-                    if (selected == UsageProvider.OPENAI &&
-                        resetCreditSummary.availableCount > 0
-                    ) {
-                        val expiresLabel = resetCreditSummary.nextExpiresInDays?.let {
-                            " · next expires in ${it}d"
-                        }.orEmpty()
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = "${resetCreditSummary.availableCount} banked$expiresLabel",
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Button(
-                                onClick = viewModel::beginResetCreditConfirm,
-                                enabled = resetCreditState !is ResetCreditUiState.InFlight &&
-                                    resetCreditSummary.soonestCreditId != null,
+                    if (selected == UsageProvider.OPENAI) {
+                        if (resetCreditSummary.availableCount > 0) {
+                            val expiresLabel = resetCreditSummary.nextExpiresInDays?.let {
+                                " · next expires in ${it}d"
+                            }.orEmpty()
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text("Use reset")
+                                Text(
+                                    text = "${resetCreditSummary.availableCount} banked$expiresLabel",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Button(
+                                    onClick = viewModel::beginResetCreditConfirm,
+                                    enabled = resetCreditState !is ResetCreditUiState.InFlight &&
+                                        resetCreditSummary.soonestCreditId != null,
+                                ) {
+                                    Text("Use reset")
+                                }
                             }
                         }
+                        // Outside the availability row so "Limits reset" stays after the last credit.
                         when (val state = resetCreditState) {
                             is ResetCreditUiState.Outcome -> Text(
                                 text = state.message,

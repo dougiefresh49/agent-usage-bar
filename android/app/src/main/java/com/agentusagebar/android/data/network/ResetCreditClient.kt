@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.agentusagebar.android.data.model.OpenAIResetCreditsResponse
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
@@ -32,6 +33,7 @@ class ResetCreditClient(
     private val pendingStore: PendingResetAttemptStore,
     private val httpClient: OkHttpClient = defaultClient(),
     private val consumeUrl: String = CONSUME_URL,
+    private val creditsUrl: String = CREDITS_URL,
 ) {
     private val flightMutex = Mutex()
     private var inFlight = false
@@ -52,14 +54,36 @@ class ResetCreditClient(
     }
 
     /**
+     * Lists reset credits with the CLI-precedence bearer so a CLI-only phone can
+     * populate the Codex row without touching UsageApiClient.
+     */
+    fun fetchCredits(bearer: String, accountId: String?): OpenAIResetCreditsResponse {
+        val builder = Request.Builder()
+            .url(creditsUrl)
+            .get()
+            .header("Authorization", "Bearer $bearer")
+            .header("Accept", "application/json")
+        if (!accountId.isNullOrBlank()) {
+            builder.header("Chatgpt-Account-Id", accountId)
+        }
+        httpClient.newCall(builder.build()).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ResetCreditFailure.SendFailed("HTTP ${response.code}")
+            }
+            return CREDITS_JSON.decodeFromString(OpenAIResetCreditsResponse.serializer(), body)
+        }
+    }
+
+    /**
      * Posts the consume call. Reuses a persisted request id after a failed send.
-     * A second call while one is already in flight returns [ResetCreditRedeemResult.InFlight].
+     * A second call while one is already in flight throws [ResetCreditFailure.InFlight].
      */
     suspend fun redeem(
         bearer: String,
         accountId: String?,
         creditId: String,
-    ): ResetCreditRedeemResult {
+    ): ResetCreditOutcome {
         val acquired = flightMutex.withLock {
             if (inFlight) {
                 false
@@ -68,9 +92,9 @@ class ResetCreditClient(
                 true
             }
         }
-        if (!acquired) return ResetCreditRedeemResult.InFlight
+        if (!acquired) throw ResetCreditFailure.InFlight
 
-        return try {
+        try {
             val requestUuid = pendingStore.load()
                 ?.takeIf { it.creditId == creditId }
                 ?.let { UUID.fromString(it.requestId) }
@@ -105,7 +129,7 @@ class ResetCreditClient(
             val response = httpClient.newCall(builder.build()).execute()
             val responseBody = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                return ResetCreditRedeemResult.Failed("HTTP ${response.code}")
+                throw ResetCreditFailure.SendFailed("HTTP ${response.code}")
             }
 
             val code = runCatching {
@@ -114,15 +138,17 @@ class ResetCreditClient(
                     ?.jsonPrimitive
                     ?.contentOrNull
             }.getOrNull()
-                ?: return ResetCreditRedeemResult.Failed("Undecodable response")
+                ?: throw ResetCreditFailure.SendFailed("Undecodable response")
 
             val outcome = ResetCreditOutcome.fromCode(code)
-                ?: return ResetCreditRedeemResult.Failed("Unknown code: $code")
+                ?: throw ResetCreditFailure.SendFailed("Unknown code: $code")
 
             pendingStore.clear()
-            ResetCreditRedeemResult.Completed(outcome)
+            return outcome
+        } catch (error: ResetCreditFailure) {
+            throw error
         } catch (error: Exception) {
-            ResetCreditRedeemResult.Failed(error.message ?: "Redeem failed")
+            throw ResetCreditFailure.SendFailed(error.message ?: "Redeem failed")
         } finally {
             flightMutex.withLock { inFlight = false }
         }
@@ -137,7 +163,10 @@ class ResetCreditClient(
 
         private const val CONSUME_URL =
             "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume"
+        private const val CREDITS_URL =
+            "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
         private val JSON_MEDIA = "application/json".toMediaType()
+        private val CREDITS_JSON = Json { ignoreUnknownKeys = true }
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
@@ -187,10 +216,10 @@ enum class ResetCreditOutcome(val code: String, val message: String) {
     }
 }
 
-sealed class ResetCreditRedeemResult {
-    data class Completed(val outcome: ResetCreditOutcome) : ResetCreditRedeemResult()
-    data object InFlight : ResetCreditRedeemResult()
-    data class Failed(val message: String) : ResetCreditRedeemResult()
+/** Typed failure path for in-flight and send errors; redeem still returns [ResetCreditOutcome]. */
+sealed class ResetCreditFailure(message: String) : Exception(message) {
+    data object InFlight : ResetCreditFailure("Redeem already in flight")
+    class SendFailed(message: String) : ResetCreditFailure(message)
 }
 
 data class PendingResetAttempt(
@@ -202,17 +231,6 @@ interface PendingResetAttemptStore {
     fun load(): PendingResetAttempt?
     fun save(attempt: PendingResetAttempt)
     fun clear()
-}
-
-class InMemoryPendingResetAttemptStore : PendingResetAttemptStore {
-    private var pending: PendingResetAttempt? = null
-    override fun load(): PendingResetAttempt? = pending
-    override fun save(attempt: PendingResetAttempt) {
-        pending = attempt
-    }
-    override fun clear() {
-        pending = null
-    }
 }
 
 class SharedPreferencesPendingResetAttemptStore(

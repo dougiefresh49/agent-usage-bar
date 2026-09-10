@@ -2,7 +2,6 @@ package com.agentusagebar.android.data.network
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -14,6 +13,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
@@ -66,17 +66,13 @@ class ResetCreditClientTest {
             consumeUrl = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume",
         )
 
-        val result = client.redeem(
+        val outcome = client.redeem(
             bearer = "tok_test",
             accountId = "acct-9",
             creditId = "credit-1",
         )
 
-        assertTrue(result is ResetCreditRedeemResult.Completed)
-        assertEquals(
-            ResetCreditOutcome.RESET,
-            (result as ResetCreditRedeemResult.Completed).outcome,
-        )
+        assertEquals(ResetCreditOutcome.RESET, outcome)
         assertEquals(1, recorded.size)
         val req = recorded.first()
         assertEquals("POST", req.method)
@@ -105,9 +101,7 @@ class ResetCreditClientTest {
                 jsonResponse(request, 200, """{"code":"${outcome.code}"}""")
             }
             val client = ResetCreditClient(InMemoryPendingResetAttemptStore(), http)
-            val result = client.redeem("tok", null, "c-${outcome.code}")
-            assertTrue(result is ResetCreditRedeemResult.Completed)
-            assertEquals(outcome, (result as ResetCreditRedeemResult.Completed).outcome)
+            assertEquals(outcome, client.redeem("tok", null, "c-${outcome.code}"))
         }
     }
 
@@ -127,12 +121,16 @@ class ResetCreditClientTest {
         }
         val client = ResetCreditClient(store, http)
 
-        val first = client.redeem("tok", "acct-9", "credit-1")
-        assertTrue(first is ResetCreditRedeemResult.Failed)
+        try {
+            client.redeem("tok", "acct-9", "credit-1")
+            fail("expected SendFailed")
+        } catch (error: ResetCreditFailure.SendFailed) {
+            assertTrue(error.message!!.contains("500"))
+        }
         assertEquals("credit-1", store.load()!!.creditId)
 
         val second = client.redeem("tok", "acct-9", "credit-1")
-        assertTrue(second is ResetCreditRedeemResult.Completed)
+        assertEquals(ResetCreditOutcome.RESET, second)
         assertNull(store.load())
 
         val id1 = Json.parseToJsonElement(bodies[0]).jsonObject
@@ -158,9 +156,14 @@ class ResetCreditClientTest {
         // stalling this coroutine before the second redeem runs.
         val first = async(Dispatchers.IO) { client.redeem("tok", null, "credit-1") }
         assertTrue(started.await(5, TimeUnit.SECONDS))
-        assertEquals(ResetCreditRedeemResult.InFlight, client.redeem("tok", null, "credit-1"))
+        try {
+            client.redeem("tok", null, "credit-1")
+            fail("expected InFlight")
+        } catch (_: ResetCreditFailure.InFlight) {
+            // expected
+        }
         release.countDown()
-        assertTrue(first.await() is ResetCreditRedeemResult.Completed)
+        assertEquals(ResetCreditOutcome.RESET, first.await())
     }
 
     private fun fakeClient(handler: (okhttp3.Request) -> Response): OkHttpClient =
@@ -181,5 +184,17 @@ class ResetCreditClientTest {
         val buffer = okio.Buffer()
         writeTo(buffer)
         return buffer.readUtf8()
+    }
+}
+
+/** Test-only pending store; kept out of the production source set. */
+class InMemoryPendingResetAttemptStore : PendingResetAttemptStore {
+    private var pending: PendingResetAttempt? = null
+    override fun load(): PendingResetAttempt? = pending
+    override fun save(attempt: PendingResetAttempt) {
+        pending = attempt
+    }
+    override fun clear() {
+        pending = null
     }
 }
