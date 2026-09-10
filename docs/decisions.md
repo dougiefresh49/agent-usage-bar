@@ -8,6 +8,8 @@ as prose or were dropped, not backfilled.
 
 | # | date | decision | status |
 |---|------|----------|--------|
+| 17 | 2026-09-10 | #54 popover pace: overview capsules keep the compact used-percent text and only the per-window headline and detail rows switch to "left", reading owner decision 3's "headline only" narrowly (#68) | assumed (reopens when: Doug says the overview cards should read "left" too) |
+| 16 | 2026-09-10 | #54 popover pace, the question at fix dispatch 3: the design holds; the open finding (Codex additional rate-limit rows still plain used-percent) is an implementation miss against "each window metric gains geometry", so dispatch 3 goes out for that row only (#68) | accepted |
 | 15 | 2026-09-10 | Overnight #58 run: one Sol round per PR is the gate from wave 2 on (the lane's own, with a coverage table over every spec bullet); the orchestrator re-reviews only a PR whose lane gate could not run, and grok via cursor-agent is the overflow reviewer while codex is capped, because seven lane gates plus four re-reviews took codex from 32% to 48% weekly and capped its 5-hour window | accepted |
 | 14 | 2026-09-10 | Overnight #58 run: the Sol review gate runs `codex -m gpt-5.6-sol` at high reasoning, not the local codex config's pinned default `gpt-6-astra`, because the run brief names Sol and the roster has no row for astra | assumed (reopens when: Doug names the codex review model, or adds astra to the roster) |
 | 13 | 2026-09-10 | Overnight #58 run: no lane, reviewer, or verifier calls the Codex reset-credit consume endpoint against a real account; the RFC UUIDv5 vector and stubbed sessions are the whole check, and the #56 computer-use round opens the confirm dialog and presses Cancel only | accepted |
