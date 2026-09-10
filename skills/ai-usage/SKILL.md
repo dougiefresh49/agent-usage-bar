@@ -39,7 +39,7 @@ The AgentUsageBar menu bar app polls Claude, OpenAI/Codex, and Cursor usage APIs
 - `percentUsed` is 0–100; `null` means the provider did not report a number.
 - A provider key that is absent means it is not connected in the app — treat it as "unknown", not "0% used".
 - `resetsAt` (ISO 8601) is when that window resets; `updatedAt` is when that provider was last fetched.
-- Metric ids — claude: `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, `extra_usage`; openai: `primary`, `secondary`; cursor: `models`, `api`, `on_demand`.
+- Metric ids — claude: `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, `extra_usage`; openai: `primary`, `secondary`; cursor: `models`, `api`, `grok_bot`, `on_demand`.
 
 ## Using it for model routing
 

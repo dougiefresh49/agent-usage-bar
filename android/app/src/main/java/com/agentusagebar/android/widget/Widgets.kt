@@ -880,8 +880,7 @@ private fun shortMetricLabel(
     UsageMetricPreferences.CLAUDE_SEVEN_DAY -> "7d"
     UsageMetricPreferences.CURSOR_MODELS -> "Models"
     UsageMetricPreferences.CURSOR_API -> "API"
-    UsageMetricPreferences.CURSOR_TOTAL ->
-        if (fillMode == UsageFillMode.DRAIN) "Total Plan" else "Total"
+    UsageMetricPreferences.CURSOR_GROK_BOT -> "Grok"
     UsageMetricPreferences.OPENAI_PRIMARY -> "Primary"
     UsageMetricPreferences.OPENAI_SECONDARY -> "Secondary"
     UsageMetricPreferences.OPENAI_RESET_CREDITS -> "Reset Credits"

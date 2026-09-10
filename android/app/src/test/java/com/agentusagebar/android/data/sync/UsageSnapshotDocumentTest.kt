@@ -100,6 +100,7 @@ class UsageSnapshotDocumentTest {
         assertEquals("Pro", snapshot.cursorPlanInfo?.planInfo?.planName)
         assertEquals("$20/mo", snapshot.cursorPlanInfo?.planInfo?.price)
         assertEquals(2000, snapshot.cursorPlanInfo?.planInfo?.includedAmountCents)
+        assertEquals(406, snapshot.cursorPlanInfo?.planInfo?.usedAmountCents)
         assertEquals(
             Instant.parse("2026-09-26T16:24:39Z").toEpochMilli().toString(),
             snapshot.cursorPlanInfo?.planInfo?.billingCycleEnd,
@@ -115,7 +116,7 @@ class UsageSnapshotDocumentTest {
             snapshot.providers.getValue(UsageProvider.CLAUDE).metrics[0].resetIntervalMs,
         )
         assertEquals("used $4.06 / $20.00", snapshot.providers.getValue(UsageProvider.CURSOR).metrics
-            .first { it.id == UsageMetricPreferences.CURSOR_TOTAL }.detail)
+            .first { it.id == UsageMetricPreferences.CURSOR_GROK_BOT }.detail)
     }
 
     companion object {
@@ -163,10 +164,11 @@ class UsageSnapshotDocumentTest {
                 "label": "Pro",
                 "priceText": "${'$'}20/mo",
                 "renewsAt": "2026-09-26T16:24:39Z",
-                "includedAmountCents": 2000
+                "includedAmountCents": 2000,
+                "usedAmountCents": 406
               },
               "metrics": [
-                {"id": "total", "label": "Total usage", "percentUsed": 20.3, "valueText": "used ${'$'}4.06 / ${'$'}20.00"}
+                {"id": "grok_bot", "label": "Grok Bot", "percentUsed": 0.059292, "valueText": "used ${'$'}4.06 / ${'$'}20.00"}
               ]
             }
           }

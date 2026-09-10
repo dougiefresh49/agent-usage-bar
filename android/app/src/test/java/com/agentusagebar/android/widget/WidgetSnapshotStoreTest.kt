@@ -27,8 +27,8 @@ class WidgetSnapshotStoreTest {
                     isConfigured = true,
                     metrics = listOf(
                         UsageMetric(
-                            id = UsageMetricPreferences.CURSOR_TOTAL,
-                            label = "Total Plan Usage",
+                            id = UsageMetricPreferences.CURSOR_GROK_BOT,
+                            label = "Grok Bot",
                             percentUsed = 20.3,
                             resetsAtEpochMs = renewsAt,
                         ),
@@ -63,7 +63,7 @@ class WidgetSnapshotStoreTest {
             20.3,
             loaded.providers[UsageProvider.CURSOR]
                 ?.metrics
-                ?.first { it.id == UsageMetricPreferences.CURSOR_TOTAL }
+                ?.first { it.id == UsageMetricPreferences.CURSOR_GROK_BOT }
                 ?.percentUsed,
         )
     }
@@ -111,10 +111,10 @@ class WidgetSnapshotStoreTest {
     fun cursorSpendRowUsesPercentOfIncludedAmount() {
         assertEquals(
             "used $4.06 of $20.00",
-            formatCursorSpendRow(percentUsed = 20.3, includedAmountCents = 2000),
+            formatCursorSpendRow(usedAmountCents = 406, includedAmountCents = 2000),
         )
-        assertNull(formatCursorSpendRow(percentUsed = 20.3, includedAmountCents = null))
-        assertNull(formatCursorSpendRow(percentUsed = null, includedAmountCents = 2000))
+        assertNull(formatCursorSpendRow(usedAmountCents = 406, includedAmountCents = null))
+        assertNull(formatCursorSpendRow(usedAmountCents = null, includedAmountCents = 2000))
     }
 
     @Test
@@ -135,8 +135,8 @@ class WidgetSnapshotStoreTest {
                     isConfigured = true,
                     metrics = listOf(
                         UsageMetric(
-                            id = UsageMetricPreferences.CURSOR_TOTAL,
-                            label = "Total Plan Usage",
+                            id = UsageMetricPreferences.CURSOR_GROK_BOT,
+                            label = "Grok Bot",
                             percentUsed = 10.0,
                             resetsAtEpochMs = metricReset,
                         ),

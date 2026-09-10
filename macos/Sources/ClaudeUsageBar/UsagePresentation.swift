@@ -155,7 +155,7 @@ struct UsagePresentationMetric: Identifiable, Equatable {
     let kind: UsageMetricKind
     let resetDate: Date?
     let resetInterval: TimeInterval?
-    /// Pace inputs for Claude and Codex windows. Cursor and ElevenLabs stay nil.
+    /// Pace inputs for Claude, Codex, and Cursor Grok Bot windows. Other Cursor metrics and ElevenLabs stay nil.
     let geometry: UsageWindowGeometry?
     /// Popover labels for drain mode when the default label names the used share
     /// ("Credits Used"); nil keeps `label` and `shortLabel` in both modes.
@@ -359,7 +359,7 @@ enum UsagePresentationMetrics {
     static let openAIResetCreditsID = "openai.resetCredits"
     static let cursorModelsID = "cursor.models"
     static let cursorAPIID = "cursor.api"
-    static let cursorTotalID = "cursor.total"
+    static let cursorGrokBotID = "cursor.grokBot"
     static let elevenLabsCreditsID = "elevenlabs.credits"
     static let elevenLabsRemainingID = "elevenlabs.remaining"
 
@@ -377,7 +377,10 @@ enum UsagePresentationMetrics {
                 resetCredits: connectedService.openAIResetCredits
             )
         case .cursor:
-            return cursorMetrics(connectedService.cursorUsage)
+            return cursorMetrics(
+                connectedService.cursorUsage,
+                grokBot: connectedService.cursorGrokBotUsage
+            )
         case .elevenLabs:
             return elevenLabsMetrics(connectedService.elevenLabsUsage)
         }
@@ -394,7 +397,7 @@ enum UsagePresentationMetrics {
         case .openAI:
             preferred = [openAIPrimaryID, openAISecondaryID, openAIResetCreditsID]
         case .cursor:
-            preferred = [cursorModelsID, cursorAPIID, cursorTotalID]
+            preferred = [cursorModelsID, cursorAPIID, cursorGrokBotID]
         case .elevenLabs:
             preferred = [elevenLabsCreditsID, elevenLabsRemainingID]
         }
@@ -671,11 +674,14 @@ enum UsagePresentationMetrics {
         }
     }
 
-    static func cursorMetrics(_ usage: CursorUsageResponse?) -> [UsagePresentationMetric] {
+    static func cursorMetrics(
+        _ usage: CursorUsageResponse?,
+        grokBot: CursorGrokBotUsageResponse? = nil
+    ) -> [UsagePresentationMetric] {
         let resetDate = usage?.billingCycleEndDate
         let interval: TimeInterval = 30 * 24 * 60 * 60
-        // No pace geometry: Cursor has no window duration from the API.
-        return [
+        // Models and API have no window duration from the API. Grok Bot does.
+        var metrics = [
             UsagePresentationMetric(
                 id: cursorModelsID,
                 label: "First-Party Models",
@@ -694,17 +700,21 @@ enum UsagePresentationMetrics {
                 resetInterval: interval,
                 geometry: nil
             ),
-            UsagePresentationMetric(
-                id: cursorTotalID,
-                label: "Total Plan Usage",
-                shortLabel: "Tot",
-                kind: .percentage(usage?.planUsage?.totalPercentUsed),
-                resetDate: resetDate,
-                resetInterval: interval,
-                geometry: nil,
-                drainLabel: "Total Plan"
-            )
         ]
+        if let grokBot {
+            metrics.append(
+                percentageMetric(
+                    id: cursorGrokBotID,
+                    label: "Grok Bot",
+                    shortLabel: "Grok",
+                    percent: grokBot.usagePercent,
+                    resetDate: grokBot.nextResetDate,
+                    resetInterval: 7 * 24 * 60 * 60,
+                    geometryDuration: grokBot.windowDuration
+                )
+            )
+        }
+        return metrics
     }
 
     static func elevenLabsMetrics(

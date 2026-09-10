@@ -33,7 +33,7 @@ A tiny macOS menu bar app that shows your AI subscription usage at a glance. Cli
 - Menu bar icon with a mini dual-bar showing 5-hour and 7-day utilization
 - Claude 5-hour, 7-day, extra usage, and dynamic per-model limits such as Fable
 - OpenAI/Codex usage windows, reset timers, and available reset-credit announcements
-- Cursor first-party/API usage plus on-demand spend and billing-cycle reset
+- Cursor first-party/API usage, weekly Grok Bot window, on-demand spend, and billing-cycle reset
 - ElevenLabs credit balance, plan details, and next billing reset
 - Four native macOS desktop widgets for provider details, snapshots, and grids
 - Extra usage tracking with USD currency display

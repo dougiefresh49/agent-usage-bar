@@ -41,6 +41,7 @@ final class ConnectedUsageService: ObservableObject {
     /// True when a pasted Cursor token is in the store, even if CLI login is the active source.
     @Published private(set) var hasStoredCursorToken = false
     @Published private(set) var cursorPlanInfo: CursorPlanInfoResponse?
+    @Published private(set) var cursorGrokBotUsage: CursorGrokBotUsageResponse?
     /// Last Use reset result for the popover; the view clears it after a few seconds.
     @Published var resetCreditOutcome: (message: String, at: Date)?
     /// Mirrors `resetCreditRedeemer.isRedeeming` as published state so SwiftUI re-renders around a redemption.
@@ -249,6 +250,7 @@ final class ConnectedUsageService: ObservableObject {
             cursorUsage = nil
             cursorLastUpdated = nil
             cursorPlanInfo = nil
+            cursorGrokBotUsage = nil
             lastCursorPlanInfoFetch = nil
             cursorTokenExpiry = nil
         }
@@ -340,15 +342,19 @@ final class ConnectedUsageService: ObservableObject {
                 )
                 decoded = try JSONDecoder().decode(CursorUsageResponse.self, from: data)
                 let planRateLimited = await fetchCursorPlanInfoIfNeeded(token: resolved.token)
+                let grokBotRateLimited = await fetchCursorGrokBotUsage(token: resolved.token)
                 cursorUsage = decoded
                 cursorError = nil
                 cursorLastUpdated = Date()
-                if !planRateLimited {
+                if !planRateLimited, !grokBotRateLimited {
                     clearBackoff(provider: .cursor)
                 }
                 snapshotStore?.update(
                     provider: "cursor",
-                    metrics: UsageSnapshotStore.cursorMetrics(for: decoded),
+                    metrics: UsageSnapshotStore.cursorMetrics(
+                        for: decoded,
+                        grokBot: cursorGrokBotUsage
+                    ),
                     plan: cursorSnapshotPlan(from: decoded)
                 )
                 notificationService?.checkCursor(
@@ -358,6 +364,7 @@ final class ConnectedUsageService: ObservableObject {
                 )
             } else {
                 cursorPlanInfo = nil
+                cursorGrokBotUsage = nil
                 lastCursorPlanInfoFetch = nil
                 var request = URLRequest(
                     url: cursorEndpoint,
@@ -377,7 +384,10 @@ final class ConnectedUsageService: ObservableObject {
                 clearBackoff(provider: .cursor)
                 snapshotStore?.update(
                     provider: "cursor",
-                    metrics: UsageSnapshotStore.cursorMetrics(for: decoded),
+                    metrics: UsageSnapshotStore.cursorMetrics(
+                        for: decoded,
+                        grokBot: cursorGrokBotUsage
+                    ),
                     plan: cursorSnapshotPlan(from: decoded)
                 )
                 notificationService?.checkCursor(
@@ -682,16 +692,25 @@ final class ConnectedUsageService: ObservableObject {
     private func cursorSnapshotPlan(from usage: CursorUsageResponse) -> UsageSnapshotPlan? {
         let info = cursorPlanInfo?.planInfo
         let renewsAt = Self.millisecondDate(from: info?.billingCycleEnd) ?? usage.billingCycleEndDate
+        let included = info?.includedAmountCents
+        let usedAmountCents: Int?
+        if let included, let percent = usage.planUsage?.totalPercentUsed {
+            usedAmountCents = Int((Double(included) * percent / 100).rounded())
+        } else {
+            usedAmountCents = nil
+        }
         let plan = UsageSnapshotPlan(
             label: info?.planName,
             priceText: info?.price,
             renewsAt: renewsAt,
-            includedAmountCents: info?.includedAmountCents
+            includedAmountCents: included,
+            usedAmountCents: usedAmountCents
         )
         if plan.label == nil,
            plan.priceText == nil,
            plan.renewsAt == nil,
-           plan.includedAmountCents == nil {
+           plan.includedAmountCents == nil,
+           plan.usedAmountCents == nil {
             return nil
         }
         return plan
@@ -826,6 +845,35 @@ final class ConnectedUsageService: ObservableObject {
             }
             return false
         } catch {
+            return false
+        }
+    }
+
+    /// Returns `true` when Grok Bot usage hit a 429 and applied provider backoff.
+    @discardableResult
+    private func fetchCursorGrokBotUsage(token: String) async -> Bool {
+        do {
+            var request = CursorConnectAPI.request(
+                method: CursorConnectAPI.getSandUsageStatus,
+                token: token
+            )
+            request.timeoutInterval = PollingBackoff.secondaryRequestTimeout
+            let data = try await responseData(
+                for: request,
+                serviceName: "Cursor",
+                unauthorizedMessage: Self.cursorCLIUnauthorizedMessage
+            )
+            cursorGrokBotUsage = try JSONDecoder().decode(CursorGrokBotUsageResponse.self, from: data)
+            return false
+        } catch let error as ConnectedUsageError {
+            if case .rateLimited(_, let retryAfter) = error {
+                applyBackoff(provider: .cursor, retryAfter: retryAfter)
+                return true
+            }
+            cursorGrokBotUsage = nil
+            return false
+        } catch {
+            cursorGrokBotUsage = nil
             return false
         }
     }
@@ -1026,6 +1074,7 @@ final class ConnectedUsageService: ObservableObject {
             cursorCredentialSource = .none
             cursorTokenExpiry = nil
             cursorPlanInfo = nil
+            cursorGrokBotUsage = nil
             lastCursorPlanInfoFetch = nil
         }
 

@@ -29,19 +29,19 @@ class UsageMetricPreferencesTest {
         val metrics = listOf(
             UsageMetric(UsageMetricPreferences.CURSOR_MODELS, "First-Party Models"),
             UsageMetric(UsageMetricPreferences.CURSOR_API, "API"),
-            UsageMetric(UsageMetricPreferences.CURSOR_TOTAL, "Total Plan Usage"),
+            UsageMetric(UsageMetricPreferences.CURSOR_GROK_BOT, "Grok Bot"),
         )
 
         val resolved = UsageMetricPreferences.resolvedPair(
             provider = UsageProvider.CURSOR,
-            primaryID = UsageMetricPreferences.CURSOR_TOTAL,
+            primaryID = UsageMetricPreferences.CURSOR_GROK_BOT,
             secondaryID = UsageMetricPreferences.CURSOR_MODELS,
             available = metrics,
         )
 
         assertEquals(
             listOf(
-                UsageMetricPreferences.CURSOR_TOTAL,
+                UsageMetricPreferences.CURSOR_GROK_BOT,
                 UsageMetricPreferences.CURSOR_MODELS,
             ),
             resolved.map { it.id },

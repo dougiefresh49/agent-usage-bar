@@ -527,6 +527,14 @@ final class UsagePresentationTests: XCTestCase {
     }
 
     func testCursorAndElevenLabsMetricsHaveNoGeometry() throws {
+        let grokBot = CursorGrokBotUsageResponse(
+            currentPeriodStart: "2026-09-09T18:11:18.164Z",
+            nextResetTimestampUtc: "2026-09-16T18:11:18.164Z",
+            usagePercent: 0.059292,
+            hasAvailableUsage: true,
+            hasNonZeroIncludedLimit: true,
+            grokPlanLabel: "Grok Bot Plan"
+        )
         let cursor = UsagePresentationMetrics.cursorMetrics(
             CursorUsageResponse(
                 billingCycleStart: nil,
@@ -546,16 +554,26 @@ final class UsagePresentationTests: XCTestCase {
                 displayMessage: nil,
                 autoModelSelectedDisplayMessage: nil,
                 namedModelSelectedDisplayMessage: nil
-            )
+            ),
+            grokBot: grokBot
         )
-        XCTAssertTrue(cursor.allSatisfy { $0.geometry == nil })
-        XCTAssertTrue(cursor.allSatisfy { $0.paceSystemImage() == nil })
-        XCTAssertTrue(cursor.allSatisfy { $0.paceHelpText() == nil })
-        XCTAssertTrue(cursor.allSatisfy { $0.restoresLine() == nil })
         let models = try XCTUnwrap(cursor.first { $0.id == UsagePresentationMetrics.cursorModelsID })
+        let api = try XCTUnwrap(cursor.first { $0.id == UsagePresentationMetrics.cursorAPIID })
+        let grok = try XCTUnwrap(cursor.first { $0.id == UsagePresentationMetrics.cursorGrokBotID })
+        XCTAssertNil(models.geometry)
+        XCTAssertNil(api.geometry)
+        XCTAssertTrue([models, api].allSatisfy { $0.paceSystemImage() == nil })
+        XCTAssertTrue([models, api].allSatisfy { $0.paceHelpText() == nil })
+        XCTAssertTrue([models, api].allSatisfy { $0.restoresLine() == nil })
         XCTAssertEqual(models.headlineText(mode: .drain), "88% left")
         XCTAssertEqual(models.headlineText(mode: .fill), "12% used")
         XCTAssertEqual(models.valueText, "12%")
+
+        XCTAssertEqual(grok.geometry?.usedPercent, 0.059292)
+        XCTAssertEqual(grok.geometry?.resetsAt, grokBot.nextResetDate)
+        XCTAssertEqual(grok.geometry?.duration, 7 * 24 * 60 * 60)
+        XCTAssertEqual(grok.resetDate, grokBot.nextResetDate)
+        XCTAssertEqual(grok.kind, .percentage(0.059292))
 
         let eleven = UsagePresentationMetrics.elevenLabsMetrics(
             ElevenLabsSubscriptionResponse(
@@ -679,10 +697,20 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertEqual(creditsMetric?.label(mode: .drain), "Credits")
         XCTAssertEqual(creditsMetric?.shortLabel(mode: .drain), "Credits")
 
-        let cursor = UsagePresentationMetrics.cursorMetrics(nil)
-        let total = cursor.first { $0.id == UsagePresentationMetrics.cursorTotalID }
-        XCTAssertEqual(total?.label(mode: .fill), "Total Plan Usage")
-        XCTAssertEqual(total?.label(mode: .drain), "Total Plan")
+        let cursor = UsagePresentationMetrics.cursorMetrics(
+            nil,
+            grokBot: CursorGrokBotUsageResponse(
+                currentPeriodStart: "2026-09-09T18:11:18.164Z",
+                nextResetTimestampUtc: "2026-09-16T18:11:18.164Z",
+                usagePercent: 0.059292,
+                hasAvailableUsage: true,
+                hasNonZeroIncludedLimit: true,
+                grokPlanLabel: "Grok Bot Plan"
+            )
+        )
+        let grok = cursor.first { $0.id == UsagePresentationMetrics.cursorGrokBotID }
+        XCTAssertEqual(grok?.label(mode: .fill), "Grok Bot")
+        XCTAssertEqual(grok?.label(mode: .drain), "Grok Bot")
     }
 
     func testRemainingHeadlineAndRestoresLineForFixedNow() {

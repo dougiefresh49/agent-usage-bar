@@ -51,7 +51,6 @@ import com.agentusagebar.android.ui.components.ProviderDetailSection
 import com.agentusagebar.android.ui.components.ProviderOverviewGrid
 import com.agentusagebar.android.ui.components.formatUpdated
 import com.agentusagebar.android.ui.settings.SettingsScreen
-import com.agentusagebar.android.widget.cursorTotalPercent
 import com.agentusagebar.android.widget.formatClaudePlanRow
 import com.agentusagebar.android.widget.formatCursorPlanRow
 import com.agentusagebar.android.widget.formatCursorSpendRow
@@ -250,7 +249,7 @@ private fun HomeScreen(
                                 )
                             }
                             formatCursorSpendRow(
-                                percentUsed = cursorTotalPercent(selectedState),
+                                usedAmountCents = planInfo?.usedAmountCents,
                                 includedAmountCents = planInfo?.includedAmountCents,
                             )?.let { line ->
                                 Text(
