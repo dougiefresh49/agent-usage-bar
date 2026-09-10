@@ -103,6 +103,18 @@ struct PopoverView: View {
         .frame(maxHeight: 720)
         .environment(\.usageTextSize, usageTextSize)
         .dynamicTypeSize(usageTextSize.dynamicTypeSize)
+        .onAppear {
+            // Refresh when any provider's last update is older than that service's
+            // effective polling interval (doubled in Low Power Mode). Polling options
+            // are all >= 5 minutes, so this also sits above the app's 2-minute refresh
+            // throttle (RefreshRequestListener).
+            Task {
+                await service.refreshIfStale(olderThan: service.effectivePollingInterval)
+                await connectedService.refreshIfStale(
+                    olderThan: connectedService.effectivePollingInterval
+                )
+            }
+        }
         .onChange(of: connectedService.isElevenLabsConfigured) { _, isConfigured in
             if !isConfigured && selectedProvider == .elevenLabs {
                 selectedProvider = .claude

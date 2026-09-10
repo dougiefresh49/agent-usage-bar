@@ -945,7 +945,7 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(tokenRefreshCount, 0)
     }
 
-    func testConcurrentUsageFetchesShareSingleProfileRequest() async throws {
+    func testConcurrentUsageFetchesAreSingleFlight() async throws {
         let store = try makeStore()
         try store.save(
             StoredCredentials(
@@ -958,7 +958,136 @@ final class UsageServiceTests: XCTestCase {
 
         let usageURL = URL(string: "https://example.com/api/oauth/usage")!
         let profileURL = URL(string: "https://example.com/api/oauth/profile")!
-        let gate = ProfileRequestGate(targetUsageCount: 2)
+        let gate = ProfileRequestGate(targetUsageCount: 1)
+
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                XCTAssertEqual(request.timeoutInterval, PollingBackoff.usageRequestTimeout)
+                gate.noteUsage()
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 18, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 28, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                XCTAssertEqual(request.timeoutInterval, PollingBackoff.secondaryRequestTimeout)
+                gate.noteProfileStarted()
+                gate.waitForRelease()
+                return try Self.httpResponse(
+                    url: profileURL,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: profileURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store
+        )
+
+        async let first: Void = service.fetchUsage(force: true)
+        async let second: Void = service.fetchUsage(force: true)
+
+        await gate.waitUntilProfileStarted()
+        await gate.waitUntilUsagesSeen()
+        XCTAssertEqual(gate.usageRequestCount, 1, "Manual refresh is single-flight")
+        XCTAssertEqual(gate.profileRequestCount, 1, "Only one profile request while both callers await it")
+
+        gate.release()
+        _ = await (first, second)
+
+        XCTAssertEqual(gate.usageRequestCount, 1)
+        XCTAssertEqual(gate.profileRequestCount, 1)
+        XCTAssertEqual(service.profile?.planLabel, "Max 20x")
+        XCTAssertNil(service.lastError)
+    }
+
+    func testScheduledFetchDebouncesWhenLastUpdateIsFresh() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        var usageHits = 0
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                usageHits += 1
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 3, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 4, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: URL(string: "https://example.com/api/oauth/profile")!,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store
+        )
+
+        await service.fetchUsage(force: true)
+        XCTAssertEqual(usageHits, 1)
+
+        await service.fetchUsage(force: false)
+        XCTAssertEqual(usageHits, 1, "Scheduled poll within debounce window must not hit the network")
+
+        await service.fetchUsage(force: true)
+        XCTAssertEqual(usageHits, 2, "Manual refresh always runs")
+    }
+
+    func testScheduledThenManualRunsTrailingRefresh() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let profileURL = URL(string: "https://example.com/api/oauth/profile")!
+        let gate = ProfileRequestGate(targetUsageCount: 1)
 
         MockURLProtocol.handler = { request in
             switch (request.httpMethod, request.url?.path) {
@@ -997,19 +1126,97 @@ final class UsageServiceTests: XCTestCase {
             credentialsStore: store
         )
 
-        async let first: Void = service.fetchUsage()
-        async let second: Void = service.fetchUsage()
-
+        async let scheduled: Void = service.fetchUsage(trigger: .scheduled)
         await gate.waitUntilProfileStarted()
         await gate.waitUntilUsagesSeen()
-        XCTAssertEqual(gate.profileRequestCount, 1, "Only one profile request while both callers await it")
+        XCTAssertEqual(gate.usageRequestCount, 1)
+
+        async let manual1: Void = service.fetchUsage(trigger: .manual)
+        async let manual2: Void = service.fetchUsage(trigger: .manual)
+        // Let the manuals register pending before the in-flight fetch finishes.
+        await Task.yield()
+        await Task.yield()
 
         gate.release()
-        _ = await (first, second)
+        _ = await (scheduled, manual1, manual2)
 
-        XCTAssertEqual(gate.profileRequestCount, 1)
-        XCTAssertEqual(service.profile?.planLabel, "Max 20x")
+        XCTAssertEqual(
+            gate.usageRequestCount,
+            2,
+            "Scheduled-then-manual must run exactly one trailing usage request"
+        )
+        XCTAssertEqual(service.usage?.fiveHour?.utilization, 18)
+    }
+
+    func testLowPowerModeDoublesBaseIntervalAfterSuccess() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 1, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 2, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: URL(string: "https://example.com/api/oauth/profile")!,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        UserDefaults.standard.set(15, forKey: "pollingMinutes")
+        defer { UserDefaults.standard.removeObject(forKey: "pollingMinutes") }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store,
+            lowPowerModeEnabled: { true }
+        )
+
+        await service.fetchUsage(force: true)
         XCTAssertNil(service.lastError)
+        XCTAssertEqual(service.effectivePollingInterval, 30 * 60)
+        XCTAssertEqual(service.pollingMinutes, 15)
+
+        // Flip the injected flag and reschedule like the power-state observer does.
+        var lowPower = true
+        let flipping = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store,
+            lowPowerModeEnabled: { lowPower }
+        )
+        XCTAssertEqual(flipping.effectivePollingInterval, 30 * 60)
+        lowPower = false
+        flipping.rescheduleForPowerState()
+        XCTAssertEqual(flipping.effectivePollingInterval, 15 * 60)
     }
 
     func testSignOutDuringProfileFetchDiscardsResponse() async throws {
@@ -1191,6 +1398,12 @@ private final class ProfileRequestGate: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return profileCount
+    }
+
+    var usageRequestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return usageCount
     }
 
     func noteUsage() {

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -10,6 +11,7 @@ struct AgentUsageBarApp: App {
     @StateObject private var deviceSyncManager = DeviceSyncManager()
     @State private var snapshotStore: UsageSnapshotStore?
     @State private var refreshListener: RefreshRequestListener?
+    @State private var workspaceObservers: [NSObjectProtocol] = []
     @AppStorage(UsagePresentationDefaults.menuBarProviderKey)
     private var menuBarProviderRaw = UsagePresentationDefaults.menuBarProvider.rawValue
     @AppStorage(UsagePresentationDefaults.menuBarStyleKey)
@@ -59,19 +61,21 @@ struct AgentUsageBarApp: App {
                         let listener = RefreshRequestListener { [weak service, weak connectedService] in
                             Task { @MainActor in
                                 if let service, service.isAuthenticated {
-                                    await service.fetchUsage()
+                                    await service.fetchUsage(trigger: .automatic)
                                 }
-                                await connectedService?.fetchAll()
+                                await connectedService?.fetchAll(trigger: .automatic)
                             }
                         }
                         listener.start()
                         refreshListener = listener
                     }
 
+                    installWorkspaceObserversIfNeeded()
+
                     service.startPolling()
                     connectedService.startPolling()
                 }
-                .onChange(of: connectedPollCompletionSignal) { _, _ in
+                .onChange(of: connectedService.pollCompletionCount) { _, _ in
                     deviceSyncManager.noteCredentialFingerprint(
                         DeviceSyncManager.cliCredentialFingerprint()
                     )
@@ -91,16 +95,48 @@ struct AgentUsageBarApp: App {
         .windowStyle(.titleBar)
     }
 
-    // ConnectedUsageService has no poll-completion publisher; lastUpdated + errors stand in.
-    private var connectedPollCompletionSignal: String {
-        [
-            connectedService.openAILastUpdated?.timeIntervalSince1970.description ?? "",
-            connectedService.cursorLastUpdated?.timeIntervalSince1970.description ?? "",
-            connectedService.elevenLabsLastUpdated?.timeIntervalSince1970.description ?? "",
-            connectedService.openAIError ?? "",
-            connectedService.cursorError ?? "",
-            connectedService.elevenLabsError ?? ""
-        ].joined(separator: "\u{1e}")
+    private func installWorkspaceObserversIfNeeded() {
+        guard workspaceObservers.isEmpty else { return }
+        let center = NSWorkspace.shared.notificationCenter
+        let sleep = center.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak service, weak connectedService] _ in
+            MainActor.assumeIsolated {
+                service?.pausePolling()
+                connectedService?.pausePolling()
+            }
+        }
+        let wakeHandler: (Notification) -> Void = { [weak service, weak connectedService] _ in
+            MainActor.assumeIsolated {
+                service?.handleWake()
+                connectedService?.handleWake()
+            }
+        }
+        let didWake = center.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main,
+            using: wakeHandler
+        )
+        let screensWake = center.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: nil,
+            queue: .main,
+            using: wakeHandler
+        )
+        let power = NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak service, weak connectedService] _ in
+            MainActor.assumeIsolated {
+                service?.rescheduleForPowerState()
+                connectedService?.rescheduleForPowerState()
+            }
+        }
+        workspaceObservers = [sleep, didWake, screensWake, power]
     }
 
     private var menuBarIcon: NSImage {

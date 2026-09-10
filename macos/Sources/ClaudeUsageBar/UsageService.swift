@@ -25,7 +25,9 @@ class UsageService: ObservableObject {
     private let tokenEndpoint: URL
     private let credentialsStore: StoredCredentialsStore
     private let localProfileLoader: @MainActor () -> String?
+    private let lowPowerModeEnabled: () -> Bool
     private var currentInterval: TimeInterval
+    private var isPollingPaused = false
     private enum RefreshResult {
         case success
         case permanentFailure
@@ -33,12 +35,21 @@ class UsageService: ObservableObject {
     }
 
     private var refreshTask: Task<RefreshResult, Never>?
-    private var profileFetchTask: Task<Void, Never>?
+    private var usageFetchTask: Task<Void, Never>?
+    /// Set when a manual refresh arrives during an in-flight fetch; drained as one trailing run.
+    private var pendingManualUsageRefresh = false
+    private var profileFetchTask: Task<Bool, Never>?
     private var profileFetchGeneration = 0
+    private var lastWakeAt: Date?
+    private var isRateLimitedBackoff = false
+    private(set) var rateLimitBackoffUntil: Date?
+
+    /// Timer cadence currently in effect (base, low-power, or 429 backoff).
+    var effectivePollingInterval: TimeInterval { currentInterval }
 
     static let defaultPollingMinutes = 30
     static let pollingOptions = [5, 15, 30, 60]
-    nonisolated static let maxBackoffInterval: TimeInterval = 60 * 60
+    nonisolated static let maxBackoffInterval: TimeInterval = PollingBackoff.maxInterval
     nonisolated static let profileCacheInterval: TimeInterval = 60 * 60
     nonisolated static let defaultOAuthScopes = ["user:profile", "user:inference"]
     nonisolated private static let authorizeEndpoint = URL(string: "https://claude.ai/oauth/authorize")!
@@ -53,20 +64,32 @@ class UsageService: ObservableObject {
     func updatePollingInterval(_ minutes: Int) {
         pollingMinutes = minutes
         UserDefaults.standard.set(minutes, forKey: "pollingMinutes")
-        currentInterval = TimeInterval(minutes * 60)
+        currentInterval = PollingBackoff.pollingInterval(
+            minutes: minutes,
+            isLowPower: lowPowerModeEnabled()
+        )
         if isAuthenticated {
             scheduleTimer()
-            Task { await fetchUsage() }
+            Task { await fetchUsage(trigger: .automatic) }
         }
     }
 
-    private var baseInterval: TimeInterval { TimeInterval(pollingMinutes * 60) }
+    private var baseInterval: TimeInterval {
+        PollingBackoff.pollingInterval(
+            minutes: pollingMinutes,
+            isLowPower: lowPowerModeEnabled()
+        )
+    }
 
+    /// Forwards to `PollingBackoff` so call sites and older tests keep compiling.
     nonisolated static func backoffInterval(
         retryAfter: TimeInterval?,
         currentInterval: TimeInterval
     ) -> TimeInterval {
-        min(max(retryAfter ?? currentInterval, currentInterval * 2), maxBackoffInterval)
+        PollingBackoff.backoffInterval(
+            retryAfter: retryAfter,
+            currentInterval: currentInterval
+        )
     }
 
     // OAuth constants
@@ -91,7 +114,10 @@ class UsageService: ObservableObject {
         tokenEndpoint: URL = UsageService.defaultTokenEndpoint,
         redirectUri: String = UsageService.defaultRedirectURI,
         credentialsStore: StoredCredentialsStore = StoredCredentialsStore(),
-        localProfileLoader: @MainActor @escaping () -> String? = UsageService.loadLocalProfile
+        localProfileLoader: @MainActor @escaping () -> String? = UsageService.loadLocalProfile,
+        lowPowerModeEnabled: @escaping () -> Bool = {
+            ProcessInfo.processInfo.isLowPowerModeEnabled
+        }
     ) {
         self.session = session
         self.usageEndpoint = usageEndpoint
@@ -101,10 +127,14 @@ class UsageService: ObservableObject {
         self.redirectUri = redirectUri
         self.credentialsStore = credentialsStore
         self.localProfileLoader = localProfileLoader
+        self.lowPowerModeEnabled = lowPowerModeEnabled
         let stored = UserDefaults.standard.integer(forKey: "pollingMinutes")
         let minutes = Self.pollingOptions.contains(stored) ? stored : Self.defaultPollingMinutes
         self.pollingMinutes = minutes
-        self.currentInterval = TimeInterval(minutes * 60)
+        self.currentInterval = PollingBackoff.pollingInterval(
+            minutes: minutes,
+            isLowPower: lowPowerModeEnabled()
+        )
         isAuthenticated = loadCredentials() != nil
     }
 
@@ -112,19 +142,60 @@ class UsageService: ObservableObject {
 
     func startPolling() {
         guard isAuthenticated else { return }
+        isPollingPaused = false
         Task {
-            await fetchUsage()
+            await fetchUsage(trigger: .automatic)
             if accountEmail == nil { await fetchProfile() }
         }
         scheduleTimer()
     }
 
+    func pausePolling() {
+        isPollingPaused = true
+        timer?.invalidate()
+        timer = nil
+    }
+
+    func handleWake() {
+        guard isAuthenticated else { return }
+        let now = Date()
+        if let lastWakeAt, now.timeIntervalSince(lastWakeAt) < 2 { return }
+        lastWakeAt = now
+        let wasPaused = isPollingPaused
+        isPollingPaused = false
+        Task {
+            await fetchUsage(trigger: .automatic)
+            if wasPaused || timer == nil {
+                scheduleTimer()
+            }
+        }
+    }
+
+    /// Call when Low Power Mode flips so the timer picks up the doubled (or restored) interval.
+    func rescheduleForPowerState() {
+        if !isRateLimitedBackoff {
+            currentInterval = baseInterval
+        }
+        scheduleTimer()
+    }
+
+    /// Popover-open path: refresh when the last successful fetch is older than `interval`.
+    func refreshIfStale(olderThan interval: TimeInterval) async {
+        guard isAuthenticated else { return }
+        let isStale = lastUpdated.map { Date().timeIntervalSince($0) > interval } ?? true
+        guard isStale else { return }
+        await fetchUsage(trigger: .automatic)
+    }
+
     private func scheduleTimer() {
         timer?.invalidate()
-        let t = Timer(timeInterval: currentInterval, repeats: true) { [weak self] _ in
+        timer = nil
+        guard isAuthenticated, !isPollingPaused else { return }
+        let interval = currentInterval
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.isAuthenticated else { return }
-                Task { await self.fetchUsage() }
+                guard let self, self.isAuthenticated, !self.isPollingPaused else { return }
+                Task { await self.fetchUsage(trigger: .scheduled) }
             }
         }
         RunLoop.main.add(t, forMode: .common)
@@ -187,7 +258,10 @@ class UsageService: ObservableObject {
         }
 
         // Exchange code for token
-        var request = URLRequest(url: tokenEndpoint)
+        var request = URLRequest(
+            url: tokenEndpoint,
+            timeoutInterval: PollingBackoff.secondaryRequestTimeout
+        )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -251,9 +325,13 @@ class UsageService: ObservableObject {
         timer = nil
         refreshTask?.cancel()
         refreshTask = nil
+        usageFetchTask?.cancel()
+        usageFetchTask = nil
         profileFetchGeneration &+= 1
         profileFetchTask?.cancel()
         profileFetchTask = nil
+        isPollingPaused = false
+        clearRateLimitBackoff()
         lastError = nil
     }
 
@@ -272,7 +350,51 @@ class UsageService: ObservableObject {
 
     // MARK: - API Fetch
 
-    func fetchUsage() async {
+    /// - Parameter trigger: `.scheduled` debounces; `.automatic` still honours 429
+    ///   backoff; `.manual` (Refresh) always runs. A manual that arrives during an
+    ///   in-flight fetch sets a pending flag and runs exactly one trailing request.
+    func fetchUsage(trigger: PollingBackoff.Trigger = .manual) async {
+        if let usageFetchTask {
+            if trigger == .manual {
+                pendingManualUsageRefresh = true
+            }
+            await usageFetchTask.value
+            // The owner of the task runs the trailing manual fetch if the flag is
+            // still set once it clears the slot; recursing here can loop without a
+            // suspension point while the slot still holds the finished task.
+            return
+        }
+
+        if !trigger.skipsBackoff,
+           PollingBackoff.shouldSkipForBackoff(until: rateLimitBackoffUntil) {
+            return
+        }
+        if !trigger.skipsDebounce,
+           PollingBackoff.shouldSkipScheduledPoll(lastSuccessfulFetch: lastUpdated) {
+            return
+        }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            repeat {
+                self.pendingManualUsageRefresh = false
+                await self.performFetchUsage()
+            } while self.pendingManualUsageRefresh
+        }
+        usageFetchTask = task
+        await task.value
+        usageFetchTask = nil
+        if pendingManualUsageRefresh {
+            await fetchUsage(trigger: .manual)
+        }
+    }
+
+    /// Backward-compatible wrapper used by older call sites and tests.
+    func fetchUsage(force: Bool) async {
+        await fetchUsage(trigger: force ? .manual : .scheduled)
+    }
+
+    private func performFetchUsage() async {
         guard loadCredentials() != nil else {
             lastError = "Not signed in"
             isAuthenticated = false
@@ -285,12 +407,7 @@ class UsageService: ObservableObject {
             }
             let (data, http) = result
             if http.statusCode == 429 {
-                let retryAfter = http.value(forHTTPHeaderField: "Retry-After")
-                    .flatMap(Double.init) ?? currentInterval
-                currentInterval = Self.backoffInterval(
-                    retryAfter: retryAfter,
-                    currentInterval: currentInterval
-                )
+                applyRateLimitBackoff(retryAfter: PollingBackoff.retryAfterSeconds(from: http))
                 lastError = "Rate limited — backing off to \(Int(currentInterval))s"
                 scheduleTimer()
                 return
@@ -314,48 +431,72 @@ class UsageService: ObservableObject {
                 provider: "claude",
                 metrics: UsageSnapshotStore.claudeMetrics(for: reconciled)
             )
-            if currentInterval != baseInterval {
-                currentInterval = baseInterval
+            // Reuse the bearer token that just succeeded for usage. No separate refresh.
+            guard let accessToken = loadCredentials()?.accessToken else {
+                if isRateLimitedBackoff || currentInterval != baseInterval {
+                    clearRateLimitBackoff()
+                    scheduleTimer()
+                }
+                return
+            }
+            let profileRateLimited = await fetchOAuthProfileIfNeeded(accessToken: accessToken)
+            // Keep secondary (profile) 429 backoff; only clear after a clean full poll.
+            if !profileRateLimited, isRateLimitedBackoff || currentInterval != baseInterval {
+                clearRateLimitBackoff()
                 scheduleTimer()
             }
-            // Reuse the bearer token that just succeeded for usage. No separate refresh.
-            guard let accessToken = loadCredentials()?.accessToken else { return }
-            await fetchOAuthProfileIfNeeded(accessToken: accessToken)
         } catch {
             lastError = error.localizedDescription
         }
     }
 
-    private func fetchOAuthProfileIfNeeded(accessToken: String) async {
+    private func applyRateLimitBackoff(retryAfter: TimeInterval?) {
+        isRateLimitedBackoff = true
+        currentInterval = PollingBackoff.backoffInterval(
+            retryAfter: retryAfter,
+            currentInterval: currentInterval
+        )
+        rateLimitBackoffUntil = Date().addingTimeInterval(currentInterval)
+    }
+
+    private func clearRateLimitBackoff() {
+        isRateLimitedBackoff = false
+        rateLimitBackoffUntil = nil
+        currentInterval = baseInterval
+    }
+
+    @discardableResult
+    private func fetchOAuthProfileIfNeeded(accessToken: String) async -> Bool {
         if let profileLastFetched,
            Date().timeIntervalSince(profileLastFetched) < Self.profileCacheInterval {
-            return
+            return false
         }
 
         if let profileFetchTask {
-            await profileFetchTask.value
-            return
+            return await profileFetchTask.value
         }
 
         let generation = profileFetchGeneration &+ 1
         profileFetchGeneration = generation
         let task = Task { [weak self] in
-            guard let self else { return }
-            await self.performOAuthProfileFetch(accessToken: accessToken)
+            guard let self else { return false }
+            return await self.performOAuthProfileFetch(accessToken: accessToken)
         }
         profileFetchTask = task
-        await task.value
+        let rateLimited = await task.value
         // Only clear if we still own the slot. A newer fetch or sign-out may have replaced it.
         if profileFetchGeneration == generation {
             profileFetchTask = nil
         }
+        return rateLimited
     }
 
     /// Soft profile fetch: one-shot with the usage bearer token. Never refreshes, never mutates `lastError`, never expires the session.
-    private func performOAuthProfileFetch(accessToken: String) async {
+    /// Returns `true` when the profile endpoint returned 429 and applied backoff.
+    private func performOAuthProfileFetch(accessToken: String) async -> Bool {
         if let profileLastFetched,
            Date().timeIntervalSince(profileLastFetched) < Self.profileCacheInterval {
-            return
+            return false
         }
 
         let wasAuthenticated = isAuthenticated
@@ -367,19 +508,28 @@ class UsageService: ObservableObject {
             )
             guard http.statusCode == 200 else {
                 // Soft failure, including 401: leave profile nil and do not refresh.
+                // A 429 still backs off the provider polls.
+                if http.statusCode == 429 {
+                    applyRateLimitBackoff(retryAfter: PollingBackoff.retryAfterSeconds(from: http))
+                    scheduleTimer()
+                    print("[ClaudeProfile] HTTP \(http.statusCode)")
+                    return true
+                }
                 print("[ClaudeProfile] HTTP \(http.statusCode)")
-                return
+                return false
             }
             // Drop the response if the user signed out while the request was in flight.
             guard wasAuthenticated, isAuthenticated, loadCredentials() != nil else {
                 print("[ClaudeProfile] discarding response after sign-out")
-                return
+                return false
             }
             let decoded = try JSONDecoder().decode(ClaudeProfileResponse.self, from: data)
             profile = decoded
             profileLastFetched = Date()
+            return false
         } catch {
             print("[ClaudeProfile] \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -522,7 +672,10 @@ class UsageService: ObservableObject {
         token: String,
         url: URL
     ) async throws -> (Data, HTTPURLResponse) {
-        var request = URLRequest(url: url)
+        let timeout = url == usageEndpoint
+            ? PollingBackoff.usageRequestTimeout
+            : PollingBackoff.secondaryRequestTimeout
+        var request = URLRequest(url: url, timeoutInterval: timeout)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
 
@@ -559,7 +712,10 @@ class UsageService: ObservableObject {
             return .success
         }
 
-        var request = URLRequest(url: tokenEndpoint)
+        var request = URLRequest(
+            url: tokenEndpoint,
+            timeoutInterval: PollingBackoff.secondaryRequestTimeout
+        )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -669,9 +825,13 @@ class UsageService: ObservableObject {
         timer = nil
         refreshTask?.cancel()
         refreshTask = nil
+        usageFetchTask?.cancel()
+        usageFetchTask = nil
         profileFetchGeneration &+= 1
         profileFetchTask?.cancel()
         profileFetchTask = nil
+        isPollingPaused = false
+        clearRateLimitBackoff()
         lastError = "Session expired — please sign in again"
     }
 }

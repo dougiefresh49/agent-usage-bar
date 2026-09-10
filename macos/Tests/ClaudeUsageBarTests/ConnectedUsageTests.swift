@@ -175,6 +175,46 @@ final class ConnectedUsageModelTests: XCTestCase {
 
         XCTAssertEqual(usage.rateLimit?.weeklyWindow?.usedPercent, 70)
     }
+
+    func testSparkAdditionalLimitsDoNotReplacePrimaryOrSecondaryWindows() throws {
+        let data = Data(
+            """
+            {
+              "rate_limit": {
+                "primary_window": {
+                  "used_percent": 41,
+                  "limit_window_seconds": 18000
+                },
+                "secondary_window": {
+                  "used_percent": 22,
+                  "limit_window_seconds": 604800
+                }
+              },
+              "additional_rate_limits": [
+                {
+                  "type": "spark",
+                  "label": "Spark",
+                  "rate_limit": {
+                    "primary_window": {
+                      "used_percent": 99,
+                      "limit_window_seconds": 18000
+                    }
+                  }
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let usage = try JSONDecoder().decode(OpenAIUsageResponse.self, from: data)
+
+        XCTAssertEqual(usage.rateLimit?.primaryWindow?.usedPercent, 41)
+        XCTAssertEqual(usage.rateLimit?.secondaryWindow?.usedPercent, 22)
+        XCTAssertEqual(usage.additionalRateLimits?.count, 1)
+        XCTAssertEqual(usage.additionalRateLimits?.first?.type, "spark")
+        XCTAssertEqual(usage.additionalRateLimits?.first?.rateLimit?.primaryWindow?.usedPercent, 99)
+        XCTAssertEqual(usage.rateLimit?.weeklyWindow?.usedPercent, 22)
+    }
 }
 
 final class ConnectedServiceCredentialsTests: XCTestCase {
@@ -1191,6 +1231,445 @@ final class ConnectedUsageServiceTests: XCTestCase {
         )
     }
 
+    func testOpenAI429WithRetryAfterSetsBackoffAndSkipsScheduledPoll() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(openAISessionToken: "openai-token"))
+
+        var openAIHits = 0
+        var creditHits = 0
+        ConnectedMockURLProtocol.handler = { request in
+            if request.url?.path == "/openai" {
+                openAIHits += 1
+                XCTAssertEqual(request.timeoutInterval, PollingBackoff.usageRequestTimeout)
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 429,
+                    httpVersion: nil,
+                    headerFields: ["Retry-After": "900"]
+                )!
+                return (response, Data())
+            }
+            if request.url?.path == "/credits" {
+                creditHits += 1
+                XCTFail("Credits must not run after a usage 429")
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                return (response, Data(#"{"credits":[],"available_count":0}"#.utf8))
+            }
+            throw URLError(.badURL)
+        }
+
+        let service = makeService(
+            openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
+            openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
+            credentialsStore: store,
+            lowPowerModeEnabled: { false }
+        )
+        service.updatePollingInterval(5)
+
+        let before = Date()
+        await service.fetchOpenAIUsage(trigger: .manual)
+        XCTAssertEqual(openAIHits, 1)
+        XCTAssertEqual(creditHits, 0)
+        XCTAssertEqual(service.openAIError, "OpenAI rate limited")
+        // base 5m doubled is 10m; Retry-After 900s must win over that floor.
+        XCTAssertEqual(service.openAIBackoffInterval, 900)
+        let until = try XCTUnwrap(service.openAIBackoffUntil)
+        XCTAssertGreaterThanOrEqual(until.timeIntervalSince(before), 899)
+
+        await service.fetchOpenAIUsage(trigger: .scheduled)
+        XCTAssertEqual(openAIHits, 1, "Scheduled poll must skip while backoff is active")
+
+        await service.fetchOpenAIUsage(trigger: .automatic)
+        XCTAssertEqual(openAIHits, 1, "Automatic refresh must honour backoff")
+
+        await service.fetchOpenAIUsage(trigger: .manual)
+        XCTAssertEqual(openAIHits, 2, "Manual refresh may bypass backoff")
+        XCTAssertEqual(creditHits, 0)
+    }
+
+    func testOpenAI429WithoutRetryAfterStillBacksOff() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(openAISessionToken: "openai-token"))
+
+        var openAIHits = 0
+        ConnectedMockURLProtocol.handler = { request in
+            if request.url?.path == "/openai" {
+                openAIHits += 1
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 429,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                return (response, Data())
+            }
+            if request.url?.path == "/credits" {
+                XCTFail("Credits must not run after a usage 429")
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                return (response, Data(#"{"credits":[],"available_count":0}"#.utf8))
+            }
+            throw URLError(.badURL)
+        }
+
+        let service = makeService(
+            openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
+            openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
+            credentialsStore: store,
+            lowPowerModeEnabled: { false }
+        )
+        service.updatePollingInterval(5)
+
+        await service.fetchOpenAIUsage(trigger: .manual)
+        XCTAssertEqual(openAIHits, 1)
+        XCTAssertEqual(service.openAIBackoffInterval, 10 * 60)
+        await service.fetchOpenAIUsage(trigger: .scheduled)
+        XCTAssertEqual(openAIHits, 1)
+    }
+
+    func testConnectedLowPowerRescheduleUpdatesEffectiveInterval() {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        var lowPower = false
+        let service = makeService(credentialsStore: store, lowPowerModeEnabled: { lowPower })
+        service.updatePollingInterval(15)
+        XCTAssertEqual(service.effectivePollingInterval, 15 * 60)
+        XCTAssertEqual(service.installedPollingInterval, 15 * 60)
+
+        lowPower = true
+        service.rescheduleForPowerState()
+        XCTAssertEqual(service.effectivePollingInterval, 30 * 60)
+        XCTAssertEqual(
+            service.installedPollingInterval,
+            30 * 60,
+            "Reschedule must replace the installed timer with the doubled interval"
+        )
+
+        lowPower = false
+        service.rescheduleForPowerState()
+        XCTAssertEqual(service.effectivePollingInterval, 15 * 60)
+        XCTAssertEqual(service.installedPollingInterval, 15 * 60)
+
+        service.pausePolling()
+        XCTAssertNil(service.installedPollingInterval)
+    }
+
+    func testScheduledThenManualOpenAIRunsTrailingRefresh() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(openAISessionToken: "openai-token"))
+
+        let requestStarted = ConnectedAsyncGate()
+        let releaseResponse = DispatchSemaphore(value: 0)
+        var openAIHits = 0
+        ConnectedMockURLProtocol.handler = { request in
+            if request.url?.path == "/openai" {
+                openAIHits += 1
+                Task { await requestStarted.open() }
+                let waited = releaseResponse.wait(timeout: .now() + 5)
+                precondition(waited == .success, "openai response was not released")
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                return (
+                    response,
+                    Data(#"{"rate_limit":{"primary_window":{"used_percent":10},"secondary_window":{"used_percent":20}}}"#.utf8)
+                )
+            }
+            if request.url?.path == "/credits" {
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                return (response, Data(#"{"credits":[],"available_count":0}"#.utf8))
+            }
+            throw URLError(.badURL)
+        }
+
+        let service = makeService(
+            openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
+            openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
+            credentialsStore: store
+        )
+
+        async let scheduled: Void = service.fetchOpenAIUsage(trigger: .scheduled)
+        await requestStarted.wait()
+        XCTAssertEqual(openAIHits, 1)
+
+        async let manual1: Void = service.fetchOpenAIUsage(trigger: .manual)
+        async let manual2: Void = service.fetchOpenAIUsage(trigger: .manual)
+        await Task.yield()
+        await Task.yield()
+
+        releaseResponse.signal()
+        // Trailing refresh needs its own permit.
+        releaseResponse.signal()
+        _ = await (scheduled, manual1, manual2)
+
+        XCTAssertEqual(
+            openAIHits,
+            2,
+            "Scheduled-then-manual must run exactly one trailing usage request"
+        )
+    }
+
+    func testOpenAIFailedManualUsageDoesNotClearBackoffFromStaleUsage() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(openAISessionToken: "openai-token"))
+
+        var openAIHits = 0
+        var phase = 0
+        ConnectedMockURLProtocol.handler = { request in
+            if request.url?.path == "/openai" {
+                openAIHits += 1
+                let status: Int
+                switch phase {
+                case 0:
+                    status = 200
+                case 1:
+                    status = 429
+                default:
+                    status = 500
+                }
+                var headers: [String: String]?
+                if status == 429 {
+                    headers = ["Retry-After": "600"]
+                }
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: status,
+                    httpVersion: nil,
+                    headerFields: headers
+                )!
+                if status == 200 {
+                    return (
+                        response,
+                        Data(#"{"rate_limit":{"primary_window":{"used_percent":10},"secondary_window":{"used_percent":20}}}"#.utf8)
+                    )
+                }
+                return (response, Data())
+            }
+            if request.url?.path == "/credits" {
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                return (response, Data(#"{"credits":[],"available_count":0}"#.utf8))
+            }
+            throw URLError(.badURL)
+        }
+
+        let service = makeService(
+            openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
+            openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
+            credentialsStore: store,
+            lowPowerModeEnabled: { false }
+        )
+        service.updatePollingInterval(5)
+
+        // Prior successful usage leaves openAIUsage non-nil.
+        phase = 0
+        await service.fetchOpenAIUsage(trigger: .manual)
+        XCTAssertNotNil(service.openAIUsage)
+        XCTAssertNil(service.openAIBackoffUntil)
+
+        // 429 establishes backoff.
+        phase = 1
+        await service.fetchOpenAIUsage(trigger: .manual)
+        XCTAssertEqual(service.openAIBackoffInterval, 600)
+        let untilAfter429 = try XCTUnwrap(service.openAIBackoffUntil)
+
+        // Failed usage (500) plus successful credits must not clear that backoff
+        // just because openAIUsage is still set from the earlier success.
+        phase = 2
+        await service.fetchOpenAIUsage(trigger: .manual)
+        XCTAssertEqual(openAIHits, 3)
+        XCTAssertEqual(service.openAIBackoffUntil, untilAfter429)
+        XCTAssertEqual(service.openAIBackoffInterval, 600)
+        XCTAssertNotNil(service.openAIUsage, "Stale prior usage remains on the service")
+
+        await service.fetchOpenAIUsage(trigger: .scheduled)
+        XCTAssertEqual(openAIHits, 3, "Scheduled poll must still honour backoff")
+    }
+
+    func testCursorScheduledFetchDebouncesWhenFresh() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(cursorSessionToken: "cursor-token"))
+
+        var cursorHits = 0
+        ConnectedMockURLProtocol.handler = { request in
+            cursorHits += 1
+            XCTAssertEqual(request.timeoutInterval, PollingBackoff.usageRequestTimeout)
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data(#"{"planUsage":{"autoPercentUsed":1,"apiPercentUsed":2}}"#.utf8))
+        }
+
+        let service = makeService(
+            cursorEndpoint: URL(string: "https://example.com/cursor")!,
+            credentialsStore: store
+        )
+
+        await service.fetchCursorUsage(force: true)
+        XCTAssertEqual(cursorHits, 1)
+        await service.fetchCursorUsage(force: false)
+        XCTAssertEqual(cursorHits, 1)
+        await service.fetchCursorUsage(force: true)
+        XCTAssertEqual(cursorHits, 2)
+    }
+
+    func testManualCursorFetchIsSingleFlight() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(cursorSessionToken: "cursor-token"))
+
+        let requestStarted = ConnectedAsyncGate()
+        let releaseResponse = DispatchSemaphore(value: 0)
+        var cursorHits = 0
+        ConnectedMockURLProtocol.handler = { request in
+            cursorHits += 1
+            Task { await requestStarted.open() }
+            let waited = releaseResponse.wait(timeout: .now() + 5)
+            precondition(waited == .success, "cursor response was not released")
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data(#"{"planUsage":{"autoPercentUsed":1,"apiPercentUsed":2}}"#.utf8))
+        }
+
+        let service = makeService(
+            cursorEndpoint: URL(string: "https://example.com/cursor")!,
+            credentialsStore: store
+        )
+
+        async let first: Void = service.fetchCursorUsage(force: true)
+        async let second: Void = service.fetchCursorUsage(force: true)
+        await requestStarted.wait()
+        XCTAssertEqual(cursorHits, 1)
+        releaseResponse.signal()
+        _ = await (first, second)
+        XCTAssertEqual(cursorHits, 1)
+        XCTAssertEqual(service.cursorUsage?.planUsage?.apiPercentUsed, 2)
+    }
+
+    func testFetchAllIncrementsPollCompletionCountOnFailure() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(cursorSessionToken: "cursor-token"))
+
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 500,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        let service = makeService(
+            cursorEndpoint: URL(string: "https://example.com/cursor")!,
+            credentialsStore: store
+        )
+
+        XCTAssertEqual(service.pollCompletionCount, 0)
+        await service.fetchAll(force: true)
+        XCTAssertEqual(service.pollCompletionCount, 1)
+        XCTAssertNotNil(service.cursorError)
+    }
+
+    func testFetchOpenAIKeepsSparkRowsWithoutChangingPrimary() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(openAISessionToken: "openai-token"))
+
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            if request.url?.path == "/openai" {
+                return (
+                    response,
+                    Data(
+                        """
+                        {
+                          "rate_limit": {
+                            "primary_window": {"used_percent": 41, "limit_window_seconds": 18000},
+                            "secondary_window": {"used_percent": 22, "limit_window_seconds": 604800}
+                          },
+                          "additional_rate_limits": [
+                            {
+                              "type": "spark",
+                              "label": "Spark",
+                              "rate_limit": {
+                                "primary_window": {"used_percent": 99, "limit_window_seconds": 18000}
+                              }
+                            }
+                          ]
+                        }
+                        """.utf8
+                    )
+                )
+            }
+            return (response, Data(#"{"credits":[],"available_count":0}"#.utf8))
+        }
+
+        let service = makeService(
+            openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
+            openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
+            credentialsStore: store
+        )
+
+        await service.fetchOpenAIUsage(force: true)
+
+        XCTAssertEqual(service.openAIUsage?.rateLimit?.primaryWindow?.usedPercent, 41)
+        XCTAssertEqual(service.openAIUsage?.rateLimit?.secondaryWindow?.usedPercent, 22)
+        XCTAssertEqual(service.openAIUsage?.additionalRateLimits?.first?.type, "spark")
+        XCTAssertEqual(
+            service.openAIUsage?.additionalRateLimits?.first?.rateLimit?.primaryWindow?.usedPercent,
+            99
+        )
+    }
+
     private func makeService(
         session: URLSession? = nil,
         cursorEndpoint: URL = URL(string: "https://example.com/cursor")!,
@@ -1202,7 +1681,8 @@ final class ConnectedUsageServiceTests: XCTestCase {
         codexAuthLoader: (() -> CodexCLICredentials?)? = nil,
         cursorKeychainRunner: CursorCLIKeychain.Runner? = nil,
         planInfoInterval: TimeInterval = 3600,
-        resetCreditRedeemer: OpenAIResetCreditRedeemer? = nil
+        resetCreditRedeemer: OpenAIResetCreditRedeemer? = nil,
+        lowPowerModeEnabled: @escaping () -> Bool = { false }
     ) -> ConnectedUsageService {
         ConnectedUsageService(
             session: session ?? makeSession(),
@@ -1215,7 +1695,8 @@ final class ConnectedUsageServiceTests: XCTestCase {
             codexAuthLoader: codexAuthLoader ?? { nil },
             cursorKeychainRunner: cursorKeychainRunner ?? { _, _ in "" },
             planInfoInterval: planInfoInterval,
-            resetCreditRedeemer: resetCreditRedeemer
+            resetCreditRedeemer: resetCreditRedeemer,
+            lowPowerModeEnabled: lowPowerModeEnabled
         )
     }
 
