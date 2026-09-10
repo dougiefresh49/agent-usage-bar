@@ -132,7 +132,7 @@ final class DeviceSyncPayloadTests: XCTestCase {
         XCTAssertNil(device.syncAcknowledgedAt)
     }
 
-    func testResyncEnvelopeUsesTrustedDeviceKeyAndHidesCredentials() throws {
+    func testResyncEnvelopeUsesTrustedDeviceKey() throws {
         let desktopKey = P256.KeyAgreement.PrivateKey()
         let deviceKey = P256.KeyAgreement.PrivateKey()
         let desktopSecret = try desktopKey.sharedSecretFromKeyAgreement(
@@ -142,11 +142,7 @@ final class DeviceSyncPayloadTests: XCTestCase {
             with: desktopKey.publicKey
         )
         let payload = DeviceSyncPayload(
-            connections: DeviceSyncConnections(
-                openAISessionToken: "very-secret-token",
-                cursorSessionToken: nil,
-                elevenLabsAPIKey: nil
-            )
+            general: DeviceSyncGeneral(pollingMinutes: 5)
         )
         let syncID = "sync-123"
 
@@ -156,26 +152,49 @@ final class DeviceSyncPayloadTests: XCTestCase {
             salt: syncID,
             info: DeviceSyncCrypto.resyncInfo
         )
-        let encodedEnvelope = try JSONEncoder().encode(envelope)
-        XCTAssertFalse(String(decoding: encodedEnvelope, as: UTF8.self).contains("very-secret-token"))
 
-        let key = DeviceSyncCrypto.key(
+        let decoded = try DeviceSyncCrypto.open(
+            envelope,
+            as: DeviceSyncPayload.self,
             sharedSecret: deviceSecret,
             salt: syncID,
             info: DeviceSyncCrypto.resyncInfo
         )
-        let nonce = try AES.GCM.Nonce(
-            data: XCTUnwrap(Data(base64URLEncoded: envelope.nonce))
-        )
-        let box = try AES.GCM.SealedBox(
-            nonce: nonce,
-            ciphertext: XCTUnwrap(Data(base64URLEncoded: envelope.ciphertext)),
-            tag: XCTUnwrap(Data(base64URLEncoded: envelope.tag))
-        )
-        let decrypted = try AES.GCM.open(box, using: key)
-        let decoded = try JSONDecoder().decode(DeviceSyncPayload.self, from: decrypted)
 
         XCTAssertEqual(decoded, payload)
+        XCTAssertNil(decoded.connections)
+    }
+
+    func testPairingPayloadBuiltByTheSheetCarriesNoConnections() throws {
+        let payload = DeviceSyncPayload(
+            general: DeviceSyncGeneral(pollingMinutes: 5),
+            appearance: DeviceSyncAppearance(
+                preferredProvider: "claude",
+                menuBarStyle: "bar",
+                primaryMetric: "five_hour",
+                secondaryMetric: "seven_day",
+                detailStyle: "orbit",
+                textSize: "medium"
+            ),
+            notifications: DeviceSyncNotifications(
+                claudeSession: 80,
+                claudeSevenDay: 80,
+                claudeFable: 80,
+                openAIWeekly: 80,
+                openAIResetCredits: 1,
+                cursorAPI: 80,
+                cursorAuto: 80,
+                cursorCredit: 80
+            )
+        )
+        let encoded = try JSONEncoder.deviceSyncEncoder.encode(payload)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+
+        XCTAssertNil(payload.connections)
+        XCTAssertNil(object["connections"])
+        XCTAssertEqual(payload.version, 1)
     }
 
     func testPayloadVersionStaysOneWithoutV2Fields() throws {

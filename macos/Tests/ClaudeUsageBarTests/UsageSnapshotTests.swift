@@ -35,7 +35,7 @@ final class UsageSnapshotStoreTests: XCTestCase {
         ])
 
         let snapshot = try readSnapshot(store)
-        XCTAssertEqual(snapshot.version, 2)
+        XCTAssertEqual(snapshot.version, 3)
         XCTAssertEqual(snapshot.providers.count, 1)
         XCTAssertEqual(snapshot.providers["claude"]?.metrics.first?.percentUsed, 28)
     }
@@ -179,6 +179,109 @@ final class UsageSnapshotStoreTests: XCTestCase {
         let metrics = UsageSnapshotStore.openAIMetrics(for: usage)
 
         XCTAssertEqual(metrics.first(where: { $0.id == "reset_credits" })?.count, 1)
+    }
+
+    func testV3FieldsRoundTripAndCurrentSnapshotMatchesMemory() throws {
+        let now = Date(timeIntervalSince1970: 1_757_521_026)
+        let store = UsageSnapshotStore(directory: directory, now: { now })
+        let plan = UsageSnapshotPlan(label: "plus")
+        let credits = UsageSnapshotCredits(
+            available: 1,
+            items: [
+                UsageSnapshotCreditItem(
+                    id: "crd_1",
+                    expiresAt: Date(timeIntervalSince1970: 1_758_384_000)
+                )
+            ]
+        )
+
+        store.update(
+            provider: "openai",
+            metrics: [
+                UsageSnapshotMetric(id: "primary", label: "7-day window", percentUsed: 43, resetsAt: nil)
+            ],
+            plan: plan,
+            credits: credits
+        )
+
+        let fromDisk = try readSnapshot(store)
+        XCTAssertEqual(fromDisk.version, 3)
+        XCTAssertEqual(fromDisk.providers["openai"]?.plan, plan)
+        XCTAssertEqual(fromDisk.providers["openai"]?.credits, credits)
+        XCTAssertNil(fromDisk.providers["openai"]?.error)
+        XCTAssertEqual(store.currentSnapshot(), fromDisk)
+    }
+
+    func testV2DocumentDecodesWithNilPlanCreditsAndError() throws {
+        let json = """
+        {
+          "version": 2,
+          "generatedAt": "2026-09-10T16:53:46Z",
+          "providers": {
+            "claude": {
+              "updatedAt": "2026-09-10T16:53:44Z",
+              "metrics": [
+                {"id": "five_hour", "label": "5-hour window", "percentUsed": 28}
+              ]
+            }
+          }
+        }
+        """
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(json.utf8).write(
+            to: directory.appendingPathComponent("usage-snapshot.json")
+        )
+
+        let decoded = try UsageSnapshotStore.makeDecoder().decode(
+            UsageSnapshot.self,
+            from: Data(json.utf8)
+        )
+        XCTAssertEqual(decoded.version, 2)
+        XCTAssertNil(decoded.providers["claude"]?.plan)
+        XCTAssertNil(decoded.providers["claude"]?.credits)
+        XCTAssertNil(decoded.providers["claude"]?.error)
+
+        let store = UsageSnapshotStore(directory: directory)
+        XCTAssertEqual(store.currentSnapshot().providers["claude"]?.metrics.first?.percentUsed, 28)
+        XCTAssertNil(store.currentSnapshot().providers["claude"]?.plan)
+        XCTAssertEqual(store.currentSnapshot().version, 3)
+    }
+
+    func testFailedUpdateKeepsLastGoodMetricsAndUpdatedAt() throws {
+        var now = Date(timeIntervalSince1970: 1_000)
+        let store = UsageSnapshotStore(directory: directory, now: { now })
+        store.update(
+            provider: "openai",
+            metrics: [
+                UsageSnapshotMetric(id: "primary", label: "7-day window", percentUsed: 70, resetsAt: nil)
+            ],
+            plan: UsageSnapshotPlan(label: "plus")
+        )
+        let updatedAt = try XCTUnwrap(store.currentSnapshot().providers["openai"]?.updatedAt)
+
+        now = Date(timeIntervalSince1970: 2_000)
+        store.update(provider: "openai", error: "OpenAI session expired — update it in Settings")
+
+        let snapshot = store.currentSnapshot()
+        XCTAssertEqual(snapshot.providers["openai"]?.metrics.first?.percentUsed, 70)
+        XCTAssertEqual(snapshot.providers["openai"]?.plan?.label, "plus")
+        XCTAssertEqual(
+            snapshot.providers["openai"]?.error,
+            "OpenAI session expired — update it in Settings"
+        )
+        XCTAssertEqual(snapshot.providers["openai"]?.updatedAt, updatedAt)
+        XCTAssertEqual(snapshot.generatedAt, now)
+    }
+
+    func testEmptyCurrentSnapshotBeforeAnyWrite() {
+        let now = Date(timeIntervalSince1970: 1_757_521_026)
+        let store = UsageSnapshotStore(directory: directory, now: { now })
+        let snapshot = store.currentSnapshot()
+
+        XCTAssertEqual(snapshot.version, 3)
+        XCTAssertEqual(snapshot.generatedAt, now)
+        XCTAssertEqual(snapshot.providers, [:])
+        XCTAssertNil(snapshot.preferences)
     }
 }
 

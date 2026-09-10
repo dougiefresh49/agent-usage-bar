@@ -72,13 +72,13 @@ struct AgentUsageBarApp: App {
 
                     installWorkspaceObserversIfNeeded()
 
+                    deviceSyncManager.snapshotProvider = { store.currentSnapshot() }
+                    deviceSyncManager.redeemer = { creditID in
+                        await connectedService.redeemResetCredit(id: creditID)
+                    }
+
                     service.startPolling()
                     connectedService.startPolling()
-                }
-                .onChange(of: connectedService.pollCompletionCount) { _, _ in
-                    deviceSyncManager.noteCredentialFingerprint(
-                        DeviceSyncManager.cliCredentialFingerprint()
-                    )
                 }
         }
         .menuBarExtraStyle(.window)

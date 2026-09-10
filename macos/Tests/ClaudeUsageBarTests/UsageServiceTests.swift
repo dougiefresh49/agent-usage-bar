@@ -93,12 +93,14 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         await service.fetchUsage()
 
         XCTAssertTrue(service.isAuthenticated)
+        XCTAssertEqual(service.claudeCredentialSource, .appOAuth)
         XCTAssertNil(service.lastError)
         XCTAssertEqual(service.usage?.fiveHour?.utilization, 12)
         XCTAssertEqual(requests.count, 4)
@@ -165,7 +167,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         await service.fetchUsage()
@@ -216,7 +219,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         await service.fetchUsage()
@@ -274,7 +278,8 @@ final class UsageServiceTests: XCTestCase {
             userinfoEndpoint: userinfoURL,
             tokenEndpoint: tokenURL,
             credentialsStore: store,
-            localProfileLoader: { nil }
+            localProfileLoader: { nil },
+            claudeCodeLoader: { nil }
         )
 
         await service.fetchProfile()
@@ -324,7 +329,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         await service.fetchUsage()
@@ -368,7 +374,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         await service.fetchUsage()
@@ -418,7 +425,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         await service.fetchUsage()
@@ -462,7 +470,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         await service.fetchUsage()
@@ -546,7 +555,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         // ── Poll 1: token nearing expiry (within 300s leeway), refresh server down ──
@@ -662,7 +672,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         // ── Poll 1: API returns 401, refresh fails (network) → stays authenticated ──
@@ -698,7 +709,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
-            credentialsStore: try makeStore()
+            credentialsStore: try makeStore(),
+            claudeCodeLoader: { nil }
         )
 
         await service.submitOAuthCode("   ")
@@ -760,7 +772,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: profileURL,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         await service.fetchUsage()
@@ -822,7 +835,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: profileURL,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         await service.fetchUsage()
@@ -874,7 +888,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: profileURL,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         await service.fetchUsage()
@@ -932,7 +947,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: profileURL,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         await service.fetchUsage()
@@ -996,7 +1012,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: profileURL,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         async let first: Void = service.fetchUsage(force: true)
@@ -1061,7 +1078,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         await service.fetchUsage(force: true)
@@ -1123,7 +1141,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: profileURL,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         async let scheduled: Void = service.fetchUsage(trigger: .scheduled)
@@ -1194,6 +1213,7 @@ final class UsageServiceTests: XCTestCase {
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
             credentialsStore: store,
+            claudeCodeLoader: { nil },
             lowPowerModeEnabled: { true }
         )
 
@@ -1211,12 +1231,301 @@ final class UsageServiceTests: XCTestCase {
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
             credentialsStore: store,
+            claudeCodeLoader: { nil },
             lowPowerModeEnabled: { lowPower }
         )
         XCTAssertEqual(flipping.effectivePollingInterval, 30 * 60)
         lowPower = false
         flipping.rescheduleForPowerState()
         XCTAssertEqual(flipping.effectivePollingInterval, 15 * 60)
+    }
+
+    // MARK: - Claude Code credential source
+
+    func testClaudeCodeLoginWinsOverInAppSignInAndDoesNotRefresh() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "app-access",
+                refreshToken: "refresh-app",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
+        var requests: [String] = []
+
+        MockURLProtocol.handler = { request in
+            let authorization = request.value(forHTTPHeaderField: "Authorization") ?? ""
+            requests.append("\(request.httpMethod ?? "GET") \(request.url?.path ?? "") \(authorization)")
+
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/oauth/token"):
+                XCTFail("Claude Code source must not hit the token endpoint")
+                return try Self.httpResponse(url: tokenURL, statusCode: 500)
+            case ("GET", "/api/oauth/usage"):
+                XCTAssertEqual(authorization, "Bearer cli-access")
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 12, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 20, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: URL(string: "https://example.com/api/oauth/profile")!,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: tokenURL,
+            credentialsStore: store,
+            claudeCodeLoader: {
+                ClaudeCodeCredentials(
+                    accessToken: "cli-access",
+                    expiresAt: Date().addingTimeInterval(3600),
+                    subscriptionType: "max",
+                    rateLimitTier: "default_claude_max_20x"
+                )
+            }
+        )
+
+        XCTAssertEqual(service.claudeCredentialSource, .claudeCode)
+        XCTAssertTrue(service.hasStoredAppOAuth)
+
+        await service.fetchUsage()
+
+        XCTAssertEqual(service.claudeCredentialSource, .claudeCode)
+        XCTAssertTrue(service.isAuthenticated)
+        XCTAssertNil(service.lastError)
+        XCTAssertEqual(service.usage?.fiveHour?.utilization, 12)
+        XCTAssertFalse(requests.contains { $0.hasPrefix("POST /v1/oauth/token") })
+        XCTAssertEqual(
+            store.load(defaultScopes: UsageService.defaultOAuthScopes)?.accessToken,
+            "app-access"
+        )
+    }
+
+    func testExpiredClaudeCodeFallsBackToInAppSignIn() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "app-access",
+                refreshToken: "refresh-app",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+
+        MockURLProtocol.handler = { request in
+            let authorization = request.value(forHTTPHeaderField: "Authorization") ?? ""
+
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                XCTAssertEqual(authorization, "Bearer app-access")
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 8, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 9, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: URL(string: "https://example.com/api/oauth/profile")!,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store,
+            claudeCodeLoader: {
+                ClaudeCodeCredentials(
+                    accessToken: "cli-access",
+                    expiresAt: Date().addingTimeInterval(-60),
+                    subscriptionType: "max",
+                    rateLimitTier: "default_claude_max_20x"
+                )
+            }
+        )
+
+        XCTAssertEqual(service.claudeCredentialSource, .appOAuth)
+
+        await service.fetchUsage()
+
+        XCTAssertEqual(service.claudeCredentialSource, .appOAuth)
+        XCTAssertEqual(service.usage?.fiveHour?.utilization, 8)
+    }
+
+    func testExpiredClaudeCodeWithoutInAppKeepsLastGoodAndSetsCopy() async throws {
+        let store = try makeStore()
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
+        var requestCount = 0
+
+        MockURLProtocol.handler = { request in
+            requestCount += 1
+            if request.url?.path == "/v1/oauth/token" {
+                XCTFail("Expired Claude Code must not hit the token endpoint")
+            }
+            return try Self.httpResponse(url: request.url!, statusCode: 500)
+        }
+
+        let lastGood = try JSONDecoder().decode(
+            UsageResponse.self,
+            from: Data("""
+            {
+              "five_hour": { "utilization": 41, "resets_at": "2026-03-08T18:00:00Z" },
+              "seven_day": { "utilization": 22, "resets_at": "2026-03-15T18:00:00Z" }
+            }
+            """.utf8)
+        )
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: tokenURL,
+            credentialsStore: store,
+            claudeCodeLoader: {
+                ClaudeCodeCredentials(
+                    accessToken: "cli-access",
+                    expiresAt: Date().addingTimeInterval(-60),
+                    subscriptionType: "max",
+                    rateLimitTier: "default_claude_max_20x"
+                )
+            }
+        )
+
+        service.usage = lastGood
+        let previousUpdated = Date(timeIntervalSince1970: 1_700_000_000)
+        service.lastUpdated = previousUpdated
+        let snapshotDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let snapshotStore = UsageSnapshotStore(directory: snapshotDirectory)
+        snapshotStore.update(
+            provider: "claude",
+            metrics: UsageSnapshotStore.claudeMetrics(for: lastGood)
+        )
+        service.snapshotStore = snapshotStore
+
+        XCTAssertEqual(service.claudeCredentialSource, .claudeCode)
+
+        await service.fetchUsage()
+
+        XCTAssertEqual(service.claudeCredentialSource, .claudeCode)
+        XCTAssertTrue(service.isAuthenticated)
+        XCTAssertEqual(service.lastError, UsageService.claudeCodeExpiredMessage)
+        XCTAssertEqual(service.usage?.fiveHour?.utilization, 41)
+        XCTAssertEqual(service.lastUpdated, previousUpdated)
+        XCTAssertEqual(requestCount, 0)
+        XCTAssertNil(store.load(defaultScopes: UsageService.defaultOAuthScopes))
+
+        // The snapshot (phone, ai-usage skill) must see the expiry too, not healthy last-good.
+        let provider = try XCTUnwrap(snapshotStore.currentSnapshot().providers["claude"])
+        XCTAssertEqual(provider.error, UsageService.claudeCodeExpiredMessage)
+        XCTAssertEqual(provider.metrics.first { $0.id == "five_hour" }?.percentUsed, 41)
+    }
+
+    func testClaudeCode401KeepsLastGoodAndDoesNotRefreshOrSignOut() async throws {
+        let store = try makeStore()
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
+        var usageCalls = 0
+
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/oauth/token"):
+                XCTFail("Claude Code 401 must not hit the token endpoint")
+                return try Self.httpResponse(url: tokenURL, statusCode: 500)
+            case ("GET", "/api/oauth/usage"):
+                usageCalls += 1
+                if usageCalls == 1 {
+                    return try Self.httpResponse(
+                        url: usageURL,
+                        statusCode: 200,
+                        body: """
+                        {
+                          "five_hour": { "utilization": 18, "resets_at": "2026-03-08T18:00:00Z" },
+                          "seven_day": { "utilization": 19, "resets_at": "2026-03-15T18:00:00Z" }
+                        }
+                        """
+                    )
+                }
+                return try Self.httpResponse(url: usageURL, statusCode: 401)
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: URL(string: "https://example.com/api/oauth/profile")!,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: tokenURL,
+            credentialsStore: store,
+            claudeCodeLoader: {
+                ClaudeCodeCredentials(
+                    accessToken: "cli-access",
+                    expiresAt: Date().addingTimeInterval(3600),
+                    subscriptionType: "max",
+                    rateLimitTier: "default_claude_max_20x"
+                )
+            }
+        )
+
+        await service.fetchUsage()
+        XCTAssertEqual(service.usage?.fiveHour?.utilization, 18)
+        let lastUpdated = try XCTUnwrap(service.lastUpdated)
+
+        await service.fetchUsage()
+
+        XCTAssertEqual(service.claudeCredentialSource, .claudeCode)
+        XCTAssertTrue(service.isAuthenticated)
+        XCTAssertEqual(service.lastError, UsageService.claudeCodeExpiredMessage)
+        XCTAssertEqual(service.usage?.fiveHour?.utilization, 18)
+        XCTAssertEqual(service.lastUpdated, lastUpdated)
+        XCTAssertNil(store.load(defaultScopes: UsageService.defaultOAuthScopes))
     }
 
     func testSignOutDuringProfileFetchDiscardsResponse() async throws {
@@ -1268,7 +1577,8 @@ final class UsageServiceTests: XCTestCase {
             profileEndpoint: profileURL,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
-            credentialsStore: store
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
         )
 
         let fetchTask = Task { await service.fetchUsage() }
@@ -1283,6 +1593,134 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertNil(service.profileLastFetched)
         XCTAssertNil(service.usage)
         XCTAssertEqual(gate.profileRequestCount, 1)
+    }
+
+    func testClaudeSnapshotWriteIncludesPlan() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let profileURL = URL(string: "https://example.com/api/oauth/profile")!
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 15, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 25, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: profileURL,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+        let snapshotDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let snapshotStore = UsageSnapshotStore(directory: snapshotDirectory)
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: profileURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
+        )
+        service.snapshotStore = snapshotStore
+
+        await service.fetchUsage()
+
+        let provider = try XCTUnwrap(snapshotStore.currentSnapshot().providers["claude"])
+        XCTAssertEqual(provider.plan?.label, "Max 20x")
+        XCTAssertEqual(provider.plan?.status, "active")
+        XCTAssertNil(provider.error)
+        XCTAssertEqual(provider.metrics.first?.percentUsed, 15)
+    }
+
+    func testClaudeFailedFetchWritesErrorAndKeepsMetrics() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let profileURL = URL(string: "https://example.com/api/oauth/profile")!
+        var usageCalls = 0
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                usageCalls += 1
+                if usageCalls == 1 {
+                    return try Self.httpResponse(
+                        url: usageURL,
+                        statusCode: 200,
+                        body: """
+                        {
+                          "five_hour": { "utilization": 15, "resets_at": "2026-03-08T18:00:00Z" },
+                          "seven_day": { "utilization": 25, "resets_at": "2026-03-15T18:00:00Z" }
+                        }
+                        """
+                    )
+                }
+                return try Self.httpResponse(url: usageURL, statusCode: 500)
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: profileURL,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+        let snapshotDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let snapshotStore = UsageSnapshotStore(directory: snapshotDirectory)
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: profileURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store,
+            claudeCodeLoader: { nil }
+        )
+        service.snapshotStore = snapshotStore
+
+        await service.fetchUsage()
+        let first = try XCTUnwrap(snapshotStore.currentSnapshot().providers["claude"])
+        XCTAssertEqual(first.metrics.first?.percentUsed, 15)
+        XCTAssertNil(first.error)
+        let firstUpdatedAt = first.updatedAt
+
+        await service.fetchUsage()
+        let second = try XCTUnwrap(snapshotStore.currentSnapshot().providers["claude"])
+        XCTAssertEqual(second.metrics.first?.percentUsed, 15)
+        XCTAssertEqual(second.updatedAt, firstUpdatedAt)
+        XCTAssertEqual(second.error, "HTTP 500")
+        XCTAssertEqual(service.lastError, "HTTP 500")
     }
 
 

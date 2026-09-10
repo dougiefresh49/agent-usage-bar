@@ -4,9 +4,9 @@ Kotlin/Jetpack Compose port of Agent Usage Bar with home-screen widgets.
 
 ## What you get
 
-- One-page usage overview (Claude / Codex / Cursor), matching the macOS popover
-- Settings for polling, widget provider, primary/secondary stats, appearance,
-  notification thresholds, and session tokens
+- One-page usage overview (Claude / Codex / Cursor / ElevenLabs)
+- Settings for pairing, polling, widget provider, primary/secondary stats,
+  appearance, and notification thresholds
 - Five home-screen widgets:
   - **Usage Grid (4 × 3)**: four-provider grid with size-aware charts
   - **Usage Dashboard (4 × 4)**: grid plus Settings and Refresh actions when space allows
@@ -18,10 +18,12 @@ Kotlin/Jetpack Compose port of Agent Usage Bar with home-screen widgets.
   secondary values or dashboard actions when the resized footprint is too small.
   This includes intermediate launcher sizes such as 2 × 3 and 2 × 4 without
   requiring separate picker entries.
-- Encrypted local storage for Claude OAuth + OpenAI/Cursor session tokens
-- QR import for selected settings (including widget stats) and provider
-  credentials from the macOS app
-- Background refresh via WorkManager (every 15 minutes minimum — Android platform limit)
+- Pairing with the Mac over the tailnet. The phone displays the Mac's usage
+  snapshot and does not store provider credentials
+- QR import for selected settings (polling, appearance, notifications) from the
+  macOS app
+- Snapshot pull while the app is open (every 60 seconds) and a WorkManager
+  background refresh (every 15 minutes, Android's periodic minimum)
 
 ## Requirements to build
 
@@ -94,36 +96,33 @@ The debug package id is `com.agentusagebar.android.debug`.
 1. Long-press an empty spot on a home screen (or long-press the app icon → **Widgets**)
 2. Find **Agent Usage Bar**
 3. Drag **Usage Overview** and/or **Provider Usage** onto the home screen
-4. Open the app, connect providers, pull to refresh / wait for the worker — widgets update after each successful refresh
+4. Open the app, pair with the Mac, pull to refresh / wait for the worker — widgets update after each successful snapshot pull
 
 ## First-run setup in the app
 
 1. Complete the welcome / polling screen
-2. **Claude:** Sign in with Claude → browser opens → paste `code#state` back into the app
-3. **OpenAI / Codex:** Settings → paste the ChatGPT usage bearer token (same as macOS)
-4. **Cursor:** Settings → paste `WorkosCursorSessionToken` (same as macOS)
+2. Open **Settings → Devices → Scan QR Code**
+3. On the Mac, open **Settings → Devices → Add Device** and scan that code
+4. Confirm the matching six-digit code, then approve the phone on the Mac
 
-Alternatively, open **Settings → Devices → Add Device** on the Mac, choose what
-to transfer, then use **Settings → Devices → Scan QR Code** on Android. The QR
-contains only a one-time handshake and the Mac's public key—not credentials.
-Confirm the matching six-digit code on both devices, then approve the phone on
-the Mac. Selected settings and OpenAI/Cursor/ElevenLabs credentials are
-encrypted specifically for that phone. Pairing expires after 10 minutes and
-uses the local network; there is no cloud sync server.
+Both devices need to be on the tailnet. The phone then pulls the Mac's usage
+snapshot (the same credential-free document the `ai-usage` skill reads). Provider
+logins stay on the Mac. Reset credits from the phone ask the Mac to redeem.
 
-Tokens never leave the phone except when calling Anthropic / OpenAI / Cursor APIs.
+The QR contains only a one-time handshake and the Mac's public key. Pairing
+expires after 10 minutes. There is no cloud sync server.
 
 ## Findings / Android constraints worth knowing
 
 | Topic | What it means |
 | --- | --- |
 | **Widgets need an installed app** | Widgets are registered by the APK. No Play Store listing is required; sideload is enough. |
-| **Widget update cadence** | `updatePeriodMillis` cannot reliably fire faster than ~30 minutes. We also use WorkManager every **15 minutes** (Android’s minimum for periodic work) to refresh usage + push widget updates. Opening the app refreshes immediately. |
+| **Widget update cadence** | `updatePeriodMillis` cannot reliably fire faster than ~30 minutes. The open app pulls the Mac snapshot every **60 seconds**. WorkManager runs every **15 minutes** (Android’s minimum for periodic work) for widgets and background updates. Opening the app refreshes immediately. |
 | **Battery optimizations** | Aggressive OEMs can delay WorkManager. On Pixel this is usually fine; if widgets go stale, disable battery restriction for the app under **Settings → Apps → Agent Usage Bar → Battery**. |
-| **Claude OAuth** | Same public client + PKCE flow as macOS. Android opens the browser; you paste the callback code. No custom URL scheme is required for this flow. |
-| **Session tokens** | OpenAI/Cursor tokens still come from private dashboard/session endpoints — same instructions as the macOS app. They expire; when they do, Settings will show an auth error. |
-| **Cross-device pairing** | The Mac and phone perform P-256 ECDH, confirm a matching code, and transfer settings with AES-GCM. Imported credentials are written to EncryptedSharedPreferences; Claude OAuth remains a separate sign-in because copying its rotating refresh token could invalidate a session on either device. |
-| **Device removal** | The Mac keeps a device ledger. Removing a phone stops future sync and queues deletion of credentials originally transferred by that Mac. The wipe is delivered when the phone next reaches the running Mac on the same local network; use the provider's session/key controls for immediate remote revocation. |
+| **No provider credentials on the phone** | Claude / OpenAI / Cursor / ElevenLabs logins live on the Mac. A one-time upgrade wipe deletes any tokens previously stored in `agent_usage_bar_secure`. |
+| **Mac unreachable** | If the Mac is asleep or off the tailnet, the last snapshot stays on screen and the footer reads `Mac unreachable` / `Mac unreachable since …`. The reset-credit button is disabled until a pull succeeds. |
+| **Cross-device pairing** | The Mac and phone perform P-256 ECDH, confirm a matching code, and transfer settings with AES-GCM. Snapshot and redeem traffic uses the same pairing keys over the tailnet. |
+| **Device removal** | The Mac keeps a device ledger. Removing a phone stops snapshot pulls and queues a wipe that forgets that Mac and drops its cached snapshot. |
 | **Notifications** | Thresholds are stored (parity with macOS). Local notification firing is stubbed for this first Android cut — widgets + in-app UI are the primary glance surfaces. |
 | **Install source warning** | First sideload may ask you to allow installing unknown apps for the installer you used (`adb` usually skips that UI). |
 
@@ -132,7 +131,7 @@ Tokens never leave the phone except when calling Anthropic / OpenAI / Cursor API
 ```text
 android/
 ├── app/src/main/java/com/agentusagebar/android/
-│   ├── data/           # models, encrypted credentials, API client, repository
+│   ├── data/           # models, pairing/snapshot client, repository
 │   ├── ui/             # Compose home + settings (popover-like main screen)
 │   ├── widget/         # Glance App Widgets
 │   └── worker/         # WorkManager polling + boot reschedule
@@ -144,22 +143,20 @@ android/
 
 - **`adb devices` empty** — unlock phone, replug USB, accept RSA prompt, try another cable/port.
 - **Install fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`** — uninstall the previous build first: `adb uninstall com.agentusagebar.android.debug`
-- **Widgets show Connect / empty** — open the app and confirm providers are configured; tap refresh.
-- **Claude sign-in fails with state mismatch** — start Sign in again and paste the newest code without restarting the flow mid-way.
+- **Widgets show Connect / empty** — open the app and confirm a Mac is paired and reachable on the tailnet; tap refresh.
+- **Mac unreachable** — the Mac app needs to be running on the tailnet. Stale numbers stay until the next successful pull.
 
 
 ## Importing settings from your Mac
 
 1. On macOS, open **Settings → Devices → Add Device**.
-2. Select polling, appearance, notifications, and any configured providers
-   you want to copy.
-3. Generate the QR code.
-4. On Android, open **Settings → Devices → Scan QR Code** and scan it.
-5. Verify that the six-digit codes match, then approve the phone on the Mac.
+2. Generate the QR code.
+3. On Android, open **Settings → Devices → Scan QR Code** and scan it.
+4. Verify that the six-digit codes match, then approve the phone on the Mac.
 
 The QR carries no connection values. The encrypted transfer expires after 10
-minutes, and Android stores imported credentials in encrypted app storage.
-Claude still uses the browser OAuth flow separately on each device.
+minutes. Settings (polling, appearance, notifications) can still sync; provider
+tokens are not sent. The phone then pulls the usage snapshot from the Mac.
 
 
 ## Wireless updates (no USB cable)

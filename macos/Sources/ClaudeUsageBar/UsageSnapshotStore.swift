@@ -33,9 +33,58 @@ struct UsageSnapshotMetric: Codable, Equatable {
     }
 }
 
+struct UsageSnapshotPlan: Codable, Equatable {
+    var label: String?
+    var priceText: String?
+    var renewsAt: Date?
+    var includedAmountCents: Int?
+    var status: String?
+
+    init(
+        label: String? = nil,
+        priceText: String? = nil,
+        renewsAt: Date? = nil,
+        includedAmountCents: Int? = nil,
+        status: String? = nil
+    ) {
+        self.label = label
+        self.priceText = priceText
+        self.renewsAt = renewsAt
+        self.includedAmountCents = includedAmountCents
+        self.status = status
+    }
+}
+
+struct UsageSnapshotCreditItem: Codable, Equatable {
+    let id: String
+    let expiresAt: Date?
+}
+
+struct UsageSnapshotCredits: Codable, Equatable {
+    let available: Int
+    let items: [UsageSnapshotCreditItem]
+}
+
 struct UsageSnapshotProvider: Codable, Equatable {
     let updatedAt: Date
     let metrics: [UsageSnapshotMetric]
+    let plan: UsageSnapshotPlan?
+    let credits: UsageSnapshotCredits?
+    let error: String?
+
+    init(
+        updatedAt: Date,
+        metrics: [UsageSnapshotMetric],
+        plan: UsageSnapshotPlan? = nil,
+        credits: UsageSnapshotCredits? = nil,
+        error: String? = nil
+    ) {
+        self.updatedAt = updatedAt
+        self.metrics = metrics
+        self.plan = plan
+        self.credits = credits
+        self.error = error
+    }
 }
 
 struct UsageSnapshotPreferences: Codable, Equatable {
@@ -44,7 +93,7 @@ struct UsageSnapshotPreferences: Codable, Equatable {
 }
 
 struct UsageSnapshot: Codable, Equatable {
-    var version = 2
+    var version = 3
     var generatedAt: Date
     var providers: [String: UsageSnapshotProvider]
     var preferences: UsageSnapshotPreferences?
@@ -83,6 +132,7 @@ final class UsageSnapshotStore {
     let fileURL: URL
     let widgetFileURL: URL?
     private var providers: [String: UsageSnapshotProvider] = [:]
+    private var lastGeneratedAt: Date?
     private let now: () -> Date
     private let defaults: UserDefaults
     private let reloadWidgets: () -> Void
@@ -113,11 +163,44 @@ final class UsageSnapshotStore {
         if let data = try? Data(contentsOf: fileURL),
            let snapshot = try? Self.makeDecoder().decode(UsageSnapshot.self, from: data) {
             providers = snapshot.providers
+            lastGeneratedAt = snapshot.generatedAt
         }
     }
 
-    func update(provider: String, metrics: [UsageSnapshotMetric]) {
-        providers[provider] = UsageSnapshotProvider(updatedAt: now(), metrics: metrics)
+    func currentSnapshot() -> UsageSnapshot {
+        if providers.isEmpty, lastGeneratedAt == nil {
+            return UsageSnapshot(generatedAt: now(), providers: [:])
+        }
+        var snapshot = makeSnapshot()
+        snapshot.generatedAt = lastGeneratedAt ?? snapshot.generatedAt
+        return snapshot
+    }
+
+    func update(
+        provider: String,
+        metrics: [UsageSnapshotMetric] = [],
+        plan: UsageSnapshotPlan? = nil,
+        credits: UsageSnapshotCredits? = nil,
+        error: String? = nil
+    ) {
+        if let error {
+            let previous = providers[provider]
+            providers[provider] = UsageSnapshotProvider(
+                updatedAt: previous?.updatedAt ?? now(),
+                metrics: previous?.metrics ?? [],
+                plan: previous?.plan,
+                credits: previous?.credits,
+                error: error
+            )
+        } else {
+            providers[provider] = UsageSnapshotProvider(
+                updatedAt: now(),
+                metrics: metrics,
+                plan: plan,
+                credits: credits,
+                error: nil
+            )
+        }
         write()
     }
 
@@ -131,7 +214,18 @@ final class UsageSnapshotStore {
     }
 
     private func write() {
-        let snapshot = UsageSnapshot(
+        let snapshot = makeSnapshot()
+        lastGeneratedAt = snapshot.generatedAt
+        guard let data = try? Self.makeEncoder().encode(snapshot) else { return }
+        write(data, to: fileURL)
+        if let widgetFileURL {
+            write(data, to: widgetFileURL)
+        }
+        reloadWidgets()
+    }
+
+    private func makeSnapshot() -> UsageSnapshot {
+        UsageSnapshot(
             generatedAt: now(),
             providers: providers,
             preferences: UsageSnapshotPreferences(
@@ -143,12 +237,6 @@ final class UsageSnapshotStore {
                 ) ?? UsagePresentationDefaults.detailStyle.rawValue
             )
         )
-        guard let data = try? Self.makeEncoder().encode(snapshot) else { return }
-        write(data, to: fileURL)
-        if let widgetFileURL {
-            write(data, to: widgetFileURL)
-        }
-        reloadWidgets()
     }
 
     private func write(_ data: Data, to url: URL) {

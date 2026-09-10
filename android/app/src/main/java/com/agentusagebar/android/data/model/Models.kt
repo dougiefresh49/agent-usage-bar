@@ -4,99 +4,6 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class ClaudeUsageResponse(
-    @SerialName("five_hour") val fiveHour: UsageBucket? = null,
-    @SerialName("seven_day") val sevenDay: UsageBucket? = null,
-    @SerialName("seven_day_opus") val sevenDayOpus: UsageBucket? = null,
-    @SerialName("seven_day_sonnet") val sevenDaySonnet: UsageBucket? = null,
-    @SerialName("extra_usage") val extraUsage: ExtraUsage? = null,
-    val limits: List<ClaudeUsageLimit>? = null,
-)
-
-@Serializable
-data class UsageBucket(
-    val utilization: Double? = null,
-    @SerialName("resets_at") val resetsAt: String? = null,
-)
-
-@Serializable
-data class ExtraUsage(
-    @SerialName("is_enabled") val isEnabled: Boolean = false,
-    val utilization: Double? = null,
-    @SerialName("used_credits") val usedCredits: Double? = null,
-    @SerialName("monthly_limit") val monthlyLimit: Double? = null,
-) {
-    val usedCreditsAmount: Double? get() = usedCredits?.div(100.0)
-    val monthlyLimitAmount: Double? get() = monthlyLimit?.div(100.0)
-}
-
-@Serializable
-data class ClaudeUsageLimit(
-    val kind: String,
-    val group: String? = null,
-    val percent: Double? = null,
-    val severity: String? = null,
-    @SerialName("resets_at") val resetsAt: String? = null,
-    val scope: ClaudeUsageScope? = null,
-    @SerialName("is_active") val isActive: Boolean? = null,
-)
-
-@Serializable
-data class ClaudeUsageScope(
-    val model: ClaudeUsageModel? = null,
-    val surface: String? = null,
-)
-
-@Serializable
-data class ClaudeUsageModel(
-    val id: String? = null,
-    @SerialName("display_name") val displayName: String? = null,
-)
-
-@Serializable
-data class CursorUsageResponse(
-    val billingCycleStart: String? = null,
-    val billingCycleEnd: String? = null,
-    val planUsage: CursorPlanUsage? = null,
-    val spendLimitUsage: CursorSpendLimitUsage? = null,
-    val displayMessage: String? = null,
-)
-
-@Serializable
-data class CursorPlanUsage(
-    val totalSpend: Double? = null,
-    val includedSpend: Double? = null,
-    val bonusSpend: Double? = null,
-    val limit: Double? = null,
-    val remainingBonus: Boolean? = null,
-    val autoPercentUsed: Double? = null,
-    val apiPercentUsed: Double? = null,
-    val totalPercentUsed: Double? = null,
-)
-
-@Serializable
-data class CursorSpendLimitUsage(
-    val individualLimit: Double? = null,
-    val individualRemaining: Double? = null,
-    val limitType: String? = null,
-) {
-    val spent: Double?
-        get() {
-            val limit = individualLimit ?: return null
-            val remaining = individualRemaining ?: return null
-            return maxOf(0.0, limit - remaining)
-        }
-
-    val utilization: Double?
-        get() {
-            val limit = individualLimit ?: return null
-            if (limit <= 0) return null
-            val spentAmount = spent ?: return null
-            return minOf(100.0, maxOf(0.0, spentAmount / limit * 100))
-        }
-}
-
-@Serializable
 data class CursorPlanInfoResponse(
     val planInfo: CursorPlanInfo? = null,
     val nextUpgrade: CursorPlanNextUpgrade? = null,
@@ -174,154 +81,6 @@ data class ClaudeProfileOrganization(
     @SerialName("subscription_created_at") val subscriptionCreatedAt: String? = null,
     @SerialName("has_extra_usage_enabled") val hasExtraUsageEnabled: Boolean? = null,
 )
-
-@Serializable
-data class OpenAIUsageResponse(
-    val email: String? = null,
-    @SerialName("plan_type") val planType: String? = null,
-    @SerialName("rate_limit") val rateLimit: OpenAIRateLimit? = null,
-    @SerialName("additional_rate_limits") val additionalRateLimits: List<OpenAIAdditionalRateLimit>? = null,
-    @SerialName("rate_limit_reset_credits")
-    val rateLimitResetCredits: OpenAIResetCreditSummary? = null,
-)
-
-@Serializable
-data class OpenAIResetCreditSummary(
-    @SerialName("available_count") val availableCount: Int? = null,
-    @SerialName("applicable_available_count") val applicableAvailableCount: Int? = null,
-)
-
-@Serializable
-data class OpenAIResetCreditsResponse(
-    val credits: List<OpenAIResetCredit> = emptyList(),
-    @SerialName("available_count") val availableCount: Int? = null,
-    @SerialName("total_earned_count") val totalEarnedCount: Int? = null,
-) {
-    val availableCreditsCount: Int
-        get() = availableCount ?: credits.count { it.isAvailable }
-}
-
-@Serializable
-data class OpenAIResetCredit(
-    val id: String,
-    @SerialName("reset_type") val resetType: String? = null,
-    @SerialName("is_supported_by_plan") val isSupportedByPlan: Boolean? = null,
-    val status: String? = null,
-    @SerialName("granted_at") val grantedAt: String? = null,
-    @SerialName("expires_at") val expiresAt: String? = null,
-    val title: String? = null,
-    val description: String? = null,
-) {
-    val isAvailable: Boolean
-        get() = status == "available"
-}
-
-@Serializable
-data class OpenAIRateLimit(
-    val allowed: Boolean? = null,
-    @SerialName("limit_reached") val limitReached: Boolean? = null,
-    @SerialName("primary_window") val primaryWindow: OpenAIUsageWindow? = null,
-    @SerialName("secondary_window") val secondaryWindow: OpenAIUsageWindow? = null,
-)
-
-@Serializable
-data class OpenAIAdditionalRateLimit(
-    val type: String? = null,
-    val label: String? = null,
-    @SerialName("rate_limit") val rateLimit: OpenAIRateLimit? = null,
-)
-
-@Serializable
-data class OpenAIUsageWindow(
-    @SerialName("used_percent") val usedPercent: Double? = null,
-    @SerialName("limit_window_seconds") val limitWindowSeconds: Double? = null,
-    @SerialName("reset_after_seconds") val resetAfterSeconds: Double? = null,
-    @SerialName("reset_at") val resetAt: Double? = null,
-)
-
-@Serializable
-data class ClaudeCredentials(
-    val accessToken: String,
-    val refreshToken: String? = null,
-    val expiresAtEpochMs: Long? = null,
-    val scopes: List<String> = emptyList(),
-) {
-    fun needsRefresh(nowMs: Long = System.currentTimeMillis(), leewayMs: Long = 300_000): Boolean {
-        val refresh = refreshToken
-        val expiresAt = expiresAtEpochMs
-        if (refresh.isNullOrBlank() || expiresAt == null) return false
-        return expiresAt <= nowMs + leewayMs
-    }
-
-    fun isExpired(nowMs: Long = System.currentTimeMillis()): Boolean {
-        val expiresAt = expiresAtEpochMs ?: return false
-        return expiresAt <= nowMs
-    }
-}
-
-@Serializable
-data class ElevenLabsSubscriptionResponse(
-    val tier: String? = null,
-    @SerialName("character_count") val characterCount: Int? = null,
-    @SerialName("character_limit") val characterLimit: Int? = null,
-    @SerialName("next_character_count_reset_unix") val nextCharacterCountResetUnix: Double? = null,
-    val status: String? = null,
-    @SerialName("billing_period") val billingPeriod: String? = null,
-    @SerialName("character_refresh_period") val characterRefreshPeriod: String? = null,
-) {
-    val creditsRemaining: Int?
-        get() {
-            val used = characterCount ?: return null
-            val limit = characterLimit ?: return null
-            return maxOf(0, limit - used)
-        }
-
-    val utilization: Double?
-        get() {
-            val used = characterCount ?: return null
-            val limit = characterLimit ?: return null
-            if (limit <= 0) return null
-            return used.toDouble() / limit.toDouble() * 100.0
-        }
-}
-
-@Serializable
-data class ConnectedCredentials(
-    val openAISessionToken: String? = null,
-    val cursorSessionToken: String? = null,
-    val elevenLabsAPIKey: String? = null,
-    val codexAccessToken: String? = null,
-    val codexAccountId: String? = null,
-    val cursorAccessToken: String? = null,
-) {
-    val isEmpty: Boolean
-        get() = openAISessionToken.isNullOrBlank()
-            && cursorSessionToken.isNullOrBlank()
-            && elevenLabsAPIKey.isNullOrBlank()
-            && codexAccessToken.isNullOrBlank()
-            && codexAccountId.isNullOrBlank()
-            && cursorAccessToken.isNullOrBlank()
-
-    /** Phone precedence: CLI token wins over a pasted session token (docs/decisions.md row 1). */
-    val openAIBearer: String?
-        get() = codexAccessToken?.takeIf { it.isNotBlank() }
-            ?: openAISessionToken?.takeIf { it.isNotBlank() }
-
-    val openAIAccountId: String?
-        get() = codexAccountId?.takeIf { it.isNotBlank() }
-
-    val cursorAuth: CursorAuth?
-        get() {
-            cursorAccessToken?.takeIf { it.isNotBlank() }?.let { return CursorAuth.CliToken(it) }
-            cursorSessionToken?.takeIf { it.isNotBlank() }?.let { return CursorAuth.Cookie(it) }
-            return null
-        }
-}
-
-sealed class CursorAuth {
-    data class CliToken(val token: String) : CursorAuth()
-    data class Cookie(val token: String) : CursorAuth()
-}
 
 enum class UsageProvider(
     val displayName: String,
@@ -436,8 +195,8 @@ object UsageMetricPreferences {
 
     /**
      * Stable id for Claude scoped model limits (e.g. Fable). Must not include
-     * [ClaudeUsageLimit.resetsAt] — that timestamp changes every window and would
-     * make saved primary/secondary preferences look like they reset to defaults.
+     * a reset timestamp — that changes every window and would make saved
+     * primary/secondary preferences look like they reset to defaults.
      */
     fun claudeLimitMetricId(kind: String, modelDisplayName: String, group: String?): String {
         val safeGroup = group?.takeIf { it.isNotBlank() } ?: "ungrouped"
@@ -488,11 +247,22 @@ data class ProviderUsageState(
     val updatedAtEpochMs: Long? = null,
 )
 
+data class SnapshotCreditItem(
+    val id: String,
+    val expiresAtEpochMs: Long? = null,
+)
+
 data class AppUsageSnapshot(
     val generatedAtEpochMs: Long = 0L,
     val providers: Map<UsageProvider, ProviderUsageState> = emptyMap(),
     val claudeProfile: ClaudeProfileResponse? = null,
     val cursorPlanInfo: CursorPlanInfoResponse? = null,
-    /** Codex plan type from the usage response; null when absent or not configured. */
+    /** Codex plan type from the Mac snapshot; null when absent or not configured. */
     val openAIPlanType: String? = null,
+    val openAICreditsAvailable: Int = 0,
+    val openAICreditItems: List<SnapshotCreditItem> = emptyList(),
+    val sourceDesktopName: String? = null,
+    val pairedDesktopCount: Int = 0,
+    val lastSuccessfulPullEpochMs: Long? = null,
+    val macUnreachable: Boolean = false,
 )

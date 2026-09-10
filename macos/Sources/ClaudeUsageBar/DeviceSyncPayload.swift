@@ -208,10 +208,37 @@ struct DeviceUnlinkRequest: Codable {
     let proof: String
 }
 
+struct DeviceRedeemRequest: Codable, Equatable {
+    let creditId: String
+    let requestedAtEpochSeconds: Int64
+}
+
+struct DeviceRedeemResult: Codable, Equatable {
+    var outcome: String?
+    var message: String?
+    var error: String?
+
+    init(outcome: String? = nil, message: String? = nil, error: String? = nil) {
+        self.outcome = outcome
+        self.message = message
+        self.error = error
+    }
+
+    static func success(_ value: OpenAIResetCreditOutcome) -> DeviceRedeemResult {
+        DeviceRedeemResult(outcome: value.rawValue, message: value.userMessage)
+    }
+
+    static func failure(_ message: String) -> DeviceRedeemResult {
+        DeviceRedeemResult(error: message)
+    }
+}
+
 enum DeviceSyncCrypto {
     static let pairingInfo = Data("agentusagebar-device-pair-v2".utf8)
     static let statusInfo = Data("agentusagebar-device-status-v2".utf8)
     static let resyncInfo = Data("agentusagebar-device-resync-v1".utf8)
+    static let snapshotInfo = Data("agentusagebar-device-snapshot-v1".utf8)
+    static let redeemInfo = Data("agentusagebar-device-redeem-v1".utf8)
 
     static func sharedSecret(
         desktopPrivateKey: P256.KeyAgreement.PrivateKey,
@@ -273,6 +300,30 @@ enum DeviceSyncCrypto {
             tag: box.tag.base64URLEncodedString()
         )
     }
+
+    static func open<T: Decodable>(
+        _ envelope: DeviceEncryptedEnvelope,
+        as type: T.Type,
+        sharedSecret: SharedSecret,
+        salt: String,
+        info: Data
+    ) throws -> T {
+        guard let nonceData = Data(base64URLEncoded: envelope.nonce),
+              let ciphertext = Data(base64URLEncoded: envelope.ciphertext),
+              let tag = Data(base64URLEncoded: envelope.tag) else {
+            throw DeviceSyncError.invalidEnvelope
+        }
+        let box = try AES.GCM.SealedBox(
+            nonce: AES.GCM.Nonce(data: nonceData),
+            ciphertext: ciphertext,
+            tag: tag
+        )
+        let data = try AES.GCM.open(
+            box,
+            using: key(sharedSecret: sharedSecret, salt: salt, info: info)
+        )
+        return try JSONDecoder.deviceSyncDecoder.decode(type, from: data)
+    }
 }
 
 enum DeviceSyncError: LocalizedError {
@@ -282,6 +333,7 @@ enum DeviceSyncError: LocalizedError {
     case serverUnavailable
     case pairingExpired
     case unknownDevice
+    case invalidEnvelope
 
     var errorDescription: String? {
         switch self {
@@ -297,6 +349,8 @@ enum DeviceSyncError: LocalizedError {
             return "This pairing request expired. Generate a new QR code."
         case .unknownDevice:
             return "This device is not registered with this Mac."
+        case .invalidEnvelope:
+            return "Could not decrypt the device payload."
         }
     }
 }
@@ -307,6 +361,14 @@ extension JSONEncoder {
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         encoder.dateEncodingStrategy = .iso8601
         return encoder
+    }()
+}
+
+extension JSONDecoder {
+    static let deviceSyncDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
     }()
 }
 

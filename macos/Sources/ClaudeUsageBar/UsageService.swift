@@ -2,6 +2,13 @@ import Foundation
 import Combine
 import CryptoKit
 import AppKit
+
+enum ClaudeCredentialSource: Equatable {
+    case claudeCode
+    case appOAuth
+    case none
+}
+
 @MainActor
 class UsageService: ObservableObject {
     @Published var usage: UsageResponse?
@@ -12,6 +19,10 @@ class UsageService: ObservableObject {
     @Published private(set) var accountEmail: String?
     @Published private(set) var profile: ClaudeProfileResponse?
     @Published private(set) var profileLastFetched: Date?
+    @Published private(set) var claudeCredentialSource: ClaudeCredentialSource = .none
+    @Published private(set) var claudeCodeTokenExpiry: Date?
+    /// True when this app's own OAuth sign-in is in the store, even if Claude Code is the active source.
+    @Published private(set) var hasStoredAppOAuth = false
 
     var historyService: UsageHistoryService?
     var notificationService: NotificationService?
@@ -25,7 +36,9 @@ class UsageService: ObservableObject {
     private let tokenEndpoint: URL
     private let credentialsStore: StoredCredentialsStore
     private let localProfileLoader: @MainActor () -> String?
+    private let claudeCodeLoader: () -> ClaudeCodeCredentials?
     private let lowPowerModeEnabled: () -> Bool
+    private var claudeCredentialIdentity: String?
     private var currentInterval: TimeInterval
     private var isPollingPaused = false
     private enum RefreshResult {
@@ -52,6 +65,8 @@ class UsageService: ObservableObject {
     nonisolated static let maxBackoffInterval: TimeInterval = PollingBackoff.maxInterval
     nonisolated static let profileCacheInterval: TimeInterval = 60 * 60
     nonisolated static let defaultOAuthScopes = ["user:profile", "user:inference"]
+    nonisolated static let claudeCodeExpiredMessage =
+        "Claude Code login expired. Run any claude command to refresh."
     nonisolated private static let authorizeEndpoint = URL(string: "https://claude.ai/oauth/authorize")!
     nonisolated private static let defaultUsageEndpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     nonisolated private static let defaultProfileEndpoint = URL(string: "https://api.anthropic.com/api/oauth/profile")!
@@ -115,6 +130,7 @@ class UsageService: ObservableObject {
         redirectUri: String = UsageService.defaultRedirectURI,
         credentialsStore: StoredCredentialsStore = StoredCredentialsStore(),
         localProfileLoader: @MainActor @escaping () -> String? = UsageService.loadLocalProfile,
+        claudeCodeLoader: @escaping () -> ClaudeCodeCredentials? = { ClaudeCodeKeychain.load() },
         lowPowerModeEnabled: @escaping () -> Bool = {
             ProcessInfo.processInfo.isLowPowerModeEnabled
         }
@@ -127,6 +143,7 @@ class UsageService: ObservableObject {
         self.redirectUri = redirectUri
         self.credentialsStore = credentialsStore
         self.localProfileLoader = localProfileLoader
+        self.claudeCodeLoader = claudeCodeLoader
         self.lowPowerModeEnabled = lowPowerModeEnabled
         let stored = UserDefaults.standard.integer(forKey: "pollingMinutes")
         let minutes = Self.pollingOptions.contains(stored) ? stored : Self.defaultPollingMinutes
@@ -135,7 +152,7 @@ class UsageService: ObservableObject {
             minutes: minutes,
             isLowPower: lowPowerModeEnabled()
         )
-        isAuthenticated = loadCredentials() != nil
+        applyResolvedCredentialState()
     }
 
     // MARK: - Polling
@@ -299,7 +316,7 @@ class UsageService: ObservableObject {
                 lastError = "Failed to save credentials: \(error.localizedDescription)"
                 return
             }
-            isAuthenticated = true
+            applyResolvedCredentialState()
             isAwaitingCode = false
             lastError = nil
             codeVerifier = nil
@@ -314,8 +331,18 @@ class UsageService: ObservableObject {
 
     func signOut() {
         deleteCredentials()
+        let previousIdentity = claudeCredentialIdentity
+        applyResolvedCredentialState()
+        lastError = nil
+        if claudeCredentialSource != .none {
+            if claudeCredentialIdentity != previousIdentity {
+                refreshTask?.cancel()
+                refreshTask = nil
+            }
+            return
+        }
+
         snapshotStore?.remove(provider: "claude")
-        isAuthenticated = false
         usage = nil
         lastUpdated = nil
         accountEmail = nil
@@ -332,7 +359,6 @@ class UsageService: ObservableObject {
         profileFetchTask = nil
         isPollingPaused = false
         clearRateLimitBackoff()
-        lastError = nil
     }
 
     // MARK: - PKCE Helpers
@@ -395,25 +421,34 @@ class UsageService: ObservableObject {
     }
 
     private func performFetchUsage() async {
-        guard loadCredentials() != nil else {
+        applyResolvedCredentialState()
+        guard isAuthenticated else {
             lastError = "Not signed in"
-            isAuthenticated = false
             return
         }
 
         do {
             guard let result = try await sendAuthorizedRequest(to: usageEndpoint) else {
+                if claudeCredentialSource == .claudeCode, let lastError {
+                    snapshotStore?.update(provider: "claude", error: lastError)
+                }
                 return
             }
             let (data, http) = result
             if http.statusCode == 429 {
                 applyRateLimitBackoff(retryAfter: PollingBackoff.retryAfterSeconds(from: http))
                 lastError = "Rate limited — backing off to \(Int(currentInterval))s"
+                if let lastError {
+                    snapshotStore?.update(provider: "claude", error: lastError)
+                }
                 scheduleTimer()
                 return
             }
             guard http.statusCode == 200 else {
                 lastError = "HTTP \(http.statusCode)"
+                if let lastError {
+                    snapshotStore?.update(provider: "claude", error: lastError)
+                }
                 return
             }
             let decoded = try JSONDecoder().decode(UsageResponse.self, from: data)
@@ -427,12 +462,13 @@ class UsageService: ObservableObject {
                 sevenDayPercent: (usage?.sevenDay?.utilization ?? 0),
                 fablePercent: usage?.fableUtilization
             )
-            snapshotStore?.update(
-                provider: "claude",
-                metrics: UsageSnapshotStore.claudeMetrics(for: reconciled)
-            )
             // Reuse the bearer token that just succeeded for usage. No separate refresh.
-            guard let accessToken = loadCredentials()?.accessToken else {
+            guard let accessToken = resolveClaudeCredential()?.accessToken else {
+                snapshotStore?.update(
+                    provider: "claude",
+                    metrics: UsageSnapshotStore.claudeMetrics(for: reconciled),
+                    plan: claudeSnapshotPlan()
+                )
                 if isRateLimitedBackoff || currentInterval != baseInterval {
                     clearRateLimitBackoff()
                     scheduleTimer()
@@ -440,6 +476,11 @@ class UsageService: ObservableObject {
                 return
             }
             let profileRateLimited = await fetchOAuthProfileIfNeeded(accessToken: accessToken)
+            snapshotStore?.update(
+                provider: "claude",
+                metrics: UsageSnapshotStore.claudeMetrics(for: reconciled),
+                plan: claudeSnapshotPlan()
+            )
             // Keep secondary (profile) 429 backoff; only clear after a clean full poll.
             if !profileRateLimited, isRateLimitedBackoff || currentInterval != baseInterval {
                 clearRateLimitBackoff()
@@ -447,7 +488,22 @@ class UsageService: ObservableObject {
             }
         } catch {
             lastError = error.localizedDescription
+            if let lastError {
+                snapshotStore?.update(provider: "claude", error: lastError)
+            }
         }
+    }
+
+    private func claudeSnapshotPlan() -> UsageSnapshotPlan? {
+        let label: String?
+        if let planLabel = profile?.planLabel, !planLabel.isEmpty {
+            label = planLabel
+        } else {
+            label = nil
+        }
+        let status = profile?.organization?.subscriptionStatus
+        if label == nil, status == nil { return nil }
+        return UsageSnapshotPlan(label: label, status: status)
     }
 
     private func applyRateLimitBackoff(retryAfter: TimeInterval?) {
@@ -519,7 +575,7 @@ class UsageService: ObservableObject {
                 return false
             }
             // Drop the response if the user signed out while the request was in flight.
-            guard wasAuthenticated, isAuthenticated, loadCredentials() != nil else {
+            guard wasAuthenticated, isAuthenticated, resolveClaudeCredential() != nil else {
                 print("[ClaudeProfile] discarding response after sign-out")
                 return false
             }
@@ -598,6 +654,29 @@ class UsageService: ObservableObject {
         to url: URL,
         expireSessionOnAuthFailure: Bool = true
     ) async throws -> (Data, HTTPURLResponse)? {
+        applyResolvedCredentialState()
+        guard let resolved = resolveClaudeCredential() else {
+            lastError = "Not signed in"
+            return nil
+        }
+
+        if resolved.source == .claudeCode {
+            if let expiry = resolved.expiresAt, expiry <= Date() {
+                lastError = Self.claudeCodeExpiredMessage
+                return nil
+            }
+
+            let result = try await performAuthorizedRequest(
+                token: resolved.accessToken,
+                url: url
+            )
+            if result.1.statusCode == 401 {
+                lastError = Self.claudeCodeExpiredMessage
+                return nil
+            }
+            return result
+        }
+
         guard let initialCredentials = loadCredentials() else {
             lastError = "Not signed in"
             isAuthenticated = false
@@ -768,7 +847,7 @@ class UsageService: ObservableObject {
             }
         }
 
-        isAuthenticated = true
+        applyResolvedCredentialState()
         return .success
     }
 
@@ -815,7 +894,6 @@ class UsageService: ObservableObject {
     private func expireSession() {
         deleteCredentials()
         snapshotStore?.remove(provider: "claude")
-        isAuthenticated = false
         usage = nil
         lastUpdated = nil
         accountEmail = nil
@@ -833,6 +911,87 @@ class UsageService: ObservableObject {
         isPollingPaused = false
         clearRateLimitBackoff()
         lastError = "Session expired — please sign in again"
+        applyResolvedCredentialState()
+    }
+
+    // MARK: - Claude Code credential source
+
+    private struct ResolvedClaudeCredential {
+        let accessToken: String
+        let source: ClaudeCredentialSource
+        let expiresAt: Date?
+    }
+
+    private func resolveClaudeCredential(now: Date = Date()) -> ResolvedClaudeCredential? {
+        let cli = claudeCodeLoader()
+        let app = loadCredentials()
+        let cliIsCurrent = cli.map { credential in
+            guard let expiresAt = credential.expiresAt else { return true }
+            return expiresAt > now
+        } ?? false
+
+        if let cli, cliIsCurrent {
+            return ResolvedClaudeCredential(
+                accessToken: cli.accessToken,
+                source: .claudeCode,
+                expiresAt: cli.expiresAt
+            )
+        }
+        if let app {
+            return ResolvedClaudeCredential(
+                accessToken: app.accessToken,
+                source: .appOAuth,
+                expiresAt: app.expiresAt
+            )
+        }
+        if let cli {
+            return ResolvedClaudeCredential(
+                accessToken: cli.accessToken,
+                source: .claudeCode,
+                expiresAt: cli.expiresAt
+            )
+        }
+        return nil
+    }
+
+    private func applyResolvedCredentialState() {
+        hasStoredAppOAuth = loadCredentials() != nil
+
+        guard let resolved = resolveClaudeCredential() else {
+            if claudeCredentialIdentity != nil {
+                accountEmail = nil
+                profile = nil
+                profileLastFetched = nil
+            }
+            claudeCredentialIdentity = nil
+            claudeCredentialSource = .none
+            claudeCodeTokenExpiry = nil
+            isAuthenticated = false
+            return
+        }
+
+        let identity = Self.claudeCredentialIdentity(
+            source: resolved.source,
+            token: resolved.accessToken
+        )
+        if let previous = claudeCredentialIdentity, previous != identity {
+            accountEmail = nil
+            profile = nil
+            profileLastFetched = nil
+        }
+        claudeCredentialIdentity = identity
+        claudeCredentialSource = resolved.source
+        claudeCodeTokenExpiry = resolved.source == .claudeCode ? resolved.expiresAt : nil
+        isAuthenticated = true
+    }
+
+    private static func claudeCredentialIdentity(
+        source: ClaudeCredentialSource,
+        token: String
+    ) -> String {
+        let digest = SHA256.hash(data: Data(token.utf8))
+        let hash = digest.map { String(format: "%02x", $0) }.joined()
+        return "\(source)|\(hash)"
     }
 }
 

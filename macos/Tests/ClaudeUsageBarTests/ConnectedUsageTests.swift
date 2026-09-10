@@ -360,7 +360,7 @@ final class ConnectedUsageServiceTests: XCTestCase {
         XCTAssertNil(service.elevenLabsError)
     }
 
-    func testOpenAICredentialPrecedencePrefersPastedOverCLIAndEnvironment() async throws {
+    func testOpenAICredentialPrecedencePrefersCLIOverPastedAndEnvironment() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let store = ConnectedServiceCredentialsStore(directoryURL: directory)
@@ -398,9 +398,58 @@ final class ConnectedUsageServiceTests: XCTestCase {
 
         await service.fetchOpenAIUsage()
 
-        XCTAssertEqual(service.openAICredentialSource, .pasted)
-        XCTAssertEqual(authorizedToken, "Bearer pasted-token")
+        XCTAssertEqual(service.openAICredentialSource, .codexCLI)
+        XCTAssertEqual(authorizedToken, "Bearer cli-token")
+        XCTAssertTrue(service.hasStoredOpenAIToken)
         XCTAssertNil(service.openAITokenExpiry)
+    }
+
+    func testClearingUnusedOpenAIPastedTokenLeavesCLILoginAndUsageInPlace() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(openAISessionToken: "pasted-token"))
+
+        let session = makeSession()
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            if request.url?.path == "/openai" {
+                return (response, Data(#"{"account_id":"acct-cli","rate_limit":{"primary_window":{"used_percent":7}}}"#.utf8))
+            }
+            if request.url?.path == "/credits" {
+                return (response, Data(#"{"credits":[],"available_count":0}"#.utf8))
+            }
+            throw URLError(.badURL)
+        }
+
+        let service = makeService(
+            session: session,
+            openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
+            openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
+            credentialsStore: store,
+            environment: ["OPENAI_SESSION_TOKEN": "env-token"],
+            codexAuthLoader: {
+                CodexCLICredentials(accessToken: "cli-token", accountId: "acct-cli", lastRefresh: nil)
+            }
+        )
+
+        await service.fetchOpenAIUsage()
+        XCTAssertEqual(service.openAICredentialSource, .codexCLI)
+        XCTAssertTrue(service.hasStoredOpenAIToken)
+        XCTAssertEqual(service.openAIUsage?.rateLimit?.primaryWindow?.usedPercent, 7)
+
+        service.clearOpenAIToken()
+
+        XCTAssertEqual(service.openAICredentialSource, .codexCLI)
+        XCTAssertFalse(service.hasStoredOpenAIToken)
+        XCTAssertEqual(service.openAIUsage?.rateLimit?.primaryWindow?.usedPercent, 7)
+        XCTAssertNotNil(service.openAILastUpdated)
+        XCTAssertNil(store.load().openAISessionToken)
     }
 
     func testOpenAIFallsBackToCodexCLIThenEnvironment() async throws {
@@ -509,7 +558,7 @@ final class ConnectedUsageServiceTests: XCTestCase {
             throw URLError(.badURL)
         }
 
-        var cliCredentials = CodexCLICredentials(
+        var cliCredentials: CodexCLICredentials? = CodexCLICredentials(
             accessToken: "cli-token",
             accountId: "acct-cli",
             lastRefresh: nil
@@ -527,6 +576,7 @@ final class ConnectedUsageServiceTests: XCTestCase {
         XCTAssertEqual(accountHeaders.last ?? nil, "acct-cli")
 
         try store.save(ConnectedServiceCredentials(openAISessionToken: "pasted-token"))
+        cliCredentials = nil
         await service.fetchOpenAIUsage()
         XCTAssertNil(service.openAIAccountID)
         XCTAssertNil(accountHeaders.last ?? nil)
@@ -572,24 +622,24 @@ final class ConnectedUsageServiceTests: XCTestCase {
             throw URLError(.badURL)
         }
 
+        var cliCredentials: CodexCLICredentials? = CodexCLICredentials(
+            accessToken: "cli-token-a",
+            accountId: "acct-a",
+            lastRefresh: nil
+        )
         let service = makeService(
             session: session,
             openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
             openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
             credentialsStore: store,
-            codexAuthLoader: {
-                CodexCLICredentials(
-                    accessToken: "cli-token-a",
-                    accountId: "acct-a",
-                    lastRefresh: nil
-                )
-            }
+            codexAuthLoader: { cliCredentials }
         )
 
         async let fetchDone: Void = service.fetchOpenAIUsage()
         await requestStarted.wait()
         XCTAssertEqual(service.openAIAccountID, "acct-a")
 
+        cliCredentials = nil
         try service.saveOpenAIToken("pasted-token-b")
         XCTAssertNil(service.openAIAccountID)
 
@@ -599,57 +649,102 @@ final class ConnectedUsageServiceTests: XCTestCase {
         XCTAssertNil(service.openAIAccountID)
     }
 
-    func testDeviceSyncCredentialsExcludeCLITokens() throws {
+    func testOpenAISnapshotWriteIncludesCreditsAndPlan() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(openAISessionToken: "openai-token"))
+        let snapshotDirectory = directory.appendingPathComponent("snapshot")
+        let snapshotStore = UsageSnapshotStore(directory: snapshotDirectory, now: {
+            Date(timeIntervalSince1970: 1_757_521_026)
+        })
+        let session = makeSession()
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            if request.url?.path == "/openai" {
+                return (
+                    response,
+                    Data(#"{"plan_type":"plus","account_id":"acct-1","rate_limit":{"primary_window":{"used_percent":43}}}"#.utf8)
+                )
+            }
+            if request.url?.path == "/credits" {
+                return (response, Data(Self.resetCreditsFixture.utf8))
+            }
+            throw URLError(.badURL)
+        }
+        let service = makeService(session: session, credentialsStore: store)
+        service.snapshotStore = snapshotStore
 
-        let cliOnly = makeService(
-            credentialsStore: store,
-            environment: [:],
-            codexAuthLoader: {
-                CodexCLICredentials(accessToken: "cli-openai", accountId: "acct", lastRefresh: nil)
-            },
-            cursorKeychainRunner: { _, _ in "cli-cursor" }
-        )
-        let cliSync = cliOnly.deviceSyncCredentials()
-        XCTAssertNil(cliSync.openAISessionToken)
-        XCTAssertNil(cliSync.cursorSessionToken)
-        XCTAssertTrue(cliOnly.isOpenAIConfigured)
-        XCTAssertTrue(cliOnly.isCursorConfigured)
+        await service.fetchOpenAIUsage()
 
-        try store.save(
-            ConnectedServiceCredentials(
-                openAISessionToken: "pasted-openai",
-                cursorSessionToken: "pasted-cursor"
-            )
-        )
-        let pasted = makeService(
-            credentialsStore: store,
-            environment: [:],
-            codexAuthLoader: {
-                CodexCLICredentials(accessToken: "cli-openai", accountId: "acct", lastRefresh: nil)
-            },
-            cursorKeychainRunner: { _, _ in "cli-cursor" }
-        )
-        let pastedSync = pasted.deviceSyncCredentials()
-        XCTAssertEqual(pastedSync.openAISessionToken, "pasted-openai")
-        XCTAssertEqual(pastedSync.cursorSessionToken, "pasted-cursor")
-
-        try store.save(ConnectedServiceCredentials())
-        let envOnly = makeService(
-            credentialsStore: store,
-            environment: [
-                "OPENAI_SESSION_TOKEN": "env-openai",
-                "CURSOR_SESSION_TOKEN": "env-cursor"
-            ]
-        )
-        let envSync = envOnly.deviceSyncCredentials()
-        XCTAssertEqual(envSync.openAISessionToken, "env-openai")
-        XCTAssertEqual(envSync.cursorSessionToken, "env-cursor")
+        let snapshot = snapshotStore.currentSnapshot()
+        let provider = try XCTUnwrap(snapshot.providers["openai"])
+        XCTAssertEqual(provider.plan?.label, "plus")
+        XCTAssertEqual(provider.credits?.available, 3)
+        XCTAssertEqual(provider.credits?.items.map(\.id), ["soon", "later", "undated"])
+        XCTAssertNil(provider.error)
+        XCTAssertEqual(provider.metrics.first(where: { $0.id == "primary" })?.percentUsed, 43)
     }
 
-    func testCursorCredentialPrecedencePrefersPastedOverCLIAndEnvironment() async throws {
+    func testFailedOpenAIFetchWritesErrorAndKeepsMetrics() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(openAISessionToken: "openai-token"))
+        let snapshotDirectory = directory.appendingPathComponent("snapshot")
+        var now = Date(timeIntervalSince1970: 1_000)
+        let snapshotStore = UsageSnapshotStore(directory: snapshotDirectory, now: { now })
+        var usageCalls = 0
+        ConnectedMockURLProtocol.handler = { request in
+            func response(_ status: Int) -> HTTPURLResponse {
+                HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+            }
+            switch request.url?.path {
+            case "/openai":
+                usageCalls += 1
+                if usageCalls == 1 {
+                    return (
+                        response(200),
+                        Data(#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":70}}}"#.utf8)
+                    )
+                }
+                return (response(401), Data(#"{"error":"unauthorized"}"#.utf8))
+            case "/credits":
+                if usageCalls == 1 {
+                    return (response(200), Data(Self.resetCreditsFixture.utf8))
+                }
+                return (response(401), Data(#"{"error":"unauthorized"}"#.utf8))
+            default:
+                throw URLError(.badURL)
+            }
+        }
+        let service = makeService(credentialsStore: store)
+        service.snapshotStore = snapshotStore
+
+        await service.fetchOpenAIUsage()
+        let first = try XCTUnwrap(snapshotStore.currentSnapshot().providers["openai"])
+        XCTAssertEqual(first.metrics.first(where: { $0.id == "primary" })?.percentUsed, 70)
+        XCTAssertEqual(first.plan?.label, "plus")
+        XCTAssertNil(first.error)
+        let firstUpdatedAt = first.updatedAt
+
+        now = Date(timeIntervalSince1970: 2_000)
+        await service.fetchOpenAIUsage()
+
+        let second = try XCTUnwrap(snapshotStore.currentSnapshot().providers["openai"])
+        XCTAssertEqual(second.metrics.first(where: { $0.id == "primary" })?.percentUsed, 70)
+        XCTAssertEqual(second.plan?.label, "plus")
+        XCTAssertEqual(second.updatedAt, firstUpdatedAt)
+        XCTAssertEqual(second.error, service.openAIError)
+        XCTAssertNotNil(second.error)
+    }
+
+    func testCursorCredentialPrecedencePrefersCLIOverPastedAndEnvironment() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let store = ConnectedServiceCredentialsStore(directoryURL: directory)
@@ -665,17 +760,20 @@ final class ConnectedUsageServiceTests: XCTestCase {
                 httpVersion: nil,
                 headerFields: nil
             )!
-            if request.url?.path == "/cursor" {
-                usedCookie = true
-                XCTAssertEqual(
-                    request.value(forHTTPHeaderField: "Cookie"),
-                    "WorkosCursorSessionToken=pasted-cursor"
-                )
+            let path = request.url?.path ?? ""
+            if path.contains("GetCurrentPeriodUsage") {
+                usedConnect = true
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer cli-cursor")
                 return (response, Data(#"{"planUsage":{"autoPercentUsed":1,"apiPercentUsed":2}}"#.utf8))
             }
-            if (request.url?.path ?? "").contains("GetCurrentPeriodUsage")
-                || (request.url?.path ?? "").contains("GetPlanInfo") {
-                usedConnect = true
+            if path.contains("GetPlanInfo") {
+                return (
+                    response,
+                    Data(#"{"planInfo":{"planName":"Pro","includedAmountCents":2000,"price":"$20/mo"}}"#.utf8)
+                )
+            }
+            if path == "/cursor" {
+                usedCookie = true
             }
             throw URLError(.badURL)
         }
@@ -689,10 +787,61 @@ final class ConnectedUsageServiceTests: XCTestCase {
         )
         await service.fetchCursorUsage()
 
-        XCTAssertEqual(service.cursorCredentialSource, .pasted)
-        XCTAssertTrue(usedCookie)
-        XCTAssertFalse(usedConnect)
-        XCTAssertNil(service.cursorPlanInfo)
+        XCTAssertEqual(service.cursorCredentialSource, .cursorCLI)
+        XCTAssertTrue(service.hasStoredCursorToken)
+        XCTAssertTrue(usedConnect)
+        XCTAssertFalse(usedCookie)
+        XCTAssertNotNil(service.cursorPlanInfo)
+    }
+
+    func testClearingUnusedCursorPastedTokenLeavesCLILoginAndUsageInPlace() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        try store.save(ConnectedServiceCredentials(cursorSessionToken: "pasted-cursor"))
+        let session = makeSession()
+
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            let path = request.url?.path ?? ""
+            if path.contains("GetCurrentPeriodUsage") {
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer cli-cursor")
+                return (response, Data(#"{"planUsage":{"autoPercentUsed":1,"apiPercentUsed":8}}"#.utf8))
+            }
+            if path.contains("GetPlanInfo") {
+                return (
+                    response,
+                    Data(#"{"planInfo":{"planName":"Pro","includedAmountCents":2000,"price":"$20/mo"}}"#.utf8)
+                )
+            }
+            throw URLError(.badURL)
+        }
+
+        let service = makeService(
+            session: session,
+            cursorEndpoint: URL(string: "https://example.com/cursor")!,
+            credentialsStore: store,
+            environment: ["CURSOR_SESSION_TOKEN": "env-cursor"],
+            cursorKeychainRunner: { _, _ in "cli-cursor" }
+        )
+        await service.fetchCursorUsage()
+
+        XCTAssertEqual(service.cursorCredentialSource, .cursorCLI)
+        XCTAssertTrue(service.hasStoredCursorToken)
+        XCTAssertEqual(service.cursorUsage?.planUsage?.apiPercentUsed, 8)
+
+        service.clearCursorToken()
+
+        XCTAssertEqual(service.cursorCredentialSource, .cursorCLI)
+        XCTAssertFalse(service.hasStoredCursorToken)
+        XCTAssertEqual(service.cursorUsage?.planUsage?.apiPercentUsed, 8)
+        XCTAssertNotNil(service.cursorLastUpdated)
+        XCTAssertNil(store.load().cursorSessionToken)
     }
 
     func testCursorFallsBackToCLIThenEnvironment() async throws {

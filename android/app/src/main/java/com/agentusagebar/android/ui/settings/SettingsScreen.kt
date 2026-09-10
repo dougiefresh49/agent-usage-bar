@@ -19,11 +19,9 @@ import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -31,7 +29,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
@@ -51,8 +48,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.agentusagebar.android.BuildConfig
@@ -74,8 +69,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
 private enum class SettingsTab(val title: String, val icon: ImageVector) {
-    General("General", Icons.Outlined.Settings),
-    Providers("Providers", Icons.Outlined.SmartToy),
+    General("Polling", Icons.Outlined.Settings),
     Appearance("Appearance", Icons.Outlined.Palette),
     Notifications("Notifications", Icons.Outlined.Notifications),
     Devices("Devices", Icons.Outlined.Devices),
@@ -89,7 +83,6 @@ fun SettingsScreen(
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
-    val email by viewModel.claudeEmail.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val devicePairing by viewModel.devicePairing.collectAsStateWithLifecycle()
     val trustedDevices by viewModel.trustedDevices.collectAsStateWithLifecycle()
@@ -97,13 +90,8 @@ fun SettingsScreen(
     val snackbar = remember { SnackbarHostState() }
     var selectedTab by remember { mutableIntStateOf(0) }
 
-    var openAIToken by remember { mutableStateOf("") }
-    var cursorToken by remember { mutableStateOf("") }
-    var elevenLabsKey by remember { mutableStateOf("") }
     var pendingUnlink by remember { mutableStateOf<TrustedDesktopDevice?>(null) }
-    var removeImportedCredentials by remember { mutableStateOf(false) }
     val activity = LocalContext.current as? Activity
-    val uriHandler = LocalUriHandler.current
     val scanner = remember(activity) {
         activity?.let {
             val options = GmsBarcodeScannerOptions.Builder()
@@ -160,31 +148,14 @@ fun SettingsScreen(
             onDismissRequest = { pendingUnlink = null },
             title = { Text("Unlink ${device.desktopName}?") },
             text = {
-                Column {
-                    Text(
-                        "Android will delete this Mac’s trusted key. If the Mac is reachable, it will also remove this phone.",
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row {
-                        Checkbox(
-                            checked = removeImportedCredentials,
-                            onCheckedChange = { removeImportedCredentials = it },
-                        )
-                        Text(
-                            "Also remove credentials imported from this Mac",
-                            modifier = Modifier.padding(top = 12.dp),
-                        )
-                    }
-                }
+                Text(
+                    "Android will forget this Mac and drop its cached snapshot. If the Mac is reachable, it will also remove this phone.",
+                )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.unlinkMac(
-                            device.desktopID,
-                            device.desktopName,
-                            removeImportedCredentials,
-                        )
+                        viewModel.unlinkMac(device.desktopID, device.desktopName)
                         pendingUnlink = null
                     },
                 ) { Text("Unlink Mac") }
@@ -239,6 +210,11 @@ fun SettingsScreen(
                 when (SettingsTab.entries[selectedTab]) {
                     SettingsTab.General -> {
                         Text("Polling Interval", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "The open app pulls the Mac snapshot every 60 seconds. Background refresh is every 15 minutes.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             SettingsStore.POLLING_OPTIONS.forEach { mins ->
                                 FilterChip(
@@ -254,125 +230,6 @@ fun SettingsScreen(
                         Text(
                             "Version ${BuildConfig.VERSION_NAME}",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-
-                    SettingsTab.Providers -> {
-                        Text("OpenAI / Codex", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Paste the bearer token from the Authorization header of a ChatGPT usage request.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        OutlinedTextField(
-                            value = openAIToken,
-                            onValueChange = { openAIToken = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            placeholder = {
-                                Text(
-                                    if (openAIConnected) "Session token configured"
-                                    else "Bearer session token",
-                                )
-                            },
-                        )
-                        Row {
-                            Button(
-                                onClick = {
-                                    viewModel.saveOpenAIToken(openAIToken)
-                                    openAIToken = ""
-                                },
-                                enabled = openAIToken.isNotBlank(),
-                            ) { Text("Save Session Token") }
-                            if (openAIConnected) {
-                                TextButton(onClick = viewModel::clearOpenAIToken) { Text("Clear") }
-                            }
-                        }
-
-                        HorizontalDivider()
-                        Text("Cursor", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Paste the WorkosCursorSessionToken cookie from cursor.com.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        OutlinedTextField(
-                            value = cursorToken,
-                            onValueChange = { cursorToken = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            placeholder = {
-                                Text(
-                                    if (cursorConnected) "Session token configured"
-                                    else "WorkosCursorSessionToken",
-                                )
-                            },
-                        )
-                        Row {
-                            Button(
-                                onClick = {
-                                    viewModel.saveCursorToken(cursorToken)
-                                    cursorToken = ""
-                                },
-                                enabled = cursorToken.isNotBlank(),
-                            ) { Text("Save Session Token") }
-                            if (cursorConnected) {
-                                TextButton(onClick = viewModel::clearCursorToken) { Text("Clear") }
-                            }
-                        }
-
-                        HorizontalDivider()
-                        Text("ElevenLabs", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Add an ElevenLabs API key that can access the user subscription endpoint.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        OutlinedTextField(
-                            value = elevenLabsKey,
-                            onValueChange = { elevenLabsKey = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            placeholder = {
-                                Text(
-                                    if (elevenConnected) "API key configured"
-                                    else "ElevenLabs API key",
-                                )
-                            },
-                        )
-                        Row {
-                            Button(
-                                onClick = {
-                                    viewModel.saveElevenLabsAPIKey(elevenLabsKey)
-                                    elevenLabsKey = ""
-                                },
-                                enabled = elevenLabsKey.isNotBlank(),
-                            ) { Text("Save API Key") }
-                            if (elevenConnected) {
-                                TextButton(onClick = viewModel::clearElevenLabsAPIKey) { Text("Clear") }
-                            }
-                        }
-
-                        HorizontalDivider()
-                        Text("Claude", style = MaterialTheme.typography.titleMedium)
-                        if (claudeConnected) {
-                            email?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                            TextButton(onClick = viewModel::signOutClaude) { Text("Sign Out of Claude") }
-                        } else {
-                            Text(
-                                "Use Sign in with Claude on the home screen, then paste the browser code.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-
-                        Text(
-                            "Tokens stay on this phone in encrypted app storage.",
-                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -520,14 +377,14 @@ fun SettingsScreen(
 
                     SettingsTab.Notifications -> {
                         Text(
-                            "Thresholds appear for providers you have connected. 0% means Off.",
+                            "Thresholds appear for providers configured on the Mac. 0% means Off.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
 
                         if (!claudeConnected && !openAIConnected && !cursorConnected && !elevenConnected) {
                             Text(
-                                "Connect a provider in the Providers tab to configure alerts.",
+                                "Pair with your Mac and wait for a snapshot. Thresholds show up once a provider is configured there.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -594,9 +451,9 @@ fun SettingsScreen(
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                         )
-                        Text("Sync from your Mac", style = MaterialTheme.typography.titleMedium)
+                        Text("Pair with your Mac", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "On the Mac, open Settings → Devices → Add Device. Choose what to sync, then scan the temporary QR code here.",
+                            "On the Mac, open Settings → Devices → Add Device, then scan the QR code here. The phone shows the Mac’s usage snapshot over the tailnet. Provider logins stay on the Mac.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -636,11 +493,6 @@ fun SettingsScreen(
                                 Text("Cancel Pairing")
                             }
                         }
-                        Text(
-                            "Imported provider credentials are saved in Android's encrypted app storage. Claude sign-in stays device-specific.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                         Text(
                             "Only scan a code you just generated on a Mac you trust. Codes expire after 10 minutes.",
                             style = MaterialTheme.typography.labelSmall,
@@ -727,10 +579,7 @@ fun SettingsScreen(
                                                 ),
                                             ) { Text("Check for Sync") }
                                             OutlinedButton(
-                                                onClick = {
-                                                    removeImportedCredentials = false
-                                                    pendingUnlink = device
-                                                },
+                                                onClick = { pendingUnlink = device },
                                                 enabled = action?.phase !in setOf(
                                                     DeviceActionPhase.CHECKING,
                                                     DeviceActionPhase.UNLINKING,
@@ -744,23 +593,10 @@ fun SettingsScreen(
                         HorizontalDivider()
                         Text("Lost device?", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Removing a phone on the Mac queues a wipe for the next local-network check. For immediate protection, revoke sessions or keys at the provider.",
+                            "Removing a phone on the Mac queues a wipe. The next check forgets this Mac and clears the cached snapshot.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        TextButton(
-                            onClick = { uriHandler.openUri("https://chatgpt.com/") },
-                        ) { Text("OpenAI active sessions") }
-                        TextButton(
-                            onClick = {
-                                uriHandler.openUri("https://claude.ai/settings/account")
-                            },
-                        ) { Text("Claude account sessions") }
-                        TextButton(
-                            onClick = {
-                                uriHandler.openUri("https://elevenlabs.io/app/settings/api-keys")
-                            },
-                        ) { Text("ElevenLabs API keys") }
                     }
                 }
                 Spacer(modifier = Modifier.height(24.dp))

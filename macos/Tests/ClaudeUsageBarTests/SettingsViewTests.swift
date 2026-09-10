@@ -63,6 +63,31 @@ final class SettingsViewTests: XCTestCase {
             openAICredentialStatusText(source: .none, expiry: nil),
             "Run `codex login` to connect without pasting a token."
         )
+        let unusedPastedExpiry = Date().addingTimeInterval(3 * 86_400 + 60)
+        XCTAssertEqual(
+            openAICredentialStatusText(
+                source: .codexCLI,
+                expiry: unusedPastedExpiry,
+                hasStoredPastedToken: true
+            ),
+            "Using Codex CLI login (expires in 3d). A pasted token is also stored and not in use."
+        )
+        XCTAssertEqual(
+            openAICredentialStatusText(
+                source: .codexCLI,
+                expiry: nil,
+                hasStoredPastedToken: true
+            ),
+            "Using Codex CLI login. A pasted token is also stored and not in use."
+        )
+        XCTAssertEqual(
+            openAICredentialStatusText(
+                source: .pasted,
+                expiry: nil,
+                hasStoredPastedToken: true
+            ),
+            "Using pasted token"
+        )
     }
 
     func testCursorCredentialStatusText() {
@@ -78,6 +103,71 @@ final class SettingsViewTests: XCTestCase {
         XCTAssertEqual(
             cursorCredentialStatusText(source: .none, expiry: nil),
             "Run `cursor-agent login` to connect without pasting a token."
+        )
+        let unusedPastedExpiry = Date().addingTimeInterval(3 * 86_400 + 60)
+        XCTAssertEqual(
+            cursorCredentialStatusText(
+                source: .cursorCLI,
+                expiry: unusedPastedExpiry,
+                hasStoredPastedToken: true
+            ),
+            "Using Cursor CLI login (expires in 3d). A pasted token is also stored and not in use."
+        )
+        XCTAssertEqual(
+            cursorCredentialStatusText(
+                source: .cursorCLI,
+                expiry: nil,
+                hasStoredPastedToken: true
+            ),
+            "Using Cursor CLI login. A pasted token is also stored and not in use."
+        )
+        XCTAssertEqual(
+            cursorCredentialStatusText(
+                source: .pasted,
+                expiry: nil,
+                hasStoredPastedToken: true
+            ),
+            "Using pasted token"
+        )
+    }
+
+    func testClaudeCredentialStatusText() {
+        let expiry = Date().addingTimeInterval(3 * 3_600 + 60)
+        XCTAssertEqual(
+            claudeCredentialStatusText(source: .claudeCode, expiry: expiry),
+            "Using Claude Code login (expires in 3h)"
+        )
+        XCTAssertEqual(
+            claudeCredentialStatusText(source: .claudeCode, expiry: Date().addingTimeInterval(-60)),
+            "Claude Code login expired. Run any claude command to refresh."
+        )
+        XCTAssertEqual(
+            claudeCredentialStatusText(source: .claudeCode, expiry: nil),
+            "Claude Code login expired. Run any claude command to refresh."
+        )
+        XCTAssertEqual(
+            claudeCredentialStatusText(
+                source: .claudeCode,
+                expiry: expiry,
+                hasStoredAppOAuth: true
+            ),
+            "Using Claude Code login (expires in 3h) This app's own sign-in is also stored and not in use."
+        )
+        XCTAssertEqual(
+            claudeCredentialStatusText(
+                source: .claudeCode,
+                expiry: nil,
+                hasStoredAppOAuth: true
+            ),
+            "Claude Code login expired. Run any claude command to refresh. This app's own sign-in is also stored and not in use."
+        )
+        XCTAssertEqual(
+            claudeCredentialStatusText(source: .appOAuth, expiry: nil),
+            "Using this app's sign-in"
+        )
+        XCTAssertEqual(
+            claudeCredentialStatusText(source: .none, expiry: nil),
+            ""
         )
     }
 

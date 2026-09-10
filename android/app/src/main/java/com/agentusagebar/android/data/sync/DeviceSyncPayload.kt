@@ -1,6 +1,5 @@
 package com.agentusagebar.android.data.sync
 
-import com.agentusagebar.android.data.model.ConnectedCredentials
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.math.BigInteger
@@ -14,6 +13,7 @@ import java.security.KeyPairGenerator
 import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.PublicKey
+import java.security.SecureRandom
 import java.security.interfaces.ECPublicKey
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.ECParameterSpec
@@ -73,28 +73,6 @@ data class DeviceSyncConnections(
             cursorAccessToken,
         ).count { !it.isNullOrBlank() }
 }
-
-/** Present non-blank values overwrite their own keys only; null/blank leaves the current value. */
-fun ConnectedCredentials.mergingImported(imported: DeviceSyncConnections): ConnectedCredentials = copy(
-    openAISessionToken = imported.openAISessionToken
-        ?.takeIf { it.isNotBlank() }
-        ?: openAISessionToken,
-    cursorSessionToken = imported.cursorSessionToken
-        ?.takeIf { it.isNotBlank() }
-        ?: cursorSessionToken,
-    elevenLabsAPIKey = imported.elevenLabsAPIKey
-        ?.takeIf { it.isNotBlank() }
-        ?: elevenLabsAPIKey,
-    codexAccessToken = imported.codexAccessToken
-        ?.takeIf { it.isNotBlank() }
-        ?: codexAccessToken,
-    codexAccountId = imported.codexAccountId
-        ?.takeIf { it.isNotBlank() }
-        ?: codexAccountId,
-    cursorAccessToken = imported.cursorAccessToken
-        ?.takeIf { it.isNotBlank() }
-        ?: cursorAccessToken,
-)
 
 @Serializable
 data class DeviceSyncPayload(
@@ -183,6 +161,8 @@ object DeviceSyncCodec {
     const val PAIRING_INFO = "agentusagebar-device-pair-v2"
     const val STATUS_INFO = "agentusagebar-device-status-v2"
     const val RESYNC_INFO = "agentusagebar-device-resync-v1"
+    const val SNAPSHOT_INFO = "agentusagebar-device-snapshot-v1"
+    const val REDEEM_INFO = "agentusagebar-device-redeem-v1"
     const val CURRENT_PAIRING_VERSION = 2
     const val CURRENT_PAYLOAD_VERSION = 2
 
@@ -245,10 +225,6 @@ object DeviceSyncCodec {
         Base64.getUrlEncoder().withoutPadding().encodeToString(value)
 
     fun base64URLDecode(value: String): ByteArray = Base64.getUrlDecoder().decode(value)
-
-    fun credentialHash(value: String?): String? = value
-        ?.takeIf { it.isNotBlank() }
-        ?.let { base64URLEncode(MessageDigest.getInstance("SHA-256").digest(it.toByteArray())) }
 
     private fun queryItems(rawQuery: String?): Map<String, String> =
         rawQuery.orEmpty().split("&").mapNotNull { item ->
@@ -331,6 +307,29 @@ object DeviceSyncCrypto {
             doFinal(message.toByteArray())
         }
         return DeviceSyncCodec.base64URLEncode(proof)
+    }
+
+    fun seal(
+        plaintext: ByteArray,
+        sharedSecret: ByteArray,
+        salt: String,
+        info: String,
+    ): DeviceEncryptedEnvelope {
+        val key = deriveKey(sharedSecret, salt, info)
+        val nonce = ByteArray(12).also { SecureRandom().nextBytes(it) }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(
+            Cipher.ENCRYPT_MODE,
+            SecretKeySpec(key, "AES"),
+            GCMParameterSpec(128, nonce),
+        )
+        val sealed = cipher.doFinal(plaintext)
+        val tagStart = sealed.size - 16
+        return DeviceEncryptedEnvelope(
+            nonce = DeviceSyncCodec.base64URLEncode(nonce),
+            ciphertext = DeviceSyncCodec.base64URLEncode(sealed.copyOfRange(0, tagStart)),
+            tag = DeviceSyncCodec.base64URLEncode(sealed.copyOfRange(tagStart, sealed.size)),
+        )
     }
 
     fun open(

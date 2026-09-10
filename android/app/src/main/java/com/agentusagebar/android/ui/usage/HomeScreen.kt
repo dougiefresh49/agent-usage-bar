@@ -24,7 +24,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -39,7 +38,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -53,6 +55,7 @@ import com.agentusagebar.android.widget.cursorTotalPercent
 import com.agentusagebar.android.widget.formatClaudePlanRow
 import com.agentusagebar.android.widget.formatCursorPlanRow
 import com.agentusagebar.android.widget.formatCursorSpendRow
+import kotlinx.coroutines.delay
 
 @Composable
 fun UsageApp(
@@ -101,14 +104,13 @@ private fun HomeScreen(
     val appSettings by viewModel.settings.collectAsStateWithLifecycle()
     val selected by viewModel.selectedProvider.collectAsStateWithLifecycle()
     val refreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
-    val awaitingCode by viewModel.awaitingClaudeCode.collectAsStateWithLifecycle()
-    val claudeCode by viewModel.claudeCode.collectAsStateWithLifecycle()
+    val trustedDevices by viewModel.trustedDevices.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val resetCreditState by viewModel.resetCreditState.collectAsStateWithLifecycle()
     val resetCreditSummary by viewModel.resetCreditSummary.collectAsStateWithLifecycle()
-    val isOpenAIConfigured by viewModel.isOpenAIConfigured.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     LaunchedEffect(message) {
         message?.let {
@@ -117,8 +119,17 @@ private fun HomeScreen(
         }
     }
 
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                viewModel.refresh()
+                delay(60_000)
+            }
+        }
+    }
+
     val selectedState = snapshot.providers[selected]
-    val latestUpdated = snapshot.providers.values.mapNotNull { it.updatedAtEpochMs }.maxOrNull()
+    val paired = trustedDevices.isNotEmpty()
 
     Scaffold(
         topBar = {
@@ -191,69 +202,26 @@ private fun HomeScreen(
             }
 
             when {
-                selected == UsageProvider.CLAUDE && awaitingCode -> {
-                    Text("Paste the code from your browser:")
-                    OutlinedTextField(
-                        value = claudeCode,
-                        onValueChange = viewModel::setClaudeCode,
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        placeholder = { Text("code#state") },
-                    )
-                    Row {
-                        TextButton(onClick = viewModel::cancelClaudeOAuth) { Text("Cancel") }
-                        Spacer(modifier = Modifier.weight(1f))
-                        Button(
-                            onClick = viewModel::submitClaudeCode,
-                            enabled = claudeCode.isNotBlank(),
-                        ) { Text("Submit") }
-                    }
-                }
-
-                // Codex: openAIBearer (CLI-first), not the pasted-token-only snapshot flag.
-                selected == UsageProvider.OPENAI && !isOpenAIConfigured -> {
+                !paired -> {
                     Text(
-                        text = "Add a ChatGPT session token in Settings.",
+                        text = "Pair with the Agent Usage Bar app on your Mac to see usage here.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    TextButton(onClick = onOpenSettings) { Text("Open Settings") }
+                    Button(onClick = onOpenSettings) { Text("Open Settings to pair") }
                 }
 
-                selected != UsageProvider.OPENAI && selectedState?.isConfigured != true -> {
+                selectedState?.isConfigured != true -> {
                     Text(
-                        text = when (selected) {
-                            UsageProvider.CLAUDE -> "Connect Claude to view account limits."
-                            UsageProvider.OPENAI -> "Add a ChatGPT session token in Settings."
-                            UsageProvider.CURSOR -> "Add a Cursor session token in Settings."
-                            UsageProvider.ELEVENLABS -> "Add an ElevenLabs API key in Settings."
-                        },
+                        text = "Not configured on the Mac.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    if (selected == UsageProvider.CLAUDE) {
-                        Button(
-                            onClick = {
-                                val url = viewModel.startClaudeOAuth()
-                                runCatching {
-                                    CustomTabsIntent.Builder().build()
-                                        .launchUrl(context, Uri.parse(url))
-                                }.onFailure {
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_VIEW, Uri.parse(url)),
-                                    )
-                                }
-                            },
-                        ) { Text("Sign in with Claude") }
-                    } else {
-                        TextButton(onClick = onOpenSettings) { Text("Open Settings") }
-                    }
                 }
 
-                // CLI-only Codex never gets snapshot.isConfigured; skip the forever spinner.
-                selectedState?.metrics.isNullOrEmpty() == true &&
-                    selectedState?.error == null &&
-                    !(selected == UsageProvider.OPENAI && selectedState?.isConfigured != true) -> {
+                selectedState.metrics.isEmpty() &&
+                    selectedState.error == null &&
+                    !snapshot.macUnreachable -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.height(18.dp))
                         Spacer(modifier = Modifier.padding(6.dp))
@@ -349,14 +317,21 @@ private fun HomeScreen(
                                 )
                                 Button(
                                     onClick = viewModel::beginResetCreditConfirm,
-                                    enabled = resetCreditState !is ResetCreditUiState.InFlight &&
+                                    enabled = !snapshot.macUnreachable &&
+                                        resetCreditState !is ResetCreditUiState.InFlight &&
                                         resetCreditSummary.soonestCreditId != null,
                                 ) {
                                     Text("Use reset")
                                 }
                             }
+                            if (snapshot.macUnreachable) {
+                                Text(
+                                    text = "Mac unreachable",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
-                        // Outside the availability row so "Limits reset" stays after the last credit.
                         when (val state = resetCreditState) {
                             is ResetCreditUiState.Outcome -> Text(
                                 text = state.message,
@@ -384,14 +359,13 @@ private fun HomeScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Updated ${formatUpdated(latestUpdated)}",
+                text = footerCopy(snapshot),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
-
 
     if (resetCreditState is ResetCreditUiState.Confirming) {
         AlertDialog(
@@ -414,5 +388,23 @@ private fun HomeScreen(
                 }
             },
         )
+    }
+}
+
+internal fun footerCopy(snapshot: com.agentusagebar.android.data.model.AppUsageSnapshot): String {
+    if (snapshot.macUnreachable) {
+        val since = snapshot.lastSuccessfulPullEpochMs
+        return if (since == null || since == 0L) {
+            "Mac unreachable"
+        } else {
+            "Mac unreachable since ${formatUpdated(since)}"
+        }
+    }
+    val asOf = "As of ${formatUpdated(snapshot.generatedAtEpochMs)}"
+    val name = snapshot.sourceDesktopName
+    return if (snapshot.pairedDesktopCount > 1 && !name.isNullOrBlank()) {
+        "$asOf · $name"
+    } else {
+        asOf
     }
 }

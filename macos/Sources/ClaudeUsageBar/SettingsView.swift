@@ -55,7 +55,6 @@ struct SettingsWindowContent: View {
             DevicesSettingsView(
                 service: service,
                 notificationService: notificationService,
-                connectedService: connectedService,
                 deviceSyncManager: deviceSyncManager
             )
             .tabItem { Label("Devices", systemImage: "laptopcomputer.and.iphone") }
@@ -176,7 +175,8 @@ struct SettingsWindowContent: View {
             Section("OpenAI / Codex") {
                 Text(openAICredentialStatusText(
                     source: connectedService.openAICredentialSource,
-                    expiry: connectedService.openAITokenExpiry
+                    expiry: connectedService.openAITokenExpiry,
+                    hasStoredPastedToken: connectedService.hasStoredOpenAIToken
                 ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -187,7 +187,7 @@ struct SettingsWindowContent: View {
                         .foregroundStyle(.secondary)
 
                     CredentialSecureField(
-                        title: connectedService.openAICredentialSource == .pasted
+                        title: connectedService.hasStoredOpenAIToken
                             ? "Session token configured"
                             : "Bearer session token",
                         text: $openAIToken
@@ -199,7 +199,7 @@ struct SettingsWindowContent: View {
                         }
                         .disabled(openAIToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                        if connectedService.openAICredentialSource == .pasted {
+                        if connectedService.hasStoredOpenAIToken {
                             Button("Clear", role: .destructive) {
                                 connectedService.clearOpenAIToken()
                             }
@@ -211,7 +211,8 @@ struct SettingsWindowContent: View {
             Section("Cursor") {
                 Text(cursorCredentialStatusText(
                     source: connectedService.cursorCredentialSource,
-                    expiry: connectedService.cursorTokenExpiry
+                    expiry: connectedService.cursorTokenExpiry,
+                    hasStoredPastedToken: connectedService.hasStoredCursorToken
                 ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -222,7 +223,7 @@ struct SettingsWindowContent: View {
                         .foregroundStyle(.secondary)
 
                     CredentialSecureField(
-                        title: connectedService.cursorCredentialSource == .pasted
+                        title: connectedService.hasStoredCursorToken
                             ? "Session token configured"
                             : "WorkosCursorSessionToken",
                         text: $cursorToken
@@ -234,7 +235,7 @@ struct SettingsWindowContent: View {
                         }
                         .disabled(cursorToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                        if connectedService.cursorCredentialSource == .pasted {
+                        if connectedService.hasStoredCursorToken {
                             Button("Clear", role: .destructive) {
                                 connectedService.clearCursorToken()
                             }
@@ -275,11 +276,22 @@ struct SettingsWindowContent: View {
 
             if service.isAuthenticated {
                 Section("Anthropic Account") {
+                    if service.claudeCredentialSource != .none {
+                        Text(claudeCredentialStatusText(
+                            source: service.claudeCredentialSource,
+                            expiry: service.claudeCodeTokenExpiry,
+                            hasStoredAppOAuth: service.hasStoredAppOAuth
+                        ))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
                     if let email = service.accountEmail {
                         ObfuscatedEmailRow(email: email)
                     }
-                    Button("Sign Out") {
-                        service.signOut()
+                    if service.hasStoredAppOAuth {
+                        Button("Sign Out") {
+                            service.signOut()
+                        }
                     }
                 }
             }
@@ -752,19 +764,47 @@ private func obfuscateDomainPart(_ domain: String) -> String {
     return "\(maskedName).\(tld)"
 }
 
+func claudeCredentialStatusText(
+    source: ClaudeCredentialSource,
+    expiry: Date?,
+    now: Date = Date(),
+    hasStoredAppOAuth: Bool = false
+) -> String {
+    switch source {
+    case .claudeCode:
+        var text: String
+        if let expiry, expiry > now {
+            text = "Using Claude Code login (expires in \(credentialExpiryLabel(from: now, to: expiry)))"
+        } else {
+            text = "Claude Code login expired. Run any claude command to refresh."
+        }
+        if hasStoredAppOAuth {
+            text += " This app's own sign-in is also stored and not in use."
+        }
+        return text
+    case .appOAuth:
+        return "Using this app's sign-in"
+    case .none:
+        return ""
+    }
+}
+
 func openAICredentialStatusText(
     source: OpenAICredentialSource,
     expiry: Date?,
-    now: Date = Date()
+    now: Date = Date(),
+    hasStoredPastedToken: Bool = false
 ) -> String {
     switch source {
     case .pasted:
         return "Using pasted token"
     case .codexCLI:
-        if let expiry, expiry > now {
-            return "Using Codex CLI login (expires in \(credentialExpiryLabel(from: now, to: expiry)))"
-        }
-        return "Using Codex CLI login"
+        return cliCredentialStatusText(
+            label: "Using Codex CLI login",
+            expiry: expiry,
+            now: now,
+            hasStoredPastedToken: hasStoredPastedToken
+        )
     case .environment:
         return "Using environment variable"
     case .none:
@@ -793,21 +833,40 @@ func cursorPastedTokenDisclosureTitle(source: CursorCredentialSource) -> String 
 func cursorCredentialStatusText(
     source: CursorCredentialSource,
     expiry: Date?,
-    now: Date = Date()
+    now: Date = Date(),
+    hasStoredPastedToken: Bool = false
 ) -> String {
     switch source {
     case .pasted:
         return "Using pasted token"
     case .cursorCLI:
-        if let expiry, expiry > now {
-            return "Using Cursor CLI login (expires in \(credentialExpiryLabel(from: now, to: expiry)))"
-        }
-        return "Using Cursor CLI login"
+        return cliCredentialStatusText(
+            label: "Using Cursor CLI login",
+            expiry: expiry,
+            now: now,
+            hasStoredPastedToken: hasStoredPastedToken
+        )
     case .environment:
         return "Using environment variable"
     case .none:
         return "Run `cursor-agent login` to connect without pasting a token."
     }
+}
+
+private func cliCredentialStatusText(
+    label: String,
+    expiry: Date?,
+    now: Date,
+    hasStoredPastedToken: Bool
+) -> String {
+    var text = label
+    if let expiry, expiry > now {
+        text += " (expires in \(credentialExpiryLabel(from: now, to: expiry)))"
+    }
+    if hasStoredPastedToken {
+        text += ". A pasted token is also stored and not in use."
+    }
+    return text
 }
 
 func credentialExpiryLabel(from now: Date, to expiry: Date) -> String {
