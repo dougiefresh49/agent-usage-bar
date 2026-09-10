@@ -115,8 +115,11 @@ class UsageSnapshotDocumentTest {
             5L * 60 * 60 * 1000,
             snapshot.providers.getValue(UsageProvider.CLAUDE).metrics[0].resetIntervalMs,
         )
-        assertEquals("used $4.06 / $20.00", snapshot.providers.getValue(UsageProvider.CURSOR).metrics
-            .first { it.id == UsageMetricPreferences.CURSOR_GROK_BOT }.detail)
+        val grokBot = snapshot.providers.getValue(UsageProvider.CURSOR).metrics
+            .first { it.id == UsageMetricPreferences.CURSOR_GROK_BOT }
+        assertEquals(0.059292, grokBot.percentUsed)
+        assertEquals(Instant.parse("2026-09-16T18:11:18Z").toEpochMilli(), grokBot.resetsAtEpochMs)
+        assertEquals(7L * 24 * 60 * 60 * 1000, grokBot.resetIntervalMs)
     }
 
     companion object {
@@ -168,7 +171,7 @@ class UsageSnapshotDocumentTest {
                 "usedAmountCents": 406
               },
               "metrics": [
-                {"id": "grok_bot", "label": "Grok Bot", "percentUsed": 0.059292, "valueText": "used ${'$'}4.06 / ${'$'}20.00"}
+                {"id": "grok_bot", "label": "Grok Bot", "shortLabel": "Grok", "percentUsed": 0.059292, "resetsAt": "2026-09-16T18:11:18Z", "resetInterval": 604800}
               ]
             }
           }

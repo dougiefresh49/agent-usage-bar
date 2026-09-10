@@ -1077,6 +1077,9 @@ final class ConnectedUsageServiceTests: XCTestCase {
         let grok = try XCTUnwrap(snapshot.metrics.first { $0.id == "grok_bot" })
         XCTAssertEqual(grok.percentUsed, 0.059292)
         XCTAssertEqual(grok.resetInterval, 7 * 24 * 60 * 60)
+        let grokResetsAt = try XCTUnwrap(grok.resetsAt)
+        let expectedReset = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-16T18:11:18Z"))
+        XCTAssertEqual(grokResetsAt.timeIntervalSince1970, expectedReset.timeIntervalSince1970, accuracy: 1)
         XCTAssertEqual(snapshot.plan?.usedAmountCents, 406)
         XCTAssertEqual(snapshot.plan?.includedAmountCents, 2000)
     }

@@ -701,7 +701,8 @@ enum UsagePresentationMetrics {
                 geometry: nil
             ),
         ]
-        if let grokBot {
+        // Only with a reported percent, matching the snapshot writer, so the popover and the phone agree.
+        if let grokBot, grokBot.usagePercent != nil {
             metrics.append(
                 percentageMetric(
                     id: cursorGrokBotID,
