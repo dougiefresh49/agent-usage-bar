@@ -63,6 +63,31 @@ final class SettingsViewTests: XCTestCase {
             openAICredentialStatusText(source: .none, expiry: nil),
             "Run `codex login` to connect without pasting a token."
         )
+        let unusedPastedExpiry = Date().addingTimeInterval(3 * 86_400 + 60)
+        XCTAssertEqual(
+            openAICredentialStatusText(
+                source: .codexCLI,
+                expiry: unusedPastedExpiry,
+                hasStoredPastedToken: true
+            ),
+            "Using Codex CLI login (expires in 3d). A pasted token is also stored and not in use."
+        )
+        XCTAssertEqual(
+            openAICredentialStatusText(
+                source: .codexCLI,
+                expiry: nil,
+                hasStoredPastedToken: true
+            ),
+            "Using Codex CLI login. A pasted token is also stored and not in use."
+        )
+        XCTAssertEqual(
+            openAICredentialStatusText(
+                source: .pasted,
+                expiry: nil,
+                hasStoredPastedToken: true
+            ),
+            "Using pasted token"
+        )
     }
 
     func testCursorCredentialStatusText() {
@@ -78,6 +103,31 @@ final class SettingsViewTests: XCTestCase {
         XCTAssertEqual(
             cursorCredentialStatusText(source: .none, expiry: nil),
             "Run `cursor-agent login` to connect without pasting a token."
+        )
+        let unusedPastedExpiry = Date().addingTimeInterval(3 * 86_400 + 60)
+        XCTAssertEqual(
+            cursorCredentialStatusText(
+                source: .cursorCLI,
+                expiry: unusedPastedExpiry,
+                hasStoredPastedToken: true
+            ),
+            "Using Cursor CLI login (expires in 3d). A pasted token is also stored and not in use."
+        )
+        XCTAssertEqual(
+            cursorCredentialStatusText(
+                source: .cursorCLI,
+                expiry: nil,
+                hasStoredPastedToken: true
+            ),
+            "Using Cursor CLI login. A pasted token is also stored and not in use."
+        )
+        XCTAssertEqual(
+            cursorCredentialStatusText(
+                source: .pasted,
+                expiry: nil,
+                hasStoredPastedToken: true
+            ),
+            "Using pasted token"
         )
     }
 }

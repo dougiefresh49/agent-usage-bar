@@ -36,6 +36,10 @@ final class ConnectedUsageService: ObservableObject {
     @Published private(set) var openAIAccountID: String?
     @Published private(set) var openAITokenExpiry: Date?
     @Published private(set) var cursorTokenExpiry: Date?
+    /// True when a pasted OpenAI token is in the store, even if CLI login is the active source.
+    @Published private(set) var hasStoredOpenAIToken = false
+    /// True when a pasted Cursor token is in the store, even if CLI login is the active source.
+    @Published private(set) var hasStoredCursorToken = false
     @Published private(set) var cursorPlanInfo: CursorPlanInfoResponse?
     /// Last Use reset result for the popover; the view clears it after a few seconds.
     @Published var resetCreditOutcome: (message: String, at: Date)?
@@ -870,20 +874,20 @@ final class ConnectedUsageService: ObservableObject {
     }
 
     private func resolveOpenAICredential() -> ResolvedOpenAICredential? {
-        if let pasted = credentialsStore.load().openAISessionToken {
-            return ResolvedOpenAICredential(
-                token: pasted,
-                source: .pasted,
-                accountId: nil,
-                expiry: nil
-            )
-        }
         if let cli = codexAuthLoader() {
             return ResolvedOpenAICredential(
                 token: cli.accessToken,
                 source: .codexCLI,
                 accountId: cli.accountId,
                 expiry: JWTClaims.expiry(of: cli.accessToken)
+            )
+        }
+        if let pasted = credentialsStore.load().openAISessionToken {
+            return ResolvedOpenAICredential(
+                token: pasted,
+                source: .pasted,
+                accountId: nil,
+                expiry: nil
             )
         }
         if let env = environment["OPENAI_SESSION_TOKEN"].flatMap(ConnectedTokenNormalizer.openAI) {
@@ -898,15 +902,15 @@ final class ConnectedUsageService: ObservableObject {
     }
 
     private func resolveCursorCredential() -> ResolvedCursorCredential? {
-        if let pasted = credentialsStore.load().cursorSessionToken {
-            return ResolvedCursorCredential(token: pasted, source: .pasted, expiry: nil)
-        }
         if let cli = CursorCLIKeychain.load(runner: cursorKeychainRunner) {
             return ResolvedCursorCredential(
                 token: cli.accessToken,
                 source: .cursorCLI,
                 expiry: JWTClaims.expiry(of: cli.accessToken)
             )
+        }
+        if let pasted = credentialsStore.load().cursorSessionToken {
+            return ResolvedCursorCredential(token: pasted, source: .pasted, expiry: nil)
         }
         if let env = environment["CURSOR_SESSION_TOKEN"].flatMap(ConnectedTokenNormalizer.cursor) {
             return ResolvedCursorCredential(token: env, source: .environment, expiry: nil)
@@ -915,6 +919,10 @@ final class ConnectedUsageService: ObservableObject {
     }
 
     private func updateConfiguredState() {
+        let stored = credentialsStore.load()
+        hasStoredOpenAIToken = stored.openAISessionToken != nil
+        hasStoredCursorToken = stored.cursorSessionToken != nil
+
         if let openAI = resolveOpenAICredential() {
             isOpenAIConfigured = true
             openAICredentialSource = openAI.source
