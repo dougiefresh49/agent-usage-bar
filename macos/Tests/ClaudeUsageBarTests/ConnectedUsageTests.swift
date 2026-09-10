@@ -502,6 +502,63 @@ final class ConnectedUsageServiceTests: XCTestCase {
         XCTAssertNil(accountHeaders.last ?? nil)
     }
 
+    func testStaleOpenAIUsageResponseDoesNotOverwriteClearedAccountID() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        let session = makeSession()
+        let requestStarted = ConnectedAsyncGate()
+        let releaseResponse = DispatchSemaphore(value: 0)
+
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            if request.url?.path == "/openai" {
+                Task { await requestStarted.open() }
+                let waited = releaseResponse.wait(timeout: .now() + 5)
+                precondition(waited == .success, "stale OpenAI usage response was not released")
+                return (
+                    response,
+                    Data(#"{"account_id":"acct-stale","rate_limit":{"primary_window":{"used_percent":9}}}"#.utf8)
+                )
+            }
+            if request.url?.path == "/credits" {
+                return (response, Data(#"{"credits":[],"available_count":0}"#.utf8))
+            }
+            throw URLError(.badURL)
+        }
+
+        let service = makeService(
+            session: session,
+            openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
+            openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
+            credentialsStore: store,
+            codexAuthLoader: {
+                CodexCLICredentials(
+                    accessToken: "cli-token-a",
+                    accountId: "acct-a",
+                    lastRefresh: nil
+                )
+            }
+        )
+
+        async let fetchDone: Void = service.fetchOpenAIUsage()
+        await requestStarted.wait()
+        XCTAssertEqual(service.openAIAccountID, "acct-a")
+
+        try service.saveOpenAIToken("pasted-token-b")
+        XCTAssertNil(service.openAIAccountID)
+
+        releaseResponse.signal()
+        await fetchDone
+
+        XCTAssertNil(service.openAIAccountID)
+    }
+
     func testDeviceSyncCredentialsExcludeCLITokens() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -865,6 +922,27 @@ final class ConnectedUsageServiceTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ConnectedMockURLProtocol.self]
         return URLSession(configuration: configuration)
+    }
+}
+
+private actor ConnectedAsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        isOpen = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending {
+            waiter.resume()
+        }
     }
 }
 

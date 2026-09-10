@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import Foundation
 
 enum OpenAICredentialSource: Equatable {
@@ -249,6 +250,10 @@ final class ConnectedUsageService: ObservableObject {
             ? Self.openAICLIUnauthorizedMessage
             : nil
         let accountId = resolved.accountId ?? openAIAccountID
+        let requestCredentialIdentity = Self.openAICredentialIdentity(
+            source: resolved.source,
+            token: resolved.token
+        )
 
         do {
             let usageData = try await openAIResponseData(
@@ -259,7 +264,8 @@ final class ConnectedUsageService: ObservableObject {
             )
             let decoded = try JSONDecoder().decode(OpenAIUsageResponse.self, from: usageData)
             openAIUsage = decoded
-            if let discovered = resolved.accountId ?? decoded.accountId {
+            if requestCredentialIdentity == currentOpenAICredentialIdentity(),
+               let discovered = resolved.accountId ?? decoded.accountId {
                 openAIAccountID = discovered
             }
             openAIError = nil
@@ -490,7 +496,7 @@ final class ConnectedUsageService: ObservableObject {
             isOpenAIConfigured = true
             openAICredentialSource = openAI.source
             openAITokenExpiry = openAI.source == .codexCLI ? openAI.expiry : nil
-            let identity = "\(openAI.source)|\(openAI.token)"
+            let identity = Self.openAICredentialIdentity(source: openAI.source, token: openAI.token)
             if identity != openAIAccountIDCredentialIdentity {
                 openAIAccountIDCredentialIdentity = identity
                 openAIAccountID = openAI.accountId
@@ -518,6 +524,19 @@ final class ConnectedUsageService: ObservableObject {
         }
 
         isElevenLabsConfigured = elevenLabsAPIKey != nil
+    }
+
+    private func currentOpenAICredentialIdentity() -> String? {
+        guard let openAI = resolveOpenAICredential() else { return nil }
+        return Self.openAICredentialIdentity(source: openAI.source, token: openAI.token)
+    }
+
+    /// Source plus a SHA-256 of the token so an in-flight response can tell whether the
+    /// credential that started the request is still current, without keeping the raw token.
+    private static func openAICredentialIdentity(source: OpenAICredentialSource, token: String) -> String {
+        let digest = SHA256.hash(data: Data(token.utf8))
+        let hash = digest.map { String(format: "%02x", $0) }.joined()
+        return "\(source)|\(hash)"
     }
 
     private static let openAICLIUnauthorizedMessage =
