@@ -899,7 +899,7 @@ private fun shortMetricLabel(
 private fun UsageBarGlance(percent: Double?, fillMode: UsageFillMode = UsageFillMode.DRAIN) {
     // Colour still keys off used percent; only the drawn length follows the mode.
     val usedFraction = ((percent ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f)
-    val fraction = fillMode.barFraction(percent ?: 0.0)
+    val fraction = fillMode.barFraction(percent)
     val fill = when {
         usedFraction < 0.60f -> Green
         usedFraction < 0.80f -> Yellow

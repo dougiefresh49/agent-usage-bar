@@ -56,9 +56,9 @@ object OrbitBitmapRenderer {
             }
         }
 
-        val p = fillMode.barFraction(primaryPercent ?: 0.0)
+        val p = fillMode.barFraction(primaryPercent)
         if (hasSecondary) {
-            ring(fillMode.barFraction(secondaryPercent ?: 0.0), secondaryColor, outerDiameter)
+            ring(fillMode.barFraction(secondaryPercent), secondaryColor, outerDiameter)
             ring(p, primaryColor, innerDiameter)
         } else {
             ring(p, primaryColor, outerDiameter)

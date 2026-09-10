@@ -23,6 +23,19 @@ class UsageFillModeTest {
     }
 
     @Test
+    fun displayValue_halfPoints_roundUpLikeTheMac() {
+        val metric = UsageMetric(id = "claude.5h", label = "5-Hour", percentUsed = 31.5)
+        assertEquals("32%", metric.displayValue(UsageFillMode.FILL))
+        assertEquals("69%", metric.displayValue(UsageFillMode.DRAIN))
+    }
+
+    @Test
+    fun barFraction_nullPercent_drawsNothingInBothModes() {
+        assertEquals(0f, UsageFillMode.FILL.barFraction(null), 0.0001f)
+        assertEquals(0f, UsageFillMode.DRAIN.barFraction(null), 0.0001f)
+    }
+
+    @Test
     fun displayValue_countMetric_unchanged() {
         val metric = UsageMetric(id = "openai.resetCredits", label = "Reset Credits", countValue = 3)
         assertEquals("3", metric.displayValue(UsageFillMode.FILL))

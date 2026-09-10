@@ -2,6 +2,7 @@ package com.agentusagebar.android.data.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlin.math.roundToInt
 
 @Serializable
 data class CursorPlanInfoResponse(
@@ -105,13 +106,16 @@ enum class UsageTextSize(val displayName: String, val overviewColumns: Int) {
     LARGE("Large", 2),
 }
 
-
 enum class UsageFillMode(val displayName: String) {
     FILL("Fill"),
     DRAIN("Drain");
 
-    /** Bar/ring fill fraction for a used percent (0..100): used share in Fill, remaining in Drain. */
-    fun barFraction(percentUsed: Double): Float {
+    /**
+     * Bar/ring fill fraction for a used percent (0..100): used share in Fill, remaining in Drain.
+     * A missing percent draws nothing in both modes, matching the Mac.
+     */
+    fun barFraction(percentUsed: Double?): Float {
+        if (percentUsed == null) return 0f
         val used = (percentUsed / 100.0).coerceIn(0.0, 1.0)
         return when (this) {
             FILL -> used.toFloat()
@@ -152,7 +156,7 @@ enum class UsagePace {
 
         /**
          * Spending versus even pace. Gap of usedPercent minus elapsed*100:
-         * above +5 is ahead, below -5 is behind, else on pace.
+         * above +5 is ahead, below -5 is under, else on pace.
          */
         fun evaluate(
             percentUsed: Double?,
@@ -318,12 +322,10 @@ data class UsageMetric(
             return "%,d".format(countValue)
         }
         val used = percentUsed ?: return "—"
+        // roundToInt rounds halves up like the Mac; kotlin.math.round would round them to even.
         return when (mode) {
-            UsageFillMode.FILL -> "${kotlin.math.round(used).toInt()}%"
-            UsageFillMode.DRAIN -> {
-                val remaining = (100.0 - used.coerceIn(0.0, 100.0)).let { kotlin.math.round(it).toInt() }
-                "$remaining%"
-            }
+            UsageFillMode.FILL -> "${used.roundToInt()}%"
+            UsageFillMode.DRAIN -> "${(100.0 - used.coerceIn(0.0, 100.0)).roundToInt()}%"
         }
     }
 

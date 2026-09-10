@@ -28,7 +28,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -321,10 +324,16 @@ fun OrbitUsageBlock(
                     val pace = metric.pace()
                     val label = metricLabelForMode(metric.id, metric.label, fillMode)
                     val value = metric.displayValue(fillMode)
+                    val glyphColor = MaterialTheme.colorScheme.onSurfaceVariant
                     Text(
-                        text = buildString {
-                            if (pace != null) append(pace.glyph).append(" ")
-                            append(label).append(" ").append(value)
+                        text = buildAnnotatedString {
+                            append(label)
+                            append(" ")
+                            if (pace != null) {
+                                withStyle(SpanStyle(color = glyphColor)) { append(pace.glyph) }
+                                append(" ")
+                            }
+                            append(value)
                             if (metric.countValue != null) append(" available")
                         },
                         style = MaterialTheme.typography.bodyMedium,
@@ -343,8 +352,8 @@ fun OrbitRings(
     fillMode: UsageFillMode = UsageFillMode.DRAIN,
     modifier: Modifier = Modifier,
 ) {
-    val primary = fillMode.barFraction(primaryPercent ?: 0.0)
-    val secondary = fillMode.barFraction(secondaryPercent ?: 0.0)
+    val primary = fillMode.barFraction(primaryPercent)
+    val secondary = fillMode.barFraction(secondaryPercent)
     val hasSecondary = secondaryPercent != null
     val drain = countdownFraction.coerceIn(0f, 1f)
     Canvas(modifier = modifier) {
@@ -486,7 +495,7 @@ fun UsageBar(
     style: DetailVisualizationStyle = DetailVisualizationStyle.BARS,
     fillMode: UsageFillMode = UsageFillMode.DRAIN,
 ) {
-    val progress = fillMode.barFraction(percent ?: 0.0)
+    val progress = fillMode.barFraction(percent)
     val shape = if (style == DetailVisualizationStyle.CAPSULE) RoundedCornerShape(50) else RoundedCornerShape(4.dp)
     LinearProgressIndicator(
         progress = { progress },
