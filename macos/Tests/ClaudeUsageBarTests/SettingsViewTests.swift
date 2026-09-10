@@ -80,4 +80,22 @@ final class SettingsViewTests: XCTestCase {
             "Run `cursor-agent login` to connect without pasting a token."
         )
     }
+
+    func testPastedTokenDisclosureTitleFollowsTheActiveSource() {
+        XCTAssertEqual(openAIPastedTokenDisclosureTitle(source: .pasted), "Manage pasted token")
+        XCTAssertEqual(openAIPastedTokenDisclosureTitle(source: .codexCLI), "Use a pasted token instead")
+        XCTAssertEqual(openAIPastedTokenDisclosureTitle(source: .environment), "Use a pasted token instead")
+        XCTAssertEqual(openAIPastedTokenDisclosureTitle(source: .none), "Use a pasted token")
+
+        XCTAssertEqual(cursorPastedTokenDisclosureTitle(source: .pasted), "Manage pasted token")
+        XCTAssertEqual(cursorPastedTokenDisclosureTitle(source: .cursorCLI), "Use a pasted token instead")
+        XCTAssertEqual(cursorPastedTokenDisclosureTitle(source: .environment), "Use a pasted token instead")
+        XCTAssertEqual(cursorPastedTokenDisclosureTitle(source: .none), "Use a pasted token")
+    }
+
+    func testUsageFillModeAppearanceDefaults() {
+        XCTAssertEqual(UsagePresentationDefaults.fillModeKey, "usageFillMode")
+        XCTAssertEqual(UsagePresentationDefaults.fillMode, .drain)
+        XCTAssertEqual(UsageFillMode.allCases.map(\.rawValue), ["fill", "drain"])
+    }
 }

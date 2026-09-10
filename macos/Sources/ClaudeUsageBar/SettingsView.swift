@@ -31,6 +31,8 @@ struct SettingsWindowContent: View {
     private var detailStyleRaw = UsagePresentationDefaults.detailStyle.rawValue
     @AppStorage(UsagePresentationDefaults.textSizeKey)
     private var usageTextSizeRaw = UsagePresentationDefaults.textSize.rawValue
+    @AppStorage(UsagePresentationDefaults.fillModeKey)
+    private var fillModeRaw = UsagePresentationDefaults.fillMode.rawValue
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -133,6 +135,13 @@ struct SettingsWindowContent: View {
                     }
                 }
 
+                Picker("Usage Display", selection: $fillModeRaw) {
+                    ForEach(UsageFillMode.allCases) { mode in
+                        Text(mode.displayName)
+                            .tag(mode.rawValue)
+                    }
+                }
+
                 Picker("Usage Text Size", selection: $usageTextSizeRaw) {
                     ForEach(UsageTextSize.allCases) { size in
                         Text(size.displayName)
@@ -149,6 +158,10 @@ struct SettingsWindowContent: View {
                     .foregroundStyle(.secondary)
 
                 Text("Orbit is used in provider details and desktop widgets; the menu bar stays readable with bars or a split capsule.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("Fill shows what you have used: bars grow and the headline reads \"31% used\". Drain shows what is left: bars shrink and the headline reads \"69% left\".")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -168,7 +181,7 @@ struct SettingsWindowContent: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                DisclosureGroup("Use a pasted token instead") {
+                DisclosureGroup(openAIPastedTokenDisclosureTitle(source: connectedService.openAICredentialSource)) {
                     Text("Use the bearer token from the Authorization header of a ChatGPT usage request. OpenAI API keys do not expose ChatGPT subscription limits.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -203,7 +216,7 @@ struct SettingsWindowContent: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                DisclosureGroup("Use a pasted token instead") {
+                DisclosureGroup(cursorPastedTokenDisclosureTitle(source: connectedService.cursorCredentialSource)) {
                     Text("Paste the WorkosCursorSessionToken cookie value from cursor.com. You can also paste a full Cookie header or copied cURL request.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -757,6 +770,24 @@ func openAICredentialStatusText(
     case .none:
         return "Run `codex login` to connect without pasting a token."
     }
+}
+
+/// Disclosure label for the pasted-token controls, following the active source: the pasted
+/// token is managed when it is in use, offered as an alternative when a CLI or environment
+/// credential is in use, and plainly offered when nothing is connected.
+func pastedTokenDisclosureTitle(isPasted: Bool, hasOtherSource: Bool) -> String {
+    if isPasted {
+        return "Manage pasted token"
+    }
+    return hasOtherSource ? "Use a pasted token instead" : "Use a pasted token"
+}
+
+func openAIPastedTokenDisclosureTitle(source: OpenAICredentialSource) -> String {
+    pastedTokenDisclosureTitle(isPasted: source == .pasted, hasOtherSource: source != .none)
+}
+
+func cursorPastedTokenDisclosureTitle(source: CursorCredentialSource) -> String {
+    pastedTokenDisclosureTitle(isPasted: source == .pasted, hasOtherSource: source != .none)
 }
 
 func cursorCredentialStatusText(
