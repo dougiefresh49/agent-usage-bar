@@ -1163,19 +1163,25 @@ final class UsageServiceTests: XCTestCase {
     }
 }
 
-/// Synchronizes profile-request tests without sleeping: URLProtocol blocks on a semaphore,
+/// Synchronizes profile-request tests without sleeping: URLProtocol blocks on a condition,
 /// and the test awaits CheckedContinuations that resume when the request has actually started.
+/// Every wait has a bounded timeout so a regression fails instead of hanging the suite.
+/// `release()` broadcasts so every blocked handler wakes (not a single semaphore permit).
 private final class ProfileRequestGate: @unchecked Sendable {
+    private static let waitTimeout: TimeInterval = 5
+
     private let lock = NSLock()
-    private let releaseSemaphore = DispatchSemaphore(value: 0)
+    private let releaseCondition = NSCondition()
     private let targetUsageCount: Int
 
     private var usageCount = 0
     private var profileCount = 0
-    private var profileStartedContinuation: CheckedContinuation<Void, Never>?
-    private var usagesSeenContinuation: CheckedContinuation<Void, Never>?
+    /// Continuation resumes with `true` on timeout, `false` when the event arrived.
+    private var profileStartedContinuation: CheckedContinuation<Bool, Never>?
+    private var usagesSeenContinuation: CheckedContinuation<Bool, Never>?
     private var profileDidStart = false
     private var usagesDidReachTarget = false
+    private var isReleased = false
 
     init(targetUsageCount: Int) {
         self.targetUsageCount = targetUsageCount
@@ -1197,7 +1203,7 @@ private final class ProfileRequestGate: @unchecked Sendable {
             usagesSeenContinuation = nil
         }
         lock.unlock()
-        cont?.resume()
+        cont?.resume(returning: false)
     }
 
     func noteProfileStarted() {
@@ -1207,41 +1213,82 @@ private final class ProfileRequestGate: @unchecked Sendable {
         let cont = profileStartedContinuation
         profileStartedContinuation = nil
         lock.unlock()
-        cont?.resume()
+        cont?.resume(returning: false)
     }
 
     func waitUntilProfileStarted() async {
-        await withCheckedContinuation { continuation in
+        let timedOut = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             lock.lock()
             if profileDidStart {
                 lock.unlock()
-                continuation.resume()
-            } else {
-                profileStartedContinuation = continuation
-                lock.unlock()
+                continuation.resume(returning: false)
+                return
             }
+            profileStartedContinuation = continuation
+            lock.unlock()
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + Self.waitTimeout) { [weak self] in
+                guard let self else { return }
+                self.lock.lock()
+                guard let cont = self.profileStartedContinuation else {
+                    self.lock.unlock()
+                    return
+                }
+                self.profileStartedContinuation = nil
+                self.lock.unlock()
+                cont.resume(returning: true)
+            }
+        }
+        if timedOut {
+            XCTFail("Timed out waiting for profile request to start")
         }
     }
 
     func waitUntilUsagesSeen() async {
-        await withCheckedContinuation { continuation in
+        let timedOut = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             lock.lock()
             if usagesDidReachTarget {
                 lock.unlock()
-                continuation.resume()
-            } else {
-                usagesSeenContinuation = continuation
-                lock.unlock()
+                continuation.resume(returning: false)
+                return
             }
+            usagesSeenContinuation = continuation
+            lock.unlock()
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + Self.waitTimeout) { [weak self] in
+                guard let self else { return }
+                self.lock.lock()
+                guard let cont = self.usagesSeenContinuation else {
+                    self.lock.unlock()
+                    return
+                }
+                self.usagesSeenContinuation = nil
+                self.lock.unlock()
+                cont.resume(returning: true)
+            }
+        }
+        if timedOut {
+            XCTFail("Timed out waiting for usage requests to reach target")
         }
     }
 
     func waitForRelease() {
-        releaseSemaphore.wait()
+        releaseCondition.lock()
+        defer { releaseCondition.unlock() }
+        let deadline = Date().addingTimeInterval(Self.waitTimeout)
+        while !isReleased {
+            if !releaseCondition.wait(until: deadline) {
+                XCTFail("Timed out waiting for profile request release")
+                return
+            }
+        }
     }
 
     func release() {
-        releaseSemaphore.signal()
+        releaseCondition.lock()
+        isReleased = true
+        releaseCondition.broadcast()
+        releaseCondition.unlock()
     }
 }
 
