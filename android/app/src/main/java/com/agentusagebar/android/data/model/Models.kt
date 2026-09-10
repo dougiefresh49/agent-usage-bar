@@ -182,7 +182,6 @@ fun metricLabelForMode(metricId: String, label: String, mode: UsageFillMode): St
     if (mode != UsageFillMode.DRAIN) return label
     return when (metricId) {
         UsageMetricPreferences.ELEVENLABS_CREDITS -> "Credits"
-        UsageMetricPreferences.CURSOR_TOTAL -> "Total Plan"
         else -> label
     }
 }
