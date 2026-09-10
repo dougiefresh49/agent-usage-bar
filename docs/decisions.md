@@ -8,6 +8,7 @@ as prose or were dropped, not backfilled.
 
 | # | date | decision | status |
 |---|------|----------|--------|
+| 15 | 2026-09-10 | Overnight #58 run: one Sol round per PR is the gate from wave 2 on (the lane's own, with a coverage table over every spec bullet); the orchestrator re-reviews only a PR whose lane gate could not run, and grok via cursor-agent is the overflow reviewer while codex is capped, because seven lane gates plus four re-reviews took codex from 32% to 48% weekly and capped its 5-hour window | accepted |
 | 14 | 2026-09-10 | Overnight #58 run: the Sol review gate runs `codex -m gpt-5.6-sol` at high reasoning, not the local codex config's pinned default `gpt-6-astra`, because the run brief names Sol and the roster has no row for astra | assumed (reopens when: Doug names the codex review model, or adds astra to the roster) |
 | 13 | 2026-09-10 | Overnight #58 run: no lane, reviewer, or verifier calls the Codex reset-credit consume endpoint against a real account; the RFC UUIDv5 vector and stubbed sessions are the whole check, and the #56 computer-use round opens the confirm dialog and presses Cancel only | accepted |
 | 12 | 2026-09-10 | Overnight #58 run: a red main after a merge gets a fix lane at once on a `fix-<what>` branch through the same review gate, nothing else merges until green, and two fix PRs for one failure without a green result stops the run as a design problem | accepted |
