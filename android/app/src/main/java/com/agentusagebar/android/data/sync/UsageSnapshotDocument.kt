@@ -43,6 +43,7 @@ data class UsageSnapshotPlanDocument(
     val priceText: String? = null,
     val renewsAt: String? = null,
     val includedAmountCents: Int? = null,
+    val usedAmountCents: Int? = null,
     val status: String? = null,
 )
 
@@ -176,7 +177,7 @@ internal fun mapSnapshotMetricId(provider: UsageProvider, snapshotId: String): S
         UsageProvider.OPENAI to "reset_credits" -> UsageMetricPreferences.OPENAI_RESET_CREDITS
         UsageProvider.CURSOR to "models" -> UsageMetricPreferences.CURSOR_MODELS
         UsageProvider.CURSOR to "api" -> UsageMetricPreferences.CURSOR_API
-        UsageProvider.CURSOR to "total" -> UsageMetricPreferences.CURSOR_TOTAL
+        UsageProvider.CURSOR to "grok_bot" -> UsageMetricPreferences.CURSOR_GROK_BOT
         UsageProvider.ELEVENLABS to "credits" -> UsageMetricPreferences.ELEVENLABS_CREDITS
         UsageProvider.ELEVENLABS to "remaining" -> UsageMetricPreferences.ELEVENLABS_REMAINING
         else -> snapshotId
@@ -207,13 +208,14 @@ private fun UsageSnapshotPlanDocument.toCursorPlanInfo(): CursorPlanInfoResponse
     val name = label?.takeIf { it.isNotBlank() }
     val price = priceText?.takeIf { it.isNotBlank() }
     val renewsAtMs = parseIsoToEpochMs(renewsAt)
-    if (name == null && price == null && renewsAtMs == null && includedAmountCents == null) {
+    if (name == null && price == null && renewsAtMs == null && includedAmountCents == null && usedAmountCents == null) {
         return null
     }
     return CursorPlanInfoResponse(
         planInfo = CursorPlanInfo(
             planName = name,
             includedAmountCents = includedAmountCents,
+            usedAmountCents = usedAmountCents,
             price = price,
             billingCycleEnd = renewsAtMs?.toString(),
         ),

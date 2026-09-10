@@ -14,6 +14,7 @@ data class CursorPlanInfoResponse(
 data class CursorPlanInfo(
     val planName: String? = null,
     val includedAmountCents: Int? = null,
+    val usedAmountCents: Int? = null,
     val price: String? = null,
     /** Epoch milliseconds as a string, matching the Connect-RPC payload. */
     val billingCycleEnd: String? = null,
@@ -181,7 +182,6 @@ fun metricLabelForMode(metricId: String, label: String, mode: UsageFillMode): St
     if (mode != UsageFillMode.DRAIN) return label
     return when (metricId) {
         UsageMetricPreferences.ELEVENLABS_CREDITS -> "Credits"
-        UsageMetricPreferences.CURSOR_TOTAL -> "Total Plan"
         else -> label
     }
 }
@@ -197,7 +197,7 @@ object UsageMetricPreferences {
     const val OPENAI_RESET_CREDITS = "openai.resetCredits"
     const val CURSOR_MODELS = "cursor.models"
     const val CURSOR_API = "cursor.api"
-    const val CURSOR_TOTAL = "cursor.total"
+    const val CURSOR_GROK_BOT = "cursor.grokBot"
     const val ELEVENLABS_CREDITS = "elevenlabs.credits"
     const val ELEVENLABS_REMAINING = "elevenlabs.remaining"
 
@@ -225,7 +225,7 @@ object UsageMetricPreferences {
             UsageProvider.CURSOR -> listOf(
                 UsageMetric(CURSOR_MODELS, "First-Party Models"),
                 UsageMetric(CURSOR_API, "API"),
-                UsageMetric(CURSOR_TOTAL, "Total Plan Usage"),
+                UsageMetric(CURSOR_GROK_BOT, "Grok Bot"),
             )
             UsageProvider.ELEVENLABS -> listOf(
                 UsageMetric(ELEVENLABS_CREDITS, "Credits Used"),

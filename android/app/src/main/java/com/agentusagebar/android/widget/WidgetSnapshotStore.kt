@@ -4,7 +4,6 @@ import android.content.Context
 import com.agentusagebar.android.data.model.AppUsageSnapshot
 import com.agentusagebar.android.data.model.ProviderUsageState
 import com.agentusagebar.android.data.model.UsageMetric
-import com.agentusagebar.android.data.model.UsageMetricPreferences
 import com.agentusagebar.android.data.model.UsageProvider
 import java.util.Locale
 import kotlinx.serialization.Serializable
@@ -176,18 +175,17 @@ internal fun formatCursorPlanRow(
 }
 
 /**
- * Spend line from included allotment and total percent (planUsage lives only as
- * percent on the CURSOR_TOTAL metric; raw cents are not on AppUsageSnapshot).
+ * Spend line from included allotment and used cents written by the Mac snapshot.
  */
 internal fun formatCursorSpendRow(
-    percentUsed: Double?,
+    usedAmountCents: Int?,
     includedAmountCents: Int?,
 ): String? {
     val cents = includedAmountCents ?: return null
     if (cents < 0) return null
-    val percent = percentUsed ?: return null
+    val used = usedAmountCents ?: return null
     val limitDollars = cents / 100.0
-    val usedDollars = limitDollars * (percent / 100.0)
+    val usedDollars = used / 100.0
     return "used $%.2f of $%.2f".format(Locale.US, usedDollars, limitDollars)
 }
 
@@ -219,11 +217,4 @@ internal fun formatRenewsIn(
         else -> "${java.util.concurrent.TimeUnit.MILLISECONDS.toDays(abs)}d"
     }
     return if (delta >= 0) "renews in $value" else "renewed $value ago"
-}
-
-internal fun cursorTotalPercent(state: ProviderUsageState?): Double? {
-    if (state == null) return null
-    return state.metrics
-        .firstOrNull { it.id == UsageMetricPreferences.CURSOR_TOTAL }
-        ?.percentUsed
 }

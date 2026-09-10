@@ -38,6 +38,18 @@ final class CursorConnectAPITests: XCTestCase {
         )
     }
 
+    func testRequestBuildsGetSandUsageStatusURL() {
+        let request = CursorConnectAPI.request(
+            method: CursorConnectAPI.getSandUsageStatus,
+            token: "fake-token"
+        )
+
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus"
+        )
+    }
+
     func testDecodesPlanInfoResponseFixture() throws {
         let data = Data(
             """
@@ -91,5 +103,33 @@ final class CursorConnectAPITests: XCTestCase {
         XCTAssertEqual(usage.billingCycleEnd, "1787681079000")
         XCTAssertEqual(usage.planUsage?.totalPercentUsed, 9.65)
         XCTAssertEqual(usage.spendLimitUsage?.individualRemaining, 1200)
+    }
+
+    func testDecodesGrokBotUsageResponseFixture() throws {
+        let data = Data(
+            """
+            {
+              "currentPeriodStart": "2026-09-09T18:11:18.164Z",
+              "nextResetTimestampUtc": "2026-09-16T18:11:18.164Z",
+              "usagePercent": 0.059292,
+              "hasAvailableUsage": true,
+              "hasNonZeroIncludedLimit": true,
+              "upgradeRecommendation": { "cta": { "label": "Upgrade to Pro+", "url": { "url": "https://cursor.com/api/auth/checkoutDeepControl?tier=pro_plus" } }, "supportingText": "Get $500 of Grok Bot usage each week with Pro+", "kind": "upgrade-to-pro-plus-for-more-usage" },
+              "upgradeRecommendations": [ { "cta": { "label": "Upgrade to Pro+", "url": { "url": "https://cursor.com/api/auth/checkoutDeepControl?tier=pro_plus" } }, "supportingText": "Get $500 of Grok Bot usage each week with Pro+", "kind": "upgrade-to-pro-plus-for-more-usage" } ],
+              "onDemandSettings": { "visible": true, "eligible": true, "enabled": true, "dashboardUrl": "https://cursor.com/dashboard/spending?for=github%7Cuser_01JK3XWYQN4HYNH2TDCD21GTD8" },
+              "grokPlanLabel": "Grok Bot Plan"
+            }
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(CursorGrokBotUsageResponse.self, from: data)
+
+        XCTAssertEqual(response.usagePercent, 0.059292)
+        XCTAssertEqual(response.currentPeriodStart, "2026-09-09T18:11:18.164Z")
+        XCTAssertEqual(response.nextResetTimestampUtc, "2026-09-16T18:11:18.164Z")
+        XCTAssertNotNil(response.currentPeriodStartDate)
+        XCTAssertNotNil(response.nextResetDate)
+        XCTAssertEqual(response.windowDuration, 7 * 24 * 60 * 60)
+        XCTAssertEqual(response.grokPlanLabel, "Grok Bot Plan")
     }
 }

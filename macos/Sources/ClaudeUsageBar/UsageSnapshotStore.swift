@@ -38,6 +38,7 @@ struct UsageSnapshotPlan: Codable, Equatable {
     var priceText: String?
     var renewsAt: Date?
     var includedAmountCents: Int?
+    var usedAmountCents: Int?
     var status: String?
 
     init(
@@ -45,12 +46,14 @@ struct UsageSnapshotPlan: Codable, Equatable {
         priceText: String? = nil,
         renewsAt: Date? = nil,
         includedAmountCents: Int? = nil,
+        usedAmountCents: Int? = nil,
         status: String? = nil
     ) {
         self.label = label
         self.priceText = priceText
         self.renewsAt = renewsAt
         self.includedAmountCents = includedAmountCents
+        self.usedAmountCents = usedAmountCents
         self.status = status
     }
 }
@@ -382,7 +385,10 @@ extension UsageSnapshotStore {
         return metrics
     }
 
-    nonisolated static func cursorMetrics(for usage: CursorUsageResponse) -> [UsageSnapshotMetric] {
+    nonisolated static func cursorMetrics(
+        for usage: CursorUsageResponse,
+        grokBot: CursorGrokBotUsageResponse?
+    ) -> [UsageSnapshotMetric] {
         var metrics = [
             UsageSnapshotMetric(
                 id: "models",
@@ -401,14 +407,14 @@ extension UsageSnapshotStore {
                 resetInterval: 30 * 24 * 60 * 60
             ),
         ]
-        if usage.planUsage?.totalPercentUsed != nil {
+        if let percent = grokBot?.usagePercent {
             metrics.append(UsageSnapshotMetric(
-                id: "total",
-                label: "Total usage",
-                shortLabel: "T",
-                percentUsed: usage.planUsage?.totalPercentUsed,
-                resetsAt: usage.billingCycleEndDate,
-                resetInterval: 30 * 24 * 60 * 60
+                id: "grok_bot",
+                label: "Grok Bot",
+                shortLabel: "Grok",
+                percentUsed: percent,
+                resetsAt: grokBot?.nextResetDate,
+                resetInterval: 7 * 24 * 60 * 60
             ))
         }
         if let spend = usage.spendLimitUsage, spend.utilization != nil {

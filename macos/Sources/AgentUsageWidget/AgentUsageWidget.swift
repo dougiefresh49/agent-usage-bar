@@ -320,7 +320,7 @@ private enum WidgetMetricSelection {
         case .openai:
             preferredIDs = ["primary", "secondary", "reset_credits"]
         case .cursor:
-            preferredIDs = ["models", "api", "total"]
+            preferredIDs = ["models", "api", "grok_bot"]
         case .elevenlabs:
             preferredIDs = ["credits", "remaining"]
         }

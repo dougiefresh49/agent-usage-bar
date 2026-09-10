@@ -169,7 +169,7 @@ private fun MiniMetricRow(
         UsageMetricPreferences.CLAUDE_SEVEN_DAY -> "7d"
         UsageMetricPreferences.CURSOR_MODELS -> "Models"
         UsageMetricPreferences.CURSOR_API -> "API"
-        UsageMetricPreferences.CURSOR_TOTAL -> "Total"
+        UsageMetricPreferences.CURSOR_GROK_BOT -> "Grok"
         UsageMetricPreferences.OPENAI_PRIMARY -> compactWindowLabel(metric.resetIntervalMs) ?: "Pri"
         UsageMetricPreferences.OPENAI_SECONDARY -> compactWindowLabel(metric.resetIntervalMs) ?: "Sec"
         UsageMetricPreferences.OPENAI_RESET_CREDITS -> "Reset"

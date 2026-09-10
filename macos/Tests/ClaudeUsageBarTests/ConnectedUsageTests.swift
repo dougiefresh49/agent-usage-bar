@@ -772,6 +772,9 @@ final class ConnectedUsageServiceTests: XCTestCase {
                     Data(#"{"planInfo":{"planName":"Pro","includedAmountCents":2000,"price":"$20/mo"}}"#.utf8)
                 )
             }
+            if path.contains("GetSandUsageStatus") {
+                return (response, Data(Self.grokBotUsageJSON.utf8))
+            }
             if path == "/cursor" {
                 usedCookie = true
             }
@@ -818,6 +821,9 @@ final class ConnectedUsageServiceTests: XCTestCase {
                     response,
                     Data(#"{"planInfo":{"planName":"Pro","includedAmountCents":2000,"price":"$20/mo"}}"#.utf8)
                 )
+            }
+            if path.contains("GetSandUsageStatus") {
+                return (response, Data(Self.grokBotUsageJSON.utf8))
             }
             throw URLError(.badURL)
         }
@@ -869,6 +875,9 @@ final class ConnectedUsageServiceTests: XCTestCase {
                     response,
                     Data(#"{"planInfo":{"planName":"Pro","includedAmountCents":2000,"price":"$20/mo"}}"#.utf8)
                 )
+            }
+            if path.contains("GetSandUsageStatus") {
+                return (response, Data(Self.grokBotUsageJSON.utf8))
             }
             if path == "/cursor" {
                 cookieAuth = request.value(forHTTPHeaderField: "Cookie")
@@ -934,6 +943,9 @@ final class ConnectedUsageServiceTests: XCTestCase {
                     Data(#"{"planInfo":{"planName":"Pro","includedAmountCents":2000,"price":"$20/mo"}}"#.utf8)
                 )
             }
+            if path.contains("GetSandUsageStatus") {
+                return (response, Data(Self.grokBotUsageJSON.utf8))
+            }
             throw URLError(.badURL)
         }
 
@@ -990,6 +1002,9 @@ final class ConnectedUsageServiceTests: XCTestCase {
                 )!
                 return (failure, Data())
             }
+            if path.contains("GetSandUsageStatus") {
+                return (response, Data(Self.grokBotUsageJSON.utf8))
+            }
             throw URLError(.badURL)
         }
 
@@ -1008,6 +1023,113 @@ final class ConnectedUsageServiceTests: XCTestCase {
         XCTAssertNil(service.cursorPlanInfo)
         XCTAssertEqual(service.cursorUsage?.planUsage?.apiPercentUsed, 2)
         XCTAssertNil(service.cursorError)
+    }
+
+    func testCursorCLIRefreshPublishesGrokBotAndWritesSnapshotWithoutTotal() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        let snapshotDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let snapshotStore = UsageSnapshotStore(directory: snapshotDirectory)
+        let session = makeSession()
+
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            let path = request.url?.path ?? ""
+            if path.contains("GetCurrentPeriodUsage") {
+                return (
+                    response,
+                    Data(#"{"planUsage":{"autoPercentUsed":1,"apiPercentUsed":2,"totalPercentUsed":20.3}}"#.utf8)
+                )
+            }
+            if path.contains("GetPlanInfo") {
+                return (
+                    response,
+                    Data(#"{"planInfo":{"planName":"Pro","includedAmountCents":2000,"price":"$20/mo"}}"#.utf8)
+                )
+            }
+            if path.contains("GetSandUsageStatus") {
+                return (response, Data(Self.grokBotUsageJSON.utf8))
+            }
+            throw URLError(.badURL)
+        }
+
+        let service = makeService(
+            session: session,
+            credentialsStore: store,
+            cursorKeychainRunner: { _, _ in "cli-cursor" }
+        )
+        service.snapshotStore = snapshotStore
+        await service.fetchCursorUsage()
+
+        XCTAssertEqual(service.cursorGrokBotUsage?.usagePercent, 0.059292)
+        XCTAssertEqual(service.cursorGrokBotUsage?.grokPlanLabel, "Grok Bot Plan")
+        XCTAssertNil(service.cursorError)
+
+        let snapshot = try XCTUnwrap(snapshotStore.currentSnapshot().providers["cursor"])
+        XCTAssertEqual(snapshot.metrics.map(\.id), ["models", "api", "grok_bot"])
+        let grok = try XCTUnwrap(snapshot.metrics.first { $0.id == "grok_bot" })
+        XCTAssertEqual(grok.percentUsed, 0.059292)
+        XCTAssertEqual(grok.resetInterval, 7 * 24 * 60 * 60)
+        let grokResetsAt = try XCTUnwrap(grok.resetsAt)
+        let expectedReset = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-16T18:11:18Z"))
+        XCTAssertEqual(grokResetsAt.timeIntervalSince1970, expectedReset.timeIntervalSince1970, accuracy: 1)
+        XCTAssertEqual(snapshot.plan?.usedAmountCents, 406)
+        XCTAssertEqual(snapshot.plan?.includedAmountCents, 2000)
+    }
+
+    func testCursorGrokBotHTTP500LeavesUsageIntactAndClearsGrokBot() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        let session = makeSession()
+
+        ConnectedMockURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            let path = request.url?.path ?? ""
+            if path.contains("GetCurrentPeriodUsage") {
+                return (response, Data(#"{"planUsage":{"autoPercentUsed":1,"apiPercentUsed":2}}"#.utf8))
+            }
+            if path.contains("GetPlanInfo") {
+                return (
+                    response,
+                    Data(#"{"planInfo":{"planName":"Pro","includedAmountCents":2000,"price":"$20/mo"}}"#.utf8)
+                )
+            }
+            if path.contains("GetSandUsageStatus") {
+                let failure = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 500,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                return (failure, Data())
+            }
+            throw URLError(.badURL)
+        }
+
+        let service = makeService(
+            session: session,
+            credentialsStore: store,
+            cursorKeychainRunner: { _, _ in "cli-cursor" }
+        )
+        await service.fetchCursorUsage()
+
+        XCTAssertNotNil(service.cursorUsage)
+        XCTAssertEqual(service.cursorUsage?.planUsage?.apiPercentUsed, 2)
+        XCTAssertNil(service.cursorError)
+        XCTAssertNil(service.cursorGrokBotUsage)
     }
 
     func testUnauthorizedCopyDependsOnCredentialSource() async throws {
@@ -1818,6 +1940,20 @@ final class ConnectedUsageServiceTests: XCTestCase {
             99
         )
     }
+
+    private static let grokBotUsageJSON = """
+    {
+      "currentPeriodStart": "2026-09-09T18:11:18.164Z",
+      "nextResetTimestampUtc": "2026-09-16T18:11:18.164Z",
+      "usagePercent": 0.059292,
+      "hasAvailableUsage": true,
+      "hasNonZeroIncludedLimit": true,
+      "upgradeRecommendation": { "cta": { "label": "Upgrade to Pro+", "url": { "url": "https://cursor.com/api/auth/checkoutDeepControl?tier=pro_plus" } }, "supportingText": "Get $500 of Grok Bot usage each week with Pro+", "kind": "upgrade-to-pro-plus-for-more-usage" },
+      "upgradeRecommendations": [ { "cta": { "label": "Upgrade to Pro+", "url": { "url": "https://cursor.com/api/auth/checkoutDeepControl?tier=pro_plus" } }, "supportingText": "Get $500 of Grok Bot usage each week with Pro+", "kind": "upgrade-to-pro-plus-for-more-usage" } ],
+      "onDemandSettings": { "visible": true, "eligible": true, "enabled": true, "dashboardUrl": "https://cursor.com/dashboard/spending?for=github%7Cuser_01JK3XWYQN4HYNH2TDCD21GTD8" },
+      "grokPlanLabel": "Grok Bot Plan"
+    }
+    """
 
     private func makeService(
         session: URLSession? = nil,

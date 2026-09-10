@@ -68,10 +68,10 @@ class UsageFillModeTest {
             ),
         )
         assertEquals(
-            "Total Plan",
+            "Grok Bot",
             metricLabelForMode(
-                UsageMetricPreferences.CURSOR_TOTAL,
-                "Total Plan Usage",
+                UsageMetricPreferences.CURSOR_GROK_BOT,
+                "Grok Bot",
                 UsageFillMode.DRAIN,
             ),
         )

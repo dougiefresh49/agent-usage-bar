@@ -5,6 +5,8 @@ enum CursorConnectAPI {
 
     static let getCurrentPeriodUsage = "GetCurrentPeriodUsage"
     static let getPlanInfo = "GetPlanInfo"
+    /// Cursor's wire name for Grok Bot is "Sand".
+    static let getSandUsageStatus = "GetSandUsageStatus"
 
     static func request(method: String, token: String) -> URLRequest {
         let url = baseURL.appendingPathComponent("aiserver.v1.DashboardService/\(method)")
@@ -40,4 +42,46 @@ struct CursorPlanNextUpgrade: Codable, Equatable {
     let includedAmountCents: Int?
     let price: String?
     let description: String?
+}
+
+/// Cursor's wire name for Grok Bot is "Sand".
+struct CursorGrokBotUsageResponse: Codable, Equatable {
+    let currentPeriodStart: String?
+    let nextResetTimestampUtc: String?
+    let usagePercent: Double?
+    let hasAvailableUsage: Bool?
+    let hasNonZeroIncludedLimit: Bool?
+    let grokPlanLabel: String?
+
+    var currentPeriodStartDate: Date? {
+        Self.parseISODate(currentPeriodStart)
+    }
+
+    var nextResetDate: Date? {
+        Self.parseISODate(nextResetTimestampUtc)
+    }
+
+    var windowDuration: TimeInterval? {
+        guard let start = currentPeriodStartDate, let end = nextResetDate else { return nil }
+        let duration = end.timeIntervalSince(start)
+        return duration > 0 ? duration : nil
+    }
+
+    private static func parseISODate(_ value: String?) -> Date? {
+        guard let value, value.isEmpty == false else { return nil }
+        return fractionalSecondsFormatter.date(from: value)
+            ?? internetDateTimeFormatter.date(from: value)
+    }
+
+    private static let fractionalSecondsFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let internetDateTimeFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
 }
