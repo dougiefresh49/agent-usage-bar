@@ -562,7 +562,9 @@ final class UsagePresentationTests: XCTestCase {
 
     func testResetCreditsLineCountsAndNamesTheSoonestExpiry() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let expiry = now.addingTimeInterval(10 * 86_400 + 22 * 3_600 + 30 * 60)
+        let tenDays: TimeInterval = 10 * 86_400
+        let extra: TimeInterval = 22 * 3_600 + 30 * 60
+        let expiry = now.addingTimeInterval(tenDays + extra)
 
         XCTAssertEqual(
             UsageDetailRows.resetCreditsLine(count: 3, nextExpiry: expiry, now: now),
