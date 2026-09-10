@@ -8,6 +8,7 @@ as prose or were dropped, not backfilled.
 
 | # | date | decision | status |
 |---|------|----------|--------|
+| 33 | 2026-09-10 | The phone stops signing in to Claude itself and consumes the Mac's Claude access token read-only over sync, re-sent on rotation; the Mac reads the Claude Code login the same read-only way (#84, #85); raised by Doug after repeated phone logouts (#83 is the logout bug) | open |
 | 32 | 2026-09-10 | Mac credential precedence flips to CLI login, then pasted token, then env var, matching the phone; raised by Doug on seeing v1.17.0 still on his old pasted tokens (https://github.com/dougiefresh49/agent-usage-bar/issues/82) | open |
 | 31 | 2026-09-10 | Fill or drain becomes an Appearance setting, and bars, orbits, capsules, and headline all follow it; the headline-only scope of row 3 is replaced (https://github.com/dougiefresh49/agent-usage-bar/issues/79) | accepted |
 | 30 | 2026-09-10 | Release immutability is recommended for this repo: both Release workflows publish the release and its assets in one step and the appcast lives on GitHub Pages, so nothing edits a published release; a Release run that fails after publishing cannot be re-run onto its tag, which the Verifying section already treats as the next release's job | open |
