@@ -114,6 +114,44 @@ final class UsagePaceTests: XCTestCase {
         XCTAssertNil(UsagePace.restoresLine(missing, now: now))
     }
 
+    func testRestoresLineIsNilWhenNothingWouldBeRestored() {
+        let fresh = UsageWindowGeometry(
+            usedPercent: 0,
+            resetsAt: now.addingTimeInterval(4 * 3_600 + 12 * 60),
+            duration: UsageWindowGeometry.claudeSessionDuration
+        )
+        XCTAssertNil(UsagePace.restoresLine(fresh, now: now))
+
+        let roundsToZero = UsageWindowGeometry(
+            usedPercent: 0.4,
+            resetsAt: now.addingTimeInterval(3_600),
+            duration: UsageWindowGeometry.claudeSessionDuration
+        )
+        XCTAssertNil(UsagePace.restoresLine(roundsToZero, now: now))
+
+        let freshPastReset = UsageWindowGeometry(
+            usedPercent: 0,
+            resetsAt: now.addingTimeInterval(-1),
+            duration: UsageWindowGeometry.claudeSessionDuration
+        )
+        XCTAssertNil(UsagePace.restoresLine(freshPastReset, now: now))
+
+        let roundsToOne = UsageWindowGeometry(
+            usedPercent: 0.5,
+            resetsAt: now.addingTimeInterval(3_600),
+            duration: UsageWindowGeometry.claudeSessionDuration
+        )
+        XCTAssertEqual(UsagePace.restoresLine(roundsToOne, now: now), "+1% in 1h 0m")
+    }
+
+    func testGeometryEqualityCoversEveryField() {
+        let base = UsageWindowGeometry(usedPercent: 10, resetsAt: now, duration: 3600)
+        XCTAssertEqual(base, UsageWindowGeometry(usedPercent: 10, resetsAt: now, duration: 3600))
+        XCTAssertNotEqual(base, UsageWindowGeometry(usedPercent: 11, resetsAt: now, duration: 3600))
+        XCTAssertNotEqual(base, UsageWindowGeometry(usedPercent: 10, resetsAt: now.addingTimeInterval(1), duration: 3600))
+        XCTAssertNotEqual(base, UsageWindowGeometry(usedPercent: 10, resetsAt: now, duration: 7200))
+    }
+
     func testRemainingPercentClampsAndRounds() {
         XCTAssertEqual(UsagePace.remainingPercent(32.4), 68)
         XCTAssertEqual(UsagePace.remainingPercent(-5), 100)
