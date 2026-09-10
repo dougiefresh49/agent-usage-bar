@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -99,6 +100,8 @@ private fun HomeScreen(
     val awaitingCode by viewModel.awaitingClaudeCode.collectAsStateWithLifecycle()
     val claudeCode by viewModel.claudeCode.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val resetCreditState by viewModel.resetCreditState.collectAsStateWithLifecycle()
+    val resetCreditSummary by viewModel.resetCreditSummary.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
 
@@ -258,6 +261,44 @@ private fun HomeScreen(
                             defaults.second
                         },
                     )
+
+                    if (selected == UsageProvider.OPENAI &&
+                        resetCreditSummary.availableCount > 0
+                    ) {
+                        val expiresLabel = resetCreditSummary.nextExpiresInDays?.let {
+                            " · next expires in ${it}d"
+                        }.orEmpty()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "${resetCreditSummary.availableCount} banked$expiresLabel",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Button(
+                                onClick = viewModel::beginResetCreditConfirm,
+                                enabled = resetCreditState !is ResetCreditUiState.InFlight &&
+                                    resetCreditSummary.soonestCreditId != null,
+                            ) {
+                                Text("Use reset")
+                            }
+                        }
+                        when (val state = resetCreditState) {
+                            is ResetCreditUiState.Outcome -> Text(
+                                text = state.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            is ResetCreditUiState.Error -> Text(
+                                text = state.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            else -> Unit
+                        }
+                    }
                 }
             }
 
@@ -277,5 +318,29 @@ private fun HomeScreen(
             )
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+
+
+    if (resetCreditState is ResetCreditUiState.Confirming) {
+        AlertDialog(
+            onDismissRequest = viewModel::cancelResetCreditConfirm,
+            title = { Text("Use reset credit") },
+            text = {
+                Text(
+                    "Use a reset credit? This redeems one credit on your account " +
+                        "and clears the current rate-limit windows. It cannot be undone.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmResetCredit) {
+                    Text("Use credit")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelResetCreditConfirm) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }

@@ -4,18 +4,28 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.agentusagebar.android.data.credentials.AppSettings
+import com.agentusagebar.android.data.credentials.CredentialsStore
 import com.agentusagebar.android.data.model.AppUsageSnapshot
+import com.agentusagebar.android.data.model.OpenAIResetCredit
 import com.agentusagebar.android.data.model.UsageProvider
+import com.agentusagebar.android.data.network.ResetCreditClient
+import com.agentusagebar.android.data.network.ResetCreditRedeemResult
+import com.agentusagebar.android.data.network.UsageApiClient
 import com.agentusagebar.android.data.repository.DeviceSyncCheckResult
 import com.agentusagebar.android.data.repository.UsageRepository
 import com.agentusagebar.android.worker.UsageRefreshScheduler
+import java.time.Instant
+import java.time.temporal.ChronoUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class DevicePairingUiState(
     val isPairing: Boolean = false,
@@ -36,8 +46,30 @@ data class DeviceActionUiState(
     val message: String? = null,
 )
 
+
+sealed class ResetCreditUiState {
+    data object Idle : ResetCreditUiState()
+    data object Confirming : ResetCreditUiState()
+    data object InFlight : ResetCreditUiState()
+    data class Outcome(val message: String) : ResetCreditUiState()
+    data class Error(val message: String) : ResetCreditUiState()
+}
+
+data class ResetCreditSummary(
+    val availableCount: Int = 0,
+    val nextExpiresInDays: Int? = null,
+    val soonestCreditId: String? = null,
+)
+
 class UsageViewModel(
     private val repository: UsageRepository,
+    private val resetCreditClient: ResetCreditClient = ResetCreditClient(
+        ResetCreditClient.encryptedPendingStore(AgentUsageBarAppHolder.context()),
+    ),
+    private val credentialsStore: CredentialsStore = CredentialsStore(
+        AgentUsageBarAppHolder.context(),
+    ),
+    private val usageApiClient: UsageApiClient = UsageApiClient(credentialsStore),
 ) : ViewModel() {
     val snapshot: StateFlow<AppUsageSnapshot> = repository.snapshot
     val settings: StateFlow<AppSettings> = repository.settings.stateIn(
@@ -65,15 +97,28 @@ class UsageViewModel(
     private val _claudeCode = MutableStateFlow("")
     val claudeCode = _claudeCode.asStateFlow()
 
+    private val _resetCreditState =
+        MutableStateFlow<ResetCreditUiState>(ResetCreditUiState.Idle)
+    val resetCreditState = _resetCreditState.asStateFlow()
+
+    private val _resetCreditSummary = MutableStateFlow(ResetCreditSummary())
+    val resetCreditSummary = _resetCreditSummary.asStateFlow()
+
+    private var outcomeClearJob: Job? = null
+
     init {
         viewModelScope.launch {
             repository.refreshAll()
             UsageRefreshScheduler.ensureScheduled(AgentUsageBarAppHolder.context())
+            refreshResetCreditSummary()
         }
     }
 
     fun selectProvider(provider: UsageProvider) {
         _selectedProvider.value = provider
+        if (provider == UsageProvider.OPENAI) {
+            viewModelScope.launch { refreshResetCreditSummary() }
+        }
     }
 
     fun setClaudeCode(value: String) {
@@ -81,7 +126,110 @@ class UsageViewModel(
     }
 
     fun refresh() {
-        viewModelScope.launch { repository.refreshAll() }
+        viewModelScope.launch {
+            repository.refreshAll()
+            refreshResetCreditSummary()
+        }
+    }
+
+    fun beginResetCreditConfirm() {
+        if (_resetCreditSummary.value.soonestCreditId == null) return
+        if (_resetCreditState.value is ResetCreditUiState.InFlight) return
+        _resetCreditState.value = ResetCreditUiState.Confirming
+    }
+
+    fun cancelResetCreditConfirm() {
+        if (_resetCreditState.value is ResetCreditUiState.Confirming) {
+            _resetCreditState.value = ResetCreditUiState.Idle
+        }
+    }
+
+    fun confirmResetCredit() {
+        val creditId = _resetCreditSummary.value.soonestCreditId ?: return
+        redeemResetCredit(creditId)
+    }
+
+    fun redeemResetCredit(creditId: String) {
+        if (_resetCreditState.value is ResetCreditUiState.InFlight) return
+        outcomeClearJob?.cancel()
+        _resetCreditState.value = ResetCreditUiState.InFlight
+        viewModelScope.launch {
+            val bearer = credentialsStore.loadConnected().openAISessionToken
+            if (bearer.isNullOrBlank()) {
+                _resetCreditState.value =
+                    ResetCreditUiState.Error("OpenAI session token missing.")
+                scheduleOutcomeClear()
+                return@launch
+            }
+            // ConnectedCredentials has no account id field (Models.kt out of ownership).
+            val accountId: String? = null
+            val result = withContext(Dispatchers.IO) {
+                resetCreditClient.redeem(
+                    bearer = bearer,
+                    accountId = accountId,
+                    creditId = creditId,
+                )
+            }
+            when (result) {
+                is ResetCreditRedeemResult.Completed -> {
+                    _resetCreditState.value =
+                        ResetCreditUiState.Outcome(result.outcome.message)
+                    repository.refreshAll()
+                    refreshResetCreditSummary()
+                }
+                ResetCreditRedeemResult.InFlight -> {
+                    _resetCreditState.value = ResetCreditUiState.InFlight
+                }
+                is ResetCreditRedeemResult.Failed -> {
+                    _resetCreditState.value = ResetCreditUiState.Error(result.message)
+                }
+            }
+            scheduleOutcomeClear()
+        }
+    }
+
+    private fun scheduleOutcomeClear() {
+        outcomeClearJob?.cancel()
+        outcomeClearJob = viewModelScope.launch {
+            delay(4_000)
+            if (_resetCreditState.value !is ResetCreditUiState.InFlight &&
+                _resetCreditState.value !is ResetCreditUiState.Confirming
+            ) {
+                _resetCreditState.value = ResetCreditUiState.Idle
+            }
+        }
+    }
+
+    private suspend fun refreshResetCreditSummary() {
+        val summary = withContext(Dispatchers.IO) {
+            runCatching {
+                val response = usageApiClient.fetchOpenAIResetCredits().getOrThrow()
+                val available = response.credits.filter { it.isAvailable }
+                val soonest = available.minByOrNull { credit ->
+                    expiresEpochMs(credit) ?: Long.MAX_VALUE
+                }
+                val days = soonest?.let { credit ->
+                    expiresEpochMs(credit)?.let { expiresAt ->
+                        ChronoUnit.DAYS.between(
+                            Instant.now(),
+                            Instant.ofEpochMilli(expiresAt),
+                        ).toInt().coerceAtLeast(0)
+                    }
+                }
+                ResetCreditSummary(
+                    availableCount = available.size,
+                    nextExpiresInDays = days,
+                    soonestCreditId = soonest?.id,
+                )
+            }.getOrElse { ResetCreditSummary() }
+        }
+        _resetCreditSummary.value = summary
+    }
+
+    private fun expiresEpochMs(credit: OpenAIResetCredit): Long? {
+        val raw = credit.expiresAt?.takeIf { it.isNotBlank() } ?: return null
+        return runCatching { Instant.parse(raw).toEpochMilli() }.getOrNull()
+            ?: raw.toLongOrNull()?.let { if (it < 1_000_000_000_000L) it * 1_000 else it }
     }
 
     fun startClaudeOAuth(): String = repository.startClaudeOAuth()
