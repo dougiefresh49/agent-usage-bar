@@ -6,9 +6,11 @@ set -euo pipefail
 # Outputs (GITHUB_OUTPUT): skip=true|false, last_tag=<tag or empty>
 #
 # Range mode: bash scripts/platform-changes.sh <macos|android> --touches <from> <to>
-# Exits 0 when any commit in <from>..<to> touches a platform-relevant path,
-# 1 when none does. Writes nothing to GITHUB_OUTPUT. Bump uses it to decide
-# whether a build that is no longer the tip of main still deserves its tag.
+# Compares the trees at <from> and <to>. Exits 0 when the diff touches a
+# platform-relevant path, 1 when it does not, 2 when git cannot compute the
+# diff (unknown SHA, missing objects). Writes nothing to GITHUB_OUTPUT. Bump
+# uses it to decide whether a build that is no longer the tip of main still
+# deserves its tag, and treats 2 as a failure, never as "no changes".
 
 PLATFORM="${1:-}"
 if [[ "$PLATFORM" != "macos" && "$PLATFORM" != "android" ]]; then
@@ -47,7 +49,10 @@ if [[ "${2:-}" == "--touches" ]]; then
     echo "Usage: $0 <macos|android> --touches <from> <to>" >&2
     exit 1
   fi
-  CHANGED="$(git diff --name-only "${FROM}..${TO}" || true)"
+  if ! CHANGED="$(git diff --name-only "${FROM}..${TO}")"; then
+    echo "Could not diff ${FROM}..${TO}." >&2
+    exit 2
+  fi
   if echo "$CHANGED" | grep -qE "$(path_regex_for_platform "$PLATFORM")"; then
     echo "${FROM}..${TO} touches ${PLATFORM}-relevant paths."
     exit 0
