@@ -1238,6 +1238,7 @@ final class ConnectedUsageServiceTests: XCTestCase {
         try store.save(ConnectedServiceCredentials(openAISessionToken: "openai-token"))
 
         var openAIHits = 0
+        var creditHits = 0
         ConnectedMockURLProtocol.handler = { request in
             if request.url?.path == "/openai" {
                 openAIHits += 1
@@ -1246,12 +1247,13 @@ final class ConnectedUsageServiceTests: XCTestCase {
                     url: request.url!,
                     statusCode: 429,
                     httpVersion: nil,
-                    headerFields: ["Retry-After": "120"]
+                    headerFields: ["Retry-After": "900"]
                 )!
                 return (response, Data())
             }
             if request.url?.path == "/credits" {
-                XCTAssertEqual(request.timeoutInterval, PollingBackoff.secondaryRequestTimeout)
+                creditHits += 1
+                XCTFail("Credits must not run after a usage 429")
                 let response = HTTPURLResponse(
                     url: request.url!,
                     statusCode: 200,
@@ -1269,13 +1271,27 @@ final class ConnectedUsageServiceTests: XCTestCase {
             credentialsStore: store,
             lowPowerModeEnabled: { false }
         )
+        service.updatePollingInterval(5)
 
-        await service.fetchOpenAIUsage(force: true)
+        let before = Date()
+        await service.fetchOpenAIUsage(trigger: .manual)
         XCTAssertEqual(openAIHits, 1)
+        XCTAssertEqual(creditHits, 0)
         XCTAssertEqual(service.openAIError, "OpenAI rate limited")
+        // base 5m doubled is 10m; Retry-After 900s must win over that floor.
+        XCTAssertEqual(service.openAIBackoffInterval, 900)
+        let until = try XCTUnwrap(service.openAIBackoffUntil)
+        XCTAssertGreaterThanOrEqual(until.timeIntervalSince(before), 899)
 
-        await service.fetchOpenAIUsage(force: false)
+        await service.fetchOpenAIUsage(trigger: .scheduled)
         XCTAssertEqual(openAIHits, 1, "Scheduled poll must skip while backoff is active")
+
+        await service.fetchOpenAIUsage(trigger: .automatic)
+        XCTAssertEqual(openAIHits, 1, "Automatic refresh must honour backoff")
+
+        await service.fetchOpenAIUsage(trigger: .manual)
+        XCTAssertEqual(openAIHits, 2, "Manual refresh may bypass backoff")
+        XCTAssertEqual(creditHits, 0)
     }
 
     func testOpenAI429WithoutRetryAfterStillBacksOff() async throws {
@@ -1297,6 +1313,7 @@ final class ConnectedUsageServiceTests: XCTestCase {
                 return (response, Data())
             }
             if request.url?.path == "/credits" {
+                XCTFail("Credits must not run after a usage 429")
                 let response = HTTPURLResponse(
                     url: request.url!,
                     statusCode: 200,
@@ -1311,13 +1328,29 @@ final class ConnectedUsageServiceTests: XCTestCase {
         let service = makeService(
             openAIUsageEndpoint: URL(string: "https://example.com/openai")!,
             openAIResetCreditsEndpoint: URL(string: "https://example.com/credits")!,
-            credentialsStore: store
+            credentialsStore: store,
+            lowPowerModeEnabled: { false }
         )
+        service.updatePollingInterval(5)
 
-        await service.fetchOpenAIUsage(force: true)
+        await service.fetchOpenAIUsage(trigger: .manual)
         XCTAssertEqual(openAIHits, 1)
-        await service.fetchOpenAIUsage(force: false)
+        XCTAssertEqual(service.openAIBackoffInterval, 10 * 60)
+        await service.fetchOpenAIUsage(trigger: .scheduled)
         XCTAssertEqual(openAIHits, 1)
+    }
+
+    func testConnectedLowPowerDoublesEffectiveInterval() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ConnectedServiceCredentialsStore(directoryURL: directory)
+        let normal = makeService(credentialsStore: store, lowPowerModeEnabled: { false })
+        normal.updatePollingInterval(15)
+        XCTAssertEqual(normal.effectivePollingInterval, 15 * 60)
+
+        let lowPower = makeService(credentialsStore: store, lowPowerModeEnabled: { true })
+        lowPower.updatePollingInterval(15)
+        XCTAssertEqual(lowPower.effectivePollingInterval, 30 * 60)
     }
 
     func testCursorScheduledFetchDebouncesWhenFresh() async throws {

@@ -63,8 +63,11 @@ final class ConnectedUsageService: ObservableObject {
     private var pollingMinutes: Int
     private var isPollingPaused = false
     private var cursorBackoffUntil: Date?
-    private var openAIBackoffUntil: Date?
+    private(set) var openAIBackoffUntil: Date?
     private var elevenLabsBackoffUntil: Date?
+    private var cursorBackoffInterval: TimeInterval?
+    private(set) var openAIBackoffInterval: TimeInterval?
+    private var elevenLabsBackoffInterval: TimeInterval?
     private var cursorFetchTask: Task<Void, Never>?
     private var openAIFetchTask: Task<Void, Never>?
     private var elevenLabsFetchTask: Task<Void, Never>?
@@ -74,6 +77,14 @@ final class ConnectedUsageService: ObservableObject {
     /// Incremented once at the end of each full `fetchAll`, success or failure.
     /// `AgentUsageBarApp` watches this to re-check CLI token rotation after skipped polls too.
     @Published private(set) var pollCompletionCount: UInt = 0
+
+    /// Timer cadence currently scheduled (includes low-power doubling).
+    var effectivePollingInterval: TimeInterval {
+        PollingBackoff.pollingInterval(
+            minutes: pollingMinutes,
+            isLowPower: lowPowerModeEnabled()
+        )
+    }
 
     var hasAnyConfiguredService: Bool {
         isCursorConfigured || isOpenAIConfigured || isElevenLabsConfigured
@@ -121,7 +132,7 @@ final class ConnectedUsageService: ObservableObject {
     func startPolling() {
         isPollingPaused = false
         updateConfiguredState()
-        Task { await fetchAll(force: true) }
+        Task { await fetchAll(trigger: .automatic) }
         scheduleTimer()
     }
 
@@ -138,11 +149,16 @@ final class ConnectedUsageService: ObservableObject {
         let wasPaused = isPollingPaused
         isPollingPaused = false
         Task {
-            await fetchAll(force: true)
+            await fetchAll(trigger: .automatic)
             if wasPaused || timer == nil {
                 scheduleTimer()
             }
         }
+    }
+
+    /// Call when Low Power Mode flips so the timer picks up the doubled (or restored) interval.
+    func rescheduleForPowerState() {
+        scheduleTimer()
     }
 
     func updatePollingInterval(_ minutes: Int) {
@@ -156,26 +172,30 @@ final class ConnectedUsageService: ObservableObject {
         let now = Date()
         if isCursorConfigured {
             let stale = cursorLastUpdated.map { now.timeIntervalSince($0) > interval } ?? true
-            if stale { await fetchCursorUsage(force: true) }
+            if stale { await fetchCursorUsage(trigger: .automatic) }
         }
         if isOpenAIConfigured {
             let stale = openAILastUpdated.map { now.timeIntervalSince($0) > interval } ?? true
-            if stale { await fetchOpenAIUsage(force: true) }
+            if stale { await fetchOpenAIUsage(trigger: .automatic) }
         }
         if isElevenLabsConfigured {
             let stale = elevenLabsLastUpdated.map { now.timeIntervalSince($0) > interval } ?? true
-            if stale { await fetchElevenLabsUsage(force: true) }
+            if stale { await fetchElevenLabsUsage(trigger: .automatic) }
         }
         pollCompletionCount &+= 1
     }
 
-    func fetchAll(force: Bool = true) async {
+    func fetchAll(trigger: PollingBackoff.Trigger = .manual) async {
         updateConfiguredState()
-        async let cursor: Void = fetchCursorUsage(force: force)
-        async let openAI: Void = fetchOpenAIUsage(force: force)
-        async let elevenLabs: Void = fetchElevenLabsUsage(force: force)
+        async let cursor: Void = fetchCursorUsage(trigger: trigger)
+        async let openAI: Void = fetchOpenAIUsage(trigger: trigger)
+        async let elevenLabs: Void = fetchElevenLabsUsage(trigger: trigger)
         _ = await (cursor, openAI, elevenLabs)
         pollCompletionCount &+= 1
+    }
+
+    func fetchAll(force: Bool) async {
+        await fetchAll(trigger: force ? .manual : .scheduled)
     }
 
     func saveCursorToken(_ rawToken: String) throws {
@@ -260,12 +280,14 @@ final class ConnectedUsageService: ObservableObject {
         )
     }
 
-    func fetchCursorUsage(force: Bool = true) async {
-        if !force {
-            if PollingBackoff.shouldSkipForBackoff(until: cursorBackoffUntil) { return }
-            if PollingBackoff.shouldSkipScheduledPoll(lastSuccessfulFetch: cursorLastUpdated) {
-                return
-            }
+    func fetchCursorUsage(trigger: PollingBackoff.Trigger = .manual) async {
+        if !trigger.skipsBackoff,
+           PollingBackoff.shouldSkipForBackoff(until: cursorBackoffUntil) {
+            return
+        }
+        if !trigger.skipsDebounce,
+           PollingBackoff.shouldSkipScheduledPoll(lastSuccessfulFetch: cursorLastUpdated) {
+            return
         }
 
         if let cursorFetchTask {
@@ -280,6 +302,10 @@ final class ConnectedUsageService: ObservableObject {
         cursorFetchTask = task
         await task.value
         cursorFetchTask = nil
+    }
+
+    func fetchCursorUsage(force: Bool) async {
+        await fetchCursorUsage(trigger: force ? .manual : .scheduled)
     }
 
     private func performFetchCursorUsage() async {
@@ -321,7 +347,7 @@ final class ConnectedUsageService: ObservableObject {
             cursorUsage = decoded
             cursorError = nil
             cursorLastUpdated = Date()
-            cursorBackoffUntil = nil
+            clearBackoff(provider: .cursor)
             snapshotStore?.update(
                 provider: "cursor",
                 metrics: UsageSnapshotStore.cursorMetrics(for: decoded)
@@ -341,12 +367,14 @@ final class ConnectedUsageService: ObservableObject {
         }
     }
 
-    func fetchOpenAIUsage(force: Bool = true) async {
-        if !force {
-            if PollingBackoff.shouldSkipForBackoff(until: openAIBackoffUntil) { return }
-            if PollingBackoff.shouldSkipScheduledPoll(lastSuccessfulFetch: openAILastUpdated) {
-                return
-            }
+    func fetchOpenAIUsage(trigger: PollingBackoff.Trigger = .manual) async {
+        if !trigger.skipsBackoff,
+           PollingBackoff.shouldSkipForBackoff(until: openAIBackoffUntil) {
+            return
+        }
+        if !trigger.skipsDebounce,
+           PollingBackoff.shouldSkipScheduledPoll(lastSuccessfulFetch: openAILastUpdated) {
+            return
         }
 
         if let openAIFetchTask {
@@ -361,6 +389,10 @@ final class ConnectedUsageService: ObservableObject {
         openAIFetchTask = task
         await task.value
         openAIFetchTask = nil
+    }
+
+    func fetchOpenAIUsage(force: Bool) async {
+        await fetchOpenAIUsage(trigger: force ? .manual : .scheduled)
     }
 
     private func performFetchOpenAIUsage() async {
@@ -394,7 +426,7 @@ final class ConnectedUsageService: ObservableObject {
             }
             openAIError = nil
             openAILastUpdated = Date()
-            openAIBackoffUntil = nil
+            clearBackoff(provider: .openAI)
             snapshotStore?.update(
                 provider: "openai",
                 metrics: UsageSnapshotStore.openAIMetrics(for: decoded)
@@ -404,6 +436,10 @@ final class ConnectedUsageService: ObservableObject {
                 applyBackoff(provider: .openAI, retryAfter: retryAfter)
             }
             openAIError = error.localizedDescription
+            // Stop the provider poll after the first 429; do not hit credits while backing off.
+            if case .rateLimited = error {
+                return
+            }
         } catch {
             openAIError = error.localizedDescription
         }
@@ -541,12 +577,14 @@ final class ConnectedUsageService: ObservableObject {
         }
     }
 
-    func fetchElevenLabsUsage(force: Bool = true) async {
-        if !force {
-            if PollingBackoff.shouldSkipForBackoff(until: elevenLabsBackoffUntil) { return }
-            if PollingBackoff.shouldSkipScheduledPoll(lastSuccessfulFetch: elevenLabsLastUpdated) {
-                return
-            }
+    func fetchElevenLabsUsage(trigger: PollingBackoff.Trigger = .manual) async {
+        if !trigger.skipsBackoff,
+           PollingBackoff.shouldSkipForBackoff(until: elevenLabsBackoffUntil) {
+            return
+        }
+        if !trigger.skipsDebounce,
+           PollingBackoff.shouldSkipScheduledPoll(lastSuccessfulFetch: elevenLabsLastUpdated) {
+            return
         }
 
         if let elevenLabsFetchTask {
@@ -561,6 +599,10 @@ final class ConnectedUsageService: ObservableObject {
         elevenLabsFetchTask = task
         await task.value
         elevenLabsFetchTask = nil
+    }
+
+    func fetchElevenLabsUsage(force: Bool) async {
+        await fetchElevenLabsUsage(trigger: force ? .manual : .scheduled)
     }
 
     private func performFetchElevenLabsUsage() async {
@@ -582,7 +624,7 @@ final class ConnectedUsageService: ObservableObject {
             elevenLabsUsage = decoded
             elevenLabsError = nil
             elevenLabsLastUpdated = Date()
-            elevenLabsBackoffUntil = nil
+            clearBackoff(provider: .elevenLabs)
             snapshotStore?.update(
                 provider: "elevenlabs",
                 metrics: UsageSnapshotStore.elevenLabsMetrics(for: decoded)
@@ -623,6 +665,11 @@ final class ConnectedUsageService: ObservableObject {
                 unauthorizedMessage: Self.cursorCLIUnauthorizedMessage
             )
             cursorPlanInfo = try JSONDecoder().decode(CursorPlanInfoResponse.self, from: data)
+        } catch let error as ConnectedUsageError {
+            if case .rateLimited(_, let retryAfter) = error {
+                applyBackoff(provider: .cursor, retryAfter: retryAfter)
+            }
+            // Soft failure otherwise: usage still stands without plan info.
         } catch {
             // Soft failure: usage still stands without plan info.
         }
@@ -685,15 +732,41 @@ final class ConnectedUsageService: ObservableObject {
             minutes: pollingMinutes,
             isLowPower: lowPowerModeEnabled()
         )
+        let current: TimeInterval
+        switch provider {
+        case .cursor: current = cursorBackoffInterval ?? base
+        case .openAI: current = openAIBackoffInterval ?? base
+        case .elevenLabs: current = elevenLabsBackoffInterval ?? base
+        }
         let delay = PollingBackoff.backoffInterval(
             retryAfter: retryAfter,
-            currentInterval: base
+            currentInterval: current
         )
         let until = Date().addingTimeInterval(delay)
         switch provider {
-        case .cursor: cursorBackoffUntil = until
-        case .openAI: openAIBackoffUntil = until
-        case .elevenLabs: elevenLabsBackoffUntil = until
+        case .cursor:
+            cursorBackoffInterval = delay
+            cursorBackoffUntil = until
+        case .openAI:
+            openAIBackoffInterval = delay
+            openAIBackoffUntil = until
+        case .elevenLabs:
+            elevenLabsBackoffInterval = delay
+            elevenLabsBackoffUntil = until
+        }
+    }
+
+    private func clearBackoff(provider: BackoffProvider) {
+        switch provider {
+        case .cursor:
+            cursorBackoffInterval = nil
+            cursorBackoffUntil = nil
+        case .openAI:
+            openAIBackoffInterval = nil
+            openAIBackoffUntil = nil
+        case .elevenLabs:
+            elevenLabsBackoffInterval = nil
+            elevenLabsBackoffUntil = nil
         }
     }
 
@@ -701,14 +774,11 @@ final class ConnectedUsageService: ObservableObject {
         timer?.invalidate()
         timer = nil
         guard !isPollingPaused else { return }
-        let interval = PollingBackoff.pollingInterval(
-            minutes: pollingMinutes,
-            isLowPower: lowPowerModeEnabled()
-        )
+        let interval = effectivePollingInterval
         let newTimer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, !self.isPollingPaused else { return }
-                Task { await self.fetchAll(force: false) }
+                Task { await self.fetchAll(trigger: .scheduled) }
             }
         }
         RunLoop.main.add(newTimer, forMode: .common)

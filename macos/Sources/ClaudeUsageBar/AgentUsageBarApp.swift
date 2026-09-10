@@ -61,9 +61,9 @@ struct AgentUsageBarApp: App {
                         let listener = RefreshRequestListener { [weak service, weak connectedService] in
                             Task { @MainActor in
                                 if let service, service.isAuthenticated {
-                                    await service.fetchUsage(force: true)
+                                    await service.fetchUsage(trigger: .automatic)
                                 }
-                                await connectedService?.fetchAll(force: true)
+                                await connectedService?.fetchAll(trigger: .automatic)
                             }
                         }
                         listener.start()
@@ -126,7 +126,17 @@ struct AgentUsageBarApp: App {
             queue: .main,
             using: wakeHandler
         )
-        workspaceObservers = [sleep, didWake, screensWake]
+        let power = NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak service, weak connectedService] _ in
+            MainActor.assumeIsolated {
+                service?.rescheduleForPowerState()
+                connectedService?.rescheduleForPowerState()
+            }
+        }
+        workspaceObservers = [sleep, didWake, screensWake, power]
     }
 
     private var menuBarIcon: NSImage {

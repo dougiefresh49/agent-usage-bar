@@ -1125,10 +1125,8 @@ final class UsageServiceTests: XCTestCase {
 
         await service.fetchUsage(force: true)
         XCTAssertNil(service.lastError)
-        XCTAssertEqual(
-            PollingBackoff.pollingInterval(minutes: service.pollingMinutes, isLowPower: true),
-            30 * 60
-        )
+        XCTAssertEqual(service.effectivePollingInterval, 30 * 60)
+        XCTAssertEqual(service.pollingMinutes, 15)
     }
 
     func testSignOutDuringProfileFetchDiscardsResponse() async throws {

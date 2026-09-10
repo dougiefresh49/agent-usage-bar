@@ -10,6 +10,19 @@ enum PollingBackoff {
     /// Credits, plan, profile, and other non-usage provider calls.
     static let secondaryRequestTimeout: TimeInterval = 10
 
+    /// Who asked for a refresh. Manual is the only path that may ignore backoff.
+    enum Trigger: Equatable {
+        /// Timer tick: debounce and backoff both apply.
+        case scheduled
+        /// Popover open, wake, start, skill: skip debounce, still honour backoff.
+        case automatic
+        /// Explicit Refresh control: always runs (single-flight still applies).
+        case manual
+
+        var skipsDebounce: Bool { self != .scheduled }
+        var skipsBackoff: Bool { self == .manual }
+    }
+
     nonisolated static func backoffInterval(
         retryAfter: TimeInterval?,
         currentInterval: TimeInterval
@@ -29,7 +42,7 @@ enum PollingBackoff {
         return isLowPower ? base * 2 : base
     }
 
-    /// Scheduled polls only. Manual refresh, wake, and start always run.
+    /// Scheduled polls only. Automatic and manual skip this gate.
     nonisolated static func shouldSkipScheduledPoll(
         lastSuccessfulFetch: Date?,
         now: Date = Date(),
