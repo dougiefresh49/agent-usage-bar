@@ -75,6 +75,12 @@ final class UsageServiceTests: XCTestCase {
                     }
                     """
                 )
+            case ("GET", "/api/oauth/profile", _):
+                return try Self.httpResponse(
+                    url: URL(string: "https://example.com/api/oauth/profile")!,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
             default:
                 XCTFail("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
@@ -84,6 +90,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: session,
             usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
@@ -94,7 +101,7 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertTrue(service.isAuthenticated)
         XCTAssertNil(service.lastError)
         XCTAssertEqual(service.usage?.fiveHour?.utilization, 12)
-        XCTAssertEqual(requests.count, 3)
+        XCTAssertEqual(requests.count, 4)
 
         let saved = try XCTUnwrap(store.load(defaultScopes: UsageService.defaultOAuthScopes))
         XCTAssertEqual(saved.accessToken, "new-access")
@@ -140,6 +147,12 @@ final class UsageServiceTests: XCTestCase {
                     statusCode: 429,
                     headers: ["Retry-After": "120"]
                 )
+            case ("GET", "/api/oauth/profile", _):
+                return try Self.httpResponse(
+                    url: URL(string: "https://example.com/api/oauth/profile")!,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
             default:
                 XCTFail("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
@@ -149,6 +162,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
@@ -199,6 +213,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
@@ -255,6 +270,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: userinfoURL,
             tokenEndpoint: tokenURL,
             credentialsStore: store,
@@ -305,6 +321,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
@@ -348,6 +365,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
@@ -382,6 +400,12 @@ final class UsageServiceTests: XCTestCase {
             case ("GET", "/api/oauth/usage"):
                 usageRequestCount += 1
                 return try Self.httpResponse(url: usageURL, statusCode: 200, body: "{}")
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: URL(string: "https://example.com/api/oauth/profile")!,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
             default:
                 XCTFail("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
@@ -391,6 +415,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
@@ -434,6 +459,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
@@ -494,6 +520,12 @@ final class UsageServiceTests: XCTestCase {
                     }
                     """
                 )
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: URL(string: "https://example.com/api/oauth/profile")!,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
             default:
                 XCTFail("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
@@ -511,6 +543,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
@@ -611,6 +644,12 @@ final class UsageServiceTests: XCTestCase {
                     }
                     """
                 )
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: URL(string: "https://example.com/api/oauth/profile")!,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
             default:
                 XCTFail("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
@@ -620,6 +659,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: tokenURL,
             credentialsStore: store
@@ -655,6 +695,7 @@ final class UsageServiceTests: XCTestCase {
         let service = UsageService(
             session: makeSession(),
             usageEndpoint: URL(string: "https://example.com/api/oauth/usage")!,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
             userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
             tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
             credentialsStore: try makeStore()
@@ -665,6 +706,397 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(service.lastError, "No OAuth code entered")
         XCTAssertFalse(service.isAuthenticated)
     }
+
+    // MARK: - Claude oauth/profile
+
+    func testFetchUsageFetchesProfileAfterSuccessfulUsage() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let profileURL = URL(string: "https://example.com/api/oauth/profile")!
+        var profileRequestCount = 0
+        var profileAuthorization: String?
+        var profileBeta: String?
+
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 15, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 25, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                profileRequestCount += 1
+                profileAuthorization = request.value(forHTTPHeaderField: "Authorization")
+                profileBeta = request.value(forHTTPHeaderField: "anthropic-beta")
+                return try Self.httpResponse(
+                    url: profileURL,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: profileURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store
+        )
+
+        await service.fetchUsage()
+
+        XCTAssertNil(service.lastError)
+        XCTAssertEqual(service.usage?.fiveHour?.utilization, 15)
+        XCTAssertEqual(profileRequestCount, 1)
+        XCTAssertEqual(profileAuthorization, "Bearer access-1")
+        XCTAssertEqual(profileBeta, "oauth-2025-04-20")
+        XCTAssertEqual(service.profile?.planLabel, "Max 20x")
+        XCTAssertEqual(service.profile?.organization?.subscriptionStatus, "active")
+        XCTAssertNotNil(service.profileLastFetched)
+    }
+
+    func testFetchUsageDoesNotRefetchProfileWithinSixtyMinutes() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let profileURL = URL(string: "https://example.com/api/oauth/profile")!
+        var profileRequestCount = 0
+
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 15, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 25, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                profileRequestCount += 1
+                return try Self.httpResponse(
+                    url: profileURL,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: profileURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store
+        )
+
+        await service.fetchUsage()
+        await service.fetchUsage()
+
+        XCTAssertEqual(profileRequestCount, 1)
+        XCTAssertEqual(service.usage?.fiveHour?.utilization, 15)
+        XCTAssertEqual(service.profile?.planLabel, "Max 20x")
+    }
+
+    func testProfileFailureLeavesUsageStateUntouched() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let profileURL = URL(string: "https://example.com/api/oauth/profile")!
+
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 33, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 44, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(url: profileURL, statusCode: 500)
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: profileURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store
+        )
+
+        await service.fetchUsage()
+
+        XCTAssertNil(service.lastError)
+        XCTAssertEqual(service.usage?.fiveHour?.utilization, 33)
+        XCTAssertEqual(service.usage?.sevenDay?.utilization, 44)
+        XCTAssertNil(service.profile)
+        XCTAssertNil(service.profileLastFetched)
+    }
+
+    func testProfileAuthFailureDoesNotSetLastError() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let profileURL = URL(string: "https://example.com/api/oauth/profile")!
+        var tokenRefreshCount = 0
+
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 11, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 22, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(url: profileURL, statusCode: 401)
+            case ("POST", "/v1/oauth/token"):
+                tokenRefreshCount += 1
+                XCTFail("Profile 401 must not trigger token refresh")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: profileURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store
+        )
+
+        await service.fetchUsage()
+
+        XCTAssertTrue(service.isAuthenticated)
+        XCTAssertNil(service.lastError)
+        XCTAssertEqual(service.usage?.fiveHour?.utilization, 11)
+        XCTAssertNil(service.profile)
+        XCTAssertNil(service.profileLastFetched)
+        XCTAssertEqual(tokenRefreshCount, 0)
+    }
+
+    func testConcurrentUsageFetchesShareSingleProfileRequest() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let profileURL = URL(string: "https://example.com/api/oauth/profile")!
+        let gate = ProfileRequestGate(targetUsageCount: 2)
+
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                gate.noteUsage()
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 18, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 28, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                gate.noteProfileStarted()
+                gate.waitForRelease()
+                return try Self.httpResponse(
+                    url: profileURL,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: profileURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store
+        )
+
+        async let first: Void = service.fetchUsage()
+        async let second: Void = service.fetchUsage()
+
+        await gate.waitUntilProfileStarted()
+        await gate.waitUntilUsagesSeen()
+        XCTAssertEqual(gate.profileRequestCount, 1, "Only one profile request while both callers await it")
+
+        gate.release()
+        _ = await (first, second)
+
+        XCTAssertEqual(gate.profileRequestCount, 1)
+        XCTAssertEqual(service.profile?.planLabel, "Max 20x")
+        XCTAssertNil(service.lastError)
+    }
+
+    func testSignOutDuringProfileFetchDiscardsResponse() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        let profileURL = URL(string: "https://example.com/api/oauth/profile")!
+        let gate = ProfileRequestGate(targetUsageCount: 1)
+
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                gate.noteUsage()
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 7, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 9, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                gate.noteProfileStarted()
+                gate.waitForRelease()
+                return try Self.httpResponse(
+                    url: profileURL,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: profileURL,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store
+        )
+
+        let fetchTask = Task { await service.fetchUsage() }
+        await gate.waitUntilProfileStarted()
+        XCTAssertEqual(gate.profileRequestCount, 1, "Sign-out must happen while the profile request is in flight")
+        service.signOut()
+        gate.release()
+        await fetchTask.value
+
+        XCTAssertFalse(service.isAuthenticated)
+        XCTAssertNil(service.profile)
+        XCTAssertNil(service.profileLastFetched)
+        XCTAssertNil(service.usage)
+        XCTAssertEqual(gate.profileRequestCount, 1)
+    }
+
+
+    private static let profileFixtureBody = """
+    {
+      "account": {
+        "email": "user@example.com",
+        "has_claude_max": true,
+        "has_claude_pro": false,
+        "created_at": "2026-03-24T16:25:09.805345Z"
+      },
+      "organization": {
+        "organization_type": "claude_max",
+        "billing_type": "stripe_subscription",
+        "rate_limit_tier": "default_claude_max_20x",
+        "subscription_status": "active",
+        "subscription_created_at": "2026-04-10T15:53:44.244879Z",
+        "has_extra_usage_enabled": true
+      }
+    }
+    """
 
     private func makeStore() throws -> StoredCredentialsStore {
         let directory = FileManager.default.temporaryDirectory
@@ -728,6 +1160,135 @@ final class UsageServiceTests: XCTestCase {
             )
         )
         return (response, Data(body.utf8))
+    }
+}
+
+/// Synchronizes profile-request tests without sleeping: URLProtocol blocks on a condition,
+/// and the test awaits CheckedContinuations that resume when the request has actually started.
+/// Every wait has a bounded timeout so a regression fails instead of hanging the suite.
+/// `release()` broadcasts so every blocked handler wakes (not a single semaphore permit).
+private final class ProfileRequestGate: @unchecked Sendable {
+    private static let waitTimeout: TimeInterval = 5
+
+    private let lock = NSLock()
+    private let releaseCondition = NSCondition()
+    private let targetUsageCount: Int
+
+    private var usageCount = 0
+    private var profileCount = 0
+    /// Continuation resumes with `true` on timeout, `false` when the event arrived.
+    private var profileStartedContinuation: CheckedContinuation<Bool, Never>?
+    private var usagesSeenContinuation: CheckedContinuation<Bool, Never>?
+    private var profileDidStart = false
+    private var usagesDidReachTarget = false
+    private var isReleased = false
+
+    init(targetUsageCount: Int) {
+        self.targetUsageCount = targetUsageCount
+    }
+
+    var profileRequestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return profileCount
+    }
+
+    func noteUsage() {
+        lock.lock()
+        usageCount += 1
+        let reached = usageCount >= targetUsageCount
+        let cont = reached && !usagesDidReachTarget ? usagesSeenContinuation : nil
+        if reached {
+            usagesDidReachTarget = true
+            usagesSeenContinuation = nil
+        }
+        lock.unlock()
+        cont?.resume(returning: false)
+    }
+
+    func noteProfileStarted() {
+        lock.lock()
+        profileCount += 1
+        profileDidStart = true
+        let cont = profileStartedContinuation
+        profileStartedContinuation = nil
+        lock.unlock()
+        cont?.resume(returning: false)
+    }
+
+    func waitUntilProfileStarted() async {
+        let timedOut = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            lock.lock()
+            if profileDidStart {
+                lock.unlock()
+                continuation.resume(returning: false)
+                return
+            }
+            profileStartedContinuation = continuation
+            lock.unlock()
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + Self.waitTimeout) { [weak self] in
+                guard let self else { return }
+                self.lock.lock()
+                guard let cont = self.profileStartedContinuation else {
+                    self.lock.unlock()
+                    return
+                }
+                self.profileStartedContinuation = nil
+                self.lock.unlock()
+                cont.resume(returning: true)
+            }
+        }
+        if timedOut {
+            XCTFail("Timed out waiting for profile request to start")
+        }
+    }
+
+    func waitUntilUsagesSeen() async {
+        let timedOut = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            lock.lock()
+            if usagesDidReachTarget {
+                lock.unlock()
+                continuation.resume(returning: false)
+                return
+            }
+            usagesSeenContinuation = continuation
+            lock.unlock()
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + Self.waitTimeout) { [weak self] in
+                guard let self else { return }
+                self.lock.lock()
+                guard let cont = self.usagesSeenContinuation else {
+                    self.lock.unlock()
+                    return
+                }
+                self.usagesSeenContinuation = nil
+                self.lock.unlock()
+                cont.resume(returning: true)
+            }
+        }
+        if timedOut {
+            XCTFail("Timed out waiting for usage requests to reach target")
+        }
+    }
+
+    func waitForRelease() {
+        releaseCondition.lock()
+        defer { releaseCondition.unlock() }
+        let deadline = Date().addingTimeInterval(Self.waitTimeout)
+        while !isReleased {
+            if !releaseCondition.wait(until: deadline) {
+                XCTFail("Timed out waiting for profile request release")
+                return
+            }
+        }
+    }
+
+    func release() {
+        releaseCondition.lock()
+        isReleased = true
+        releaseCondition.broadcast()
+        releaseCondition.unlock()
     }
 }
 

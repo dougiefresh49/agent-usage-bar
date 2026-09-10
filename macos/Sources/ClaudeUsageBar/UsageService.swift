@@ -10,6 +10,8 @@ class UsageService: ObservableObject {
     @Published var isAuthenticated = false
     @Published var isAwaitingCode = false
     @Published private(set) var accountEmail: String?
+    @Published private(set) var profile: ClaudeProfileResponse?
+    @Published private(set) var profileLastFetched: Date?
 
     var historyService: UsageHistoryService?
     var notificationService: NotificationService?
@@ -18,6 +20,7 @@ class UsageService: ObservableObject {
     private var timer: Timer?
     private let session: URLSession
     private let usageEndpoint: URL
+    private let profileEndpoint: URL
     private let userinfoEndpoint: URL
     private let tokenEndpoint: URL
     private let credentialsStore: StoredCredentialsStore
@@ -30,13 +33,17 @@ class UsageService: ObservableObject {
     }
 
     private var refreshTask: Task<RefreshResult, Never>?
+    private var profileFetchTask: Task<Void, Never>?
+    private var profileFetchGeneration = 0
 
     static let defaultPollingMinutes = 30
     static let pollingOptions = [5, 15, 30, 60]
     nonisolated static let maxBackoffInterval: TimeInterval = 60 * 60
+    nonisolated static let profileCacheInterval: TimeInterval = 60 * 60
     nonisolated static let defaultOAuthScopes = ["user:profile", "user:inference"]
     nonisolated private static let authorizeEndpoint = URL(string: "https://claude.ai/oauth/authorize")!
     nonisolated private static let defaultUsageEndpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+    nonisolated private static let defaultProfileEndpoint = URL(string: "https://api.anthropic.com/api/oauth/profile")!
     nonisolated private static let defaultUserinfoEndpoint = URL(string: "https://api.anthropic.com/api/oauth/userinfo")!
     nonisolated private static let defaultTokenEndpoint = URL(string: "https://platform.claude.com/v1/oauth/token")!
     nonisolated private static let defaultRedirectURI = "https://platform.claude.com/oauth/code/callback"
@@ -79,6 +86,7 @@ class UsageService: ObservableObject {
     init(
         session: URLSession = .shared,
         usageEndpoint: URL = UsageService.defaultUsageEndpoint,
+        profileEndpoint: URL = UsageService.defaultProfileEndpoint,
         userinfoEndpoint: URL = UsageService.defaultUserinfoEndpoint,
         tokenEndpoint: URL = UsageService.defaultTokenEndpoint,
         redirectUri: String = UsageService.defaultRedirectURI,
@@ -87,6 +95,7 @@ class UsageService: ObservableObject {
     ) {
         self.session = session
         self.usageEndpoint = usageEndpoint
+        self.profileEndpoint = profileEndpoint
         self.userinfoEndpoint = userinfoEndpoint
         self.tokenEndpoint = tokenEndpoint
         self.redirectUri = redirectUri
@@ -236,10 +245,15 @@ class UsageService: ObservableObject {
         usage = nil
         lastUpdated = nil
         accountEmail = nil
+        profile = nil
+        profileLastFetched = nil
         timer?.invalidate()
         timer = nil
         refreshTask?.cancel()
         refreshTask = nil
+        profileFetchGeneration &+= 1
+        profileFetchTask?.cancel()
+        profileFetchTask = nil
         lastError = nil
     }
 
@@ -304,8 +318,68 @@ class UsageService: ObservableObject {
                 currentInterval = baseInterval
                 scheduleTimer()
             }
+            // Reuse the bearer token that just succeeded for usage. No separate refresh.
+            guard let accessToken = loadCredentials()?.accessToken else { return }
+            await fetchOAuthProfileIfNeeded(accessToken: accessToken)
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    private func fetchOAuthProfileIfNeeded(accessToken: String) async {
+        if let profileLastFetched,
+           Date().timeIntervalSince(profileLastFetched) < Self.profileCacheInterval {
+            return
+        }
+
+        if let profileFetchTask {
+            await profileFetchTask.value
+            return
+        }
+
+        let generation = profileFetchGeneration &+ 1
+        profileFetchGeneration = generation
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performOAuthProfileFetch(accessToken: accessToken)
+        }
+        profileFetchTask = task
+        await task.value
+        // Only clear if we still own the slot. A newer fetch or sign-out may have replaced it.
+        if profileFetchGeneration == generation {
+            profileFetchTask = nil
+        }
+    }
+
+    /// Soft profile fetch: one-shot with the usage bearer token. Never refreshes, never mutates `lastError`, never expires the session.
+    private func performOAuthProfileFetch(accessToken: String) async {
+        if let profileLastFetched,
+           Date().timeIntervalSince(profileLastFetched) < Self.profileCacheInterval {
+            return
+        }
+
+        let wasAuthenticated = isAuthenticated
+
+        do {
+            let (data, http) = try await performAuthorizedRequest(
+                token: accessToken,
+                url: profileEndpoint
+            )
+            guard http.statusCode == 200 else {
+                // Soft failure, including 401: leave profile nil and do not refresh.
+                print("[ClaudeProfile] HTTP \(http.statusCode)")
+                return
+            }
+            // Drop the response if the user signed out while the request was in flight.
+            guard wasAuthenticated, isAuthenticated, loadCredentials() != nil else {
+                print("[ClaudeProfile] discarding response after sign-out")
+                return
+            }
+            let decoded = try JSONDecoder().decode(ClaudeProfileResponse.self, from: data)
+            profile = decoded
+            profileLastFetched = Date()
+        } catch {
+            print("[ClaudeProfile] \(error.localizedDescription)")
         }
     }
 
@@ -589,10 +663,15 @@ class UsageService: ObservableObject {
         usage = nil
         lastUpdated = nil
         accountEmail = nil
+        profile = nil
+        profileLastFetched = nil
         timer?.invalidate()
         timer = nil
         refreshTask?.cancel()
         refreshTask = nil
+        profileFetchGeneration &+= 1
+        profileFetchTask?.cancel()
+        profileFetchTask = nil
         lastError = "Session expired — please sign in again"
     }
 }
