@@ -43,8 +43,65 @@ struct DevicePairingTransfer {
     let expiresAt: Date
 }
 
+struct DeviceSyncNetworkInterface: Equatable {
+    let name: String
+    let address: String
+}
+
+struct DeviceSyncPairingHosts: Equatable {
+    let host: String
+    let alt: String?
+}
+
+enum DeviceSyncHostSelection {
+    /// Tailscale CGNAT is 100.64.0.0/10.
+    static func isTailscaleIPv4(_ address: String) -> Bool {
+        let parts = address.split(separator: ".").compactMap { UInt8(String($0)) }
+        guard parts.count == 4 else { return false }
+        return parts[0] == 100 && (64...127).contains(parts[1])
+    }
+
+    static func selectPairingHosts(
+        from interfaces: [DeviceSyncNetworkInterface]
+    ) -> DeviceSyncPairingHosts? {
+        let usable = interfaces.filter { candidate in
+            !candidate.address.hasPrefix("127.")
+                && !candidate.address.hasPrefix("169.254.")
+        }
+        let tailnet = usable.first { isTailscaleIPv4($0.address) }?.address
+        let lan = preferredLANAddress(from: usable.filter { !isTailscaleIPv4($0.address) })
+
+        if let tailnet {
+            return DeviceSyncPairingHosts(host: tailnet, alt: lan)
+        }
+        if let lan {
+            return DeviceSyncPairingHosts(host: lan, alt: nil)
+        }
+        return nil
+    }
+
+    private static func preferredLANAddress(
+        from interfaces: [DeviceSyncNetworkInterface]
+    ) -> String? {
+        var address: String?
+        for interface in interfaces {
+            let name = interface.name
+            guard name.hasPrefix("en") || name.hasPrefix("bridge") else { continue }
+            if address == nil || name.hasPrefix("en") {
+                address = interface.address
+            }
+            if name == "en0" {
+                return interface.address
+            }
+        }
+        return address
+    }
+}
+
 @MainActor
 final class DeviceSyncManager: ObservableObject {
+    static let credentialFingerprintDefaultsKey = "deviceSyncCLICredentialFingerprint"
+
     @Published private(set) var devices: [PairedDevice] = []
     @Published private(set) var pendingPair: PendingDevicePair?
     @Published private(set) var completedSessionID: String?
@@ -59,17 +116,52 @@ final class DeviceSyncManager: ObservableObject {
     }
 
     private let store: DeviceSyncStore
+    private let defaults: UserDefaults
+    private let makeRotationPayload: () -> DeviceSyncPayload
+    private let listNetworkInterfaces: () -> [DeviceSyncNetworkInterface]
     private let desktopID: String
     private let privateKey: P256.KeyAgreement.PrivateKey
     private var sessions: [String: PairingSession] = [:]
     private var server: LocalDeviceSyncServer?
 
-    init(store: DeviceSyncStore = DeviceSyncStore()) {
+    init(
+        store: DeviceSyncStore = DeviceSyncStore(),
+        defaults: UserDefaults = .standard,
+        makeRotationPayload: @escaping () -> DeviceSyncPayload = {
+            DeviceSyncRotationPayload.make()
+        },
+        listNetworkInterfaces: @escaping () -> [DeviceSyncNetworkInterface] = {
+            DeviceSyncNetworkEnumerator.ipv4Interfaces()
+        }
+    ) {
         self.store = store
+        self.defaults = defaults
+        self.makeRotationPayload = makeRotationPayload
+        self.listNetworkInterfaces = listNetworkInterfaces
         let identity = store.loadOrCreateIdentity()
         desktopID = identity.desktopID
         privateKey = identity.privateKey
         devices = store.loadDevices()
+    }
+
+    static func cliCredentialFingerprint(
+        codexAccessToken: String? = CodexAuthFile.load()?.accessToken,
+        cursorAccessToken: String? = CursorCLIKeychain.load()?.accessToken
+    ) -> String {
+        let concatenated = (codexAccessToken ?? "") + (cursorAccessToken ?? "")
+        return SHA256.hash(data: Data(concatenated.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    func noteCredentialFingerprint(_ fingerprint: String) {
+        let previous = defaults.string(forKey: Self.credentialFingerprintDefaultsKey)
+        guard previous != fingerprint else { return }
+        defaults.set(fingerprint, forKey: Self.credentialFingerprintDefaultsKey)
+        let payload = makeRotationPayload()
+        for device in devices where !device.isRevoked {
+            queueSync(payload, for: device)
+        }
     }
 
     func startServer() {
@@ -92,7 +184,9 @@ final class DeviceSyncManager: ObservableObject {
     func beginPairing(payload: DeviceSyncPayload) throws -> DevicePairingTransfer {
         startServer()
         guard server != nil else { throw DeviceSyncError.serverUnavailable }
-        guard let host = localIPv4Address() else {
+        guard let hosts = DeviceSyncHostSelection.selectPairingHosts(
+            from: listNetworkInterfaces()
+        ) else {
             throw DeviceSyncError.localNetworkUnavailable
         }
 
@@ -108,11 +202,12 @@ final class DeviceSyncManager: ObservableObject {
 
         let code = DevicePairingCode(
             sessionID: sessionID,
-            host: host,
+            host: hosts.host,
             port: LocalDeviceSyncServer.port,
             desktopID: desktopID,
             desktopName: Host.current().localizedName ?? "Mac",
-            desktopPublicKey: privateKey.publicKey.x963Representation
+            desktopPublicKey: privateKey.publicKey.x963Representation,
+            alt: hosts.alt
         )
         return DevicePairingTransfer(
             sessionID: sessionID,
@@ -567,35 +662,49 @@ private extension JSONDecoder {
     }()
 }
 
-private func localIPv4Address() -> String? {
-    var address: String?
-    var interfaces: UnsafeMutablePointer<ifaddrs>?
-    guard getifaddrs(&interfaces) == 0, let first = interfaces else { return nil }
-    defer { freeifaddrs(interfaces) }
-
-    for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
-        let interface = pointer.pointee
-        guard interface.ifa_addr.pointee.sa_family == UInt8(AF_INET) else { continue }
-        let name = String(cString: interface.ifa_name)
-        guard name.hasPrefix("en") || name.hasPrefix("bridge") else { continue }
-        var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-        let result = getnameinfo(
-            interface.ifa_addr,
-            socklen_t(interface.ifa_addr.pointee.sa_len),
-            &hostname,
-            socklen_t(hostname.count),
-            nil,
-            0,
-            NI_NUMERICHOST
+enum DeviceSyncRotationPayload {
+    static func make() -> DeviceSyncPayload {
+        let codex = CodexAuthFile.load()
+        let cursor = CursorCLIKeychain.load()
+        return DeviceSyncPayload(
+            connections: DeviceSyncConnections(
+                codexAccessToken: codex?.accessToken,
+                codexAccountId: codex?.accountId,
+                cursorAccessToken: cursor?.accessToken
+            )
         )
-        if result == 0 {
-            let candidate = String(cString: hostname)
-            guard !candidate.hasPrefix("169.254.") else { continue }
-            if address == nil || name.hasPrefix("en") {
-                address = candidate
-            }
-            if name == "en0" { break }
-        }
     }
-    return address
+}
+
+enum DeviceSyncNetworkEnumerator {
+    static func ipv4Interfaces() -> [DeviceSyncNetworkInterface] {
+        var result: [DeviceSyncNetworkInterface] = []
+        var interfaces: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&interfaces) == 0, let first = interfaces else { return [] }
+        defer { freeifaddrs(interfaces) }
+
+        for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let interface = pointer.pointee
+            guard interface.ifa_addr.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let name = String(cString: interface.ifa_name)
+            var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            let status = getnameinfo(
+                interface.ifa_addr,
+                socklen_t(interface.ifa_addr.pointee.sa_len),
+                &hostname,
+                socklen_t(hostname.count),
+                nil,
+                0,
+                NI_NUMERICHOST
+            )
+            guard status == 0 else { continue }
+            result.append(
+                DeviceSyncNetworkInterface(
+                    name: name,
+                    address: String(cString: hostname)
+                )
+            )
+        }
+        return result
+    }
 }

@@ -71,6 +71,11 @@ struct AgentUsageBarApp: App {
                     service.startPolling()
                     connectedService.startPolling()
                 }
+                .onChange(of: connectedPollCompletionSignal) { _, _ in
+                    deviceSyncManager.noteCredentialFingerprint(
+                        DeviceSyncManager.cliCredentialFingerprint()
+                    )
+                }
         }
         .menuBarExtraStyle(.window)
 
@@ -84,6 +89,18 @@ struct AgentUsageBarApp: App {
         }
         .windowResizability(.contentSize)
         .windowStyle(.titleBar)
+    }
+
+    // ConnectedUsageService has no poll-completion publisher; lastUpdated + errors stand in.
+    private var connectedPollCompletionSignal: String {
+        [
+            connectedService.openAILastUpdated?.timeIntervalSince1970.description ?? "",
+            connectedService.cursorLastUpdated?.timeIntervalSince1970.description ?? "",
+            connectedService.elevenLabsLastUpdated?.timeIntervalSince1970.description ?? "",
+            connectedService.openAIError ?? "",
+            connectedService.cursorError ?? "",
+            connectedService.elevenLabsError ?? ""
+        ].joined(separator: "\u{1e}")
     }
 
     private var menuBarIcon: NSImage {

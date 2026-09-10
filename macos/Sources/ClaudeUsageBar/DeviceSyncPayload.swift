@@ -29,16 +29,46 @@ struct DeviceSyncConnections: Codable, Equatable {
     let openAISessionToken: String?
     let cursorSessionToken: String?
     let elevenLabsAPIKey: String?
+    let codexAccessToken: String?
+    let codexAccountId: String?
+    let cursorAccessToken: String?
+
+    init(
+        openAISessionToken: String? = nil,
+        cursorSessionToken: String? = nil,
+        elevenLabsAPIKey: String? = nil,
+        codexAccessToken: String? = nil,
+        codexAccountId: String? = nil,
+        cursorAccessToken: String? = nil
+    ) {
+        self.openAISessionToken = openAISessionToken
+        self.cursorSessionToken = cursorSessionToken
+        self.elevenLabsAPIKey = elevenLabsAPIKey
+        self.codexAccessToken = codexAccessToken
+        self.codexAccountId = codexAccountId
+        self.cursorAccessToken = cursorAccessToken
+    }
+
+    var hasV2Fields: Bool {
+        codexAccessToken != nil || codexAccountId != nil || cursorAccessToken != nil
+    }
 
     var count: Int {
-        [openAISessionToken, cursorSessionToken, elevenLabsAPIKey]
-            .compactMap { $0 }
-            .count
+        [
+            openAISessionToken,
+            cursorSessionToken,
+            elevenLabsAPIKey,
+            codexAccessToken,
+            codexAccountId,
+            cursorAccessToken
+        ]
+        .compactMap { $0 }
+        .count
     }
 }
 
 struct DeviceSyncPayload: Codable, Equatable {
-    static let currentVersion = 1
+    static let currentVersion = 2
     static let validityDuration: TimeInterval = 10 * 60
 
     let version: Int
@@ -56,7 +86,7 @@ struct DeviceSyncPayload: Codable, Equatable {
         notifications: DeviceSyncNotifications? = nil,
         connections: DeviceSyncConnections? = nil
     ) {
-        version = Self.currentVersion
+        version = (connections?.hasV2Fields == true) ? Self.currentVersion : 1
         issuedAtEpochSeconds = Int64(issuedAt.timeIntervalSince1970)
         expiresAtEpochSeconds = Int64(
             issuedAt.addingTimeInterval(Self.validityDuration).timeIntervalSince1970
@@ -78,13 +108,32 @@ struct DevicePairingCode: Equatable {
     let desktopID: String
     let desktopName: String
     let desktopPublicKey: Data
+    let alt: String?
+
+    init(
+        sessionID: String,
+        host: String,
+        port: UInt16,
+        desktopID: String,
+        desktopName: String,
+        desktopPublicKey: Data,
+        alt: String? = nil
+    ) {
+        self.sessionID = sessionID
+        self.host = host
+        self.port = port
+        self.desktopID = desktopID
+        self.desktopName = desktopName
+        self.desktopPublicKey = desktopPublicKey
+        self.alt = alt
+    }
 
     func encodedURLString() throws -> String {
         var components = URLComponents()
         components.scheme = "agentusagebar"
         components.host = "pair"
         components.path = "/v2"
-        components.queryItems = [
+        var queryItems = [
             URLQueryItem(name: "v", value: String(Self.currentVersion)),
             URLQueryItem(name: "session", value: sessionID),
             URLQueryItem(name: "host", value: host),
@@ -93,6 +142,10 @@ struct DevicePairingCode: Equatable {
             URLQueryItem(name: "name", value: desktopName),
             URLQueryItem(name: "key", value: desktopPublicKey.base64URLEncodedString())
         ]
+        if let alt {
+            queryItems.append(URLQueryItem(name: "alt", value: alt))
+        }
+        components.queryItems = queryItems
         guard let value = components.string else {
             throw DeviceSyncError.invalidCode
         }

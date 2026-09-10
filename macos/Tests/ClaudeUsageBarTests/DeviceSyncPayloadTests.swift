@@ -177,4 +177,108 @@ final class DeviceSyncPayloadTests: XCTestCase {
 
         XCTAssertEqual(decoded, payload)
     }
+
+    func testPayloadVersionStaysOneWithoutV2Fields() throws {
+        let payload = DeviceSyncPayload(
+            connections: DeviceSyncConnections(
+                openAISessionToken: "session",
+                cursorSessionToken: nil,
+                elevenLabsAPIKey: nil
+            )
+        )
+        let encoded = try JSONEncoder.deviceSyncEncoder.encode(payload)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+
+        XCTAssertEqual(payload.version, 1)
+        XCTAssertEqual(object["version"] as? Int, 1)
+        XCTAssertEqual(DeviceSyncPayload.currentVersion, 2)
+    }
+
+    func testPayloadVersionIsTwoWhenV2FieldPresent() throws {
+        let payload = DeviceSyncPayload(
+            connections: DeviceSyncConnections(
+                openAISessionToken: "session",
+                codexAccessToken: "codex-access",
+                codexAccountId: "acct-1",
+                cursorAccessToken: "cursor-access"
+            )
+        )
+        let encoded = try JSONEncoder.deviceSyncEncoder.encode(payload)
+        let decoded = try JSONDecoder().decode(DeviceSyncPayload.self, from: encoded)
+
+        XCTAssertEqual(payload.version, 2)
+        XCTAssertEqual(decoded.version, 2)
+        XCTAssertEqual(decoded.connections?.codexAccessToken, "codex-access")
+        XCTAssertEqual(decoded.connections?.codexAccountId, "acct-1")
+        XCTAssertEqual(decoded.connections?.cursorAccessToken, "cursor-access")
+        XCTAssertEqual(decoded.connections?.count, 4)
+    }
+
+    func testV2PayloadRoundTripsThroughEnvelopeCrypto() throws {
+        let desktopKey = P256.KeyAgreement.PrivateKey()
+        let deviceKey = P256.KeyAgreement.PrivateKey()
+        let desktopSecret = try desktopKey.sharedSecretFromKeyAgreement(
+            with: deviceKey.publicKey
+        )
+        let deviceSecret = try deviceKey.sharedSecretFromKeyAgreement(
+            with: desktopKey.publicKey
+        )
+        let payload = DeviceSyncPayload(
+            connections: DeviceSyncConnections(
+                codexAccessToken: "codex-secret",
+                codexAccountId: "acct",
+                cursorAccessToken: "cursor-secret"
+            )
+        )
+
+        let envelope = try DeviceSyncCrypto.seal(
+            payload,
+            sharedSecret: desktopSecret,
+            salt: "sync-v2",
+            info: DeviceSyncCrypto.resyncInfo
+        )
+        let encodedEnvelope = try JSONEncoder().encode(envelope)
+        let envelopeText = String(decoding: encodedEnvelope, as: UTF8.self)
+        XCTAssertFalse(envelopeText.contains("codex-secret"))
+        XCTAssertFalse(envelopeText.contains("cursor-secret"))
+
+        let key = DeviceSyncCrypto.key(
+            sharedSecret: deviceSecret,
+            salt: "sync-v2",
+            info: DeviceSyncCrypto.resyncInfo
+        )
+        let nonce = try AES.GCM.Nonce(
+            data: XCTUnwrap(Data(base64URLEncoded: envelope.nonce))
+        )
+        let box = try AES.GCM.SealedBox(
+            nonce: nonce,
+            ciphertext: XCTUnwrap(Data(base64URLEncoded: envelope.ciphertext)),
+            tag: XCTUnwrap(Data(base64URLEncoded: envelope.tag))
+        )
+        let decrypted = try AES.GCM.open(box, using: key)
+        let decoded = try JSONDecoder().decode(DeviceSyncPayload.self, from: decrypted)
+
+        XCTAssertEqual(decoded, payload)
+        XCTAssertEqual(decoded.version, 2)
+    }
+
+    func testPairingCodeIncludesAltWhenProvided() throws {
+        let key = P256.KeyAgreement.PrivateKey()
+        let code = DevicePairingCode(
+            sessionID: "session-123",
+            host: "100.64.1.5",
+            port: 48_321,
+            desktopID: "desktop-123",
+            desktopName: "Test Mac",
+            desktopPublicKey: key.publicKey.x963Representation,
+            alt: "192.168.1.10"
+        )
+
+        let encoded = try code.encodedURLString()
+
+        XCTAssertTrue(encoded.contains("host=100.64.1.5"))
+        XCTAssertTrue(encoded.contains("alt=192.168.1.10"))
+    }
 }
