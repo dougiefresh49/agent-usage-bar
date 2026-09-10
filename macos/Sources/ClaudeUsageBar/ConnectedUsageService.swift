@@ -61,6 +61,19 @@ final class ConnectedUsageService: ObservableObject {
     var notificationService: NotificationService?
     private var timer: Timer?
     private var pollingMinutes: Int
+    private var isPollingPaused = false
+    private var cursorBackoffUntil: Date?
+    private var openAIBackoffUntil: Date?
+    private var elevenLabsBackoffUntil: Date?
+    private var cursorFetchTask: Task<Void, Never>?
+    private var openAIFetchTask: Task<Void, Never>?
+    private var elevenLabsFetchTask: Task<Void, Never>?
+    private let lowPowerModeEnabled: () -> Bool
+    private var lastWakeAt: Date?
+
+    /// Incremented once at the end of each full `fetchAll`, success or failure.
+    /// `AgentUsageBarApp` watches this to re-check CLI token rotation after skipped polls too.
+    @Published private(set) var pollCompletionCount: UInt = 0
 
     var hasAnyConfiguredService: Bool {
         isCursorConfigured || isOpenAIConfigured || isElevenLabsConfigured
@@ -77,7 +90,10 @@ final class ConnectedUsageService: ObservableObject {
         codexAuthLoader: (() -> CodexCLICredentials?)? = nil,
         cursorKeychainRunner: CursorCLIKeychain.Runner? = nil,
         planInfoInterval: TimeInterval = 3600,
-        resetCreditRedeemer: OpenAIResetCreditRedeemer? = nil
+        resetCreditRedeemer: OpenAIResetCreditRedeemer? = nil,
+        lowPowerModeEnabled: @escaping () -> Bool = {
+            ProcessInfo.processInfo.isLowPowerModeEnabled
+        }
     ) {
         self.session = session
         self.resetCreditRedeemer = resetCreditRedeemer
@@ -93,6 +109,7 @@ final class ConnectedUsageService: ObservableObject {
         }
         self.cursorKeychainRunner = cursorKeychainRunner ?? CursorCLIKeychain.defaultRunner
         self.planInfoInterval = planInfoInterval
+        self.lowPowerModeEnabled = lowPowerModeEnabled
 
         let storedMinutes = UserDefaults.standard.integer(forKey: "pollingMinutes")
         pollingMinutes = UsageService.pollingOptions.contains(storedMinutes)
@@ -102,9 +119,30 @@ final class ConnectedUsageService: ObservableObject {
     }
 
     func startPolling() {
+        isPollingPaused = false
         updateConfiguredState()
-        Task { await fetchAll() }
+        Task { await fetchAll(force: true) }
         scheduleTimer()
+    }
+
+    func pausePolling() {
+        isPollingPaused = true
+        timer?.invalidate()
+        timer = nil
+    }
+
+    func handleWake() {
+        let now = Date()
+        if let lastWakeAt, now.timeIntervalSince(lastWakeAt) < 2 { return }
+        lastWakeAt = now
+        let wasPaused = isPollingPaused
+        isPollingPaused = false
+        Task {
+            await fetchAll(force: true)
+            if wasPaused || timer == nil {
+                scheduleTimer()
+            }
+        }
     }
 
     func updatePollingInterval(_ minutes: Int) {
@@ -112,12 +150,32 @@ final class ConnectedUsageService: ObservableObject {
         scheduleTimer()
     }
 
-    func fetchAll() async {
+    /// Popover-open path: refresh providers whose last successful fetch is older than `interval`.
+    func refreshIfStale(olderThan interval: TimeInterval) async {
         updateConfiguredState()
-        async let cursor: Void = fetchCursorUsage()
-        async let openAI: Void = fetchOpenAIUsage()
-        async let elevenLabs: Void = fetchElevenLabsUsage()
+        let now = Date()
+        if isCursorConfigured {
+            let stale = cursorLastUpdated.map { now.timeIntervalSince($0) > interval } ?? true
+            if stale { await fetchCursorUsage(force: true) }
+        }
+        if isOpenAIConfigured {
+            let stale = openAILastUpdated.map { now.timeIntervalSince($0) > interval } ?? true
+            if stale { await fetchOpenAIUsage(force: true) }
+        }
+        if isElevenLabsConfigured {
+            let stale = elevenLabsLastUpdated.map { now.timeIntervalSince($0) > interval } ?? true
+            if stale { await fetchElevenLabsUsage(force: true) }
+        }
+        pollCompletionCount &+= 1
+    }
+
+    func fetchAll(force: Bool = true) async {
+        updateConfiguredState()
+        async let cursor: Void = fetchCursorUsage(force: force)
+        async let openAI: Void = fetchOpenAIUsage(force: force)
+        async let elevenLabs: Void = fetchElevenLabsUsage(force: force)
         _ = await (cursor, openAI, elevenLabs)
+        pollCompletionCount &+= 1
     }
 
     func saveCursorToken(_ rawToken: String) throws {
@@ -202,17 +260,40 @@ final class ConnectedUsageService: ObservableObject {
         )
     }
 
-    func fetchCursorUsage() async {
+    func fetchCursorUsage(force: Bool = true) async {
+        if !force {
+            if PollingBackoff.shouldSkipForBackoff(until: cursorBackoffUntil) { return }
+            if PollingBackoff.shouldSkipScheduledPoll(lastSuccessfulFetch: cursorLastUpdated) {
+                return
+            }
+        }
+
+        if let cursorFetchTask {
+            await cursorFetchTask.value
+            return
+        }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performFetchCursorUsage()
+        }
+        cursorFetchTask = task
+        await task.value
+        cursorFetchTask = nil
+    }
+
+    private func performFetchCursorUsage() async {
         updateConfiguredState()
         guard let resolved = resolveCursorCredential() else { return }
 
         do {
             let decoded: CursorUsageResponse
             if resolved.source == .cursorCLI {
-                let request = CursorConnectAPI.request(
+                var request = CursorConnectAPI.request(
                     method: CursorConnectAPI.getCurrentPeriodUsage,
                     token: resolved.token
                 )
+                request.timeoutInterval = PollingBackoff.usageRequestTimeout
                 let data = try await responseData(
                     for: request,
                     serviceName: "Cursor",
@@ -223,7 +304,10 @@ final class ConnectedUsageService: ObservableObject {
             } else {
                 cursorPlanInfo = nil
                 lastCursorPlanInfoFetch = nil
-                var request = URLRequest(url: cursorEndpoint)
+                var request = URLRequest(
+                    url: cursorEndpoint,
+                    timeoutInterval: PollingBackoff.usageRequestTimeout
+                )
                 request.httpMethod = "POST"
                 request.httpBody = Data("{}".utf8)
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -237,6 +321,7 @@ final class ConnectedUsageService: ObservableObject {
             cursorUsage = decoded
             cursorError = nil
             cursorLastUpdated = Date()
+            cursorBackoffUntil = nil
             snapshotStore?.update(
                 provider: "cursor",
                 metrics: UsageSnapshotStore.cursorMetrics(for: decoded)
@@ -246,12 +331,39 @@ final class ConnectedUsageService: ObservableObject {
                 autoPercent: decoded.planUsage?.autoPercentUsed,
                 creditPercent: decoded.spendLimitUsage?.utilization
             )
+        } catch let error as ConnectedUsageError {
+            if case .rateLimited(_, let retryAfter) = error {
+                applyBackoff(provider: .cursor, retryAfter: retryAfter)
+            }
+            cursorError = error.localizedDescription
         } catch {
             cursorError = error.localizedDescription
         }
     }
 
-    func fetchOpenAIUsage() async {
+    func fetchOpenAIUsage(force: Bool = true) async {
+        if !force {
+            if PollingBackoff.shouldSkipForBackoff(until: openAIBackoffUntil) { return }
+            if PollingBackoff.shouldSkipScheduledPoll(lastSuccessfulFetch: openAILastUpdated) {
+                return
+            }
+        }
+
+        if let openAIFetchTask {
+            await openAIFetchTask.value
+            return
+        }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performFetchOpenAIUsage()
+        }
+        openAIFetchTask = task
+        await task.value
+        openAIFetchTask = nil
+    }
+
+    private func performFetchOpenAIUsage() async {
         updateConfiguredState()
         guard let resolved = resolveOpenAICredential() else { return }
 
@@ -269,9 +381,12 @@ final class ConnectedUsageService: ObservableObject {
                 endpoint: openAIUsageEndpoint,
                 token: resolved.token,
                 accountId: accountId,
-                unauthorizedMessage: unauthorizedMessage
+                unauthorizedMessage: unauthorizedMessage,
+                timeout: PollingBackoff.usageRequestTimeout
             )
             let decoded = try JSONDecoder().decode(OpenAIUsageResponse.self, from: usageData)
+            // Spark rule: model-specific `additional_rate_limits` stay on the decoded
+            // value as extra rows; primary/secondary windows come only from `rate_limit`.
             openAIUsage = decoded
             if requestCredentialIdentity == currentOpenAICredentialIdentity(),
                let discovered = resolved.accountId ?? decoded.accountId {
@@ -279,10 +394,16 @@ final class ConnectedUsageService: ObservableObject {
             }
             openAIError = nil
             openAILastUpdated = Date()
+            openAIBackoffUntil = nil
             snapshotStore?.update(
                 provider: "openai",
                 metrics: UsageSnapshotStore.openAIMetrics(for: decoded)
             )
+        } catch let error as ConnectedUsageError {
+            if case .rateLimited(_, let retryAfter) = error {
+                applyBackoff(provider: .openAI, retryAfter: retryAfter)
+            }
+            openAIError = error.localizedDescription
         } catch {
             openAIError = error.localizedDescription
         }
@@ -292,7 +413,8 @@ final class ConnectedUsageService: ObservableObject {
                 endpoint: openAIResetCreditsEndpoint,
                 token: resolved.token,
                 accountId: resolved.accountId ?? openAIAccountID,
-                unauthorizedMessage: unauthorizedMessage
+                unauthorizedMessage: unauthorizedMessage,
+                timeout: PollingBackoff.secondaryRequestTimeout
             )
             openAIResetCredits = try JSONDecoder().decode(
                 OpenAIResetCreditsResponse.self,
@@ -306,6 +428,13 @@ final class ConnectedUsageService: ObservableObject {
                         resetCredits: openAIResetCredits
                     )
                 )
+            }
+        } catch let error as ConnectedUsageError {
+            if case .rateLimited(_, let retryAfter) = error {
+                applyBackoff(provider: .openAI, retryAfter: retryAfter)
+            }
+            if openAIUsage == nil {
+                openAIError = error.localizedDescription
             }
         } catch {
             if openAIUsage == nil {
@@ -412,10 +541,35 @@ final class ConnectedUsageService: ObservableObject {
         }
     }
 
-    func fetchElevenLabsUsage() async {
+    func fetchElevenLabsUsage(force: Bool = true) async {
+        if !force {
+            if PollingBackoff.shouldSkipForBackoff(until: elevenLabsBackoffUntil) { return }
+            if PollingBackoff.shouldSkipScheduledPoll(lastSuccessfulFetch: elevenLabsLastUpdated) {
+                return
+            }
+        }
+
+        if let elevenLabsFetchTask {
+            await elevenLabsFetchTask.value
+            return
+        }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performFetchElevenLabsUsage()
+        }
+        elevenLabsFetchTask = task
+        await task.value
+        elevenLabsFetchTask = nil
+    }
+
+    private func performFetchElevenLabsUsage() async {
         guard let apiKey = elevenLabsAPIKey else { return }
 
-        var request = URLRequest(url: elevenLabsSubscriptionEndpoint)
+        var request = URLRequest(
+            url: elevenLabsSubscriptionEndpoint,
+            timeoutInterval: PollingBackoff.usageRequestTimeout
+        )
         request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
@@ -428,10 +582,16 @@ final class ConnectedUsageService: ObservableObject {
             elevenLabsUsage = decoded
             elevenLabsError = nil
             elevenLabsLastUpdated = Date()
+            elevenLabsBackoffUntil = nil
             snapshotStore?.update(
                 provider: "elevenlabs",
                 metrics: UsageSnapshotStore.elevenLabsMetrics(for: decoded)
             )
+        } catch let error as ConnectedUsageError {
+            if case .rateLimited(_, let retryAfter) = error {
+                applyBackoff(provider: .elevenLabs, retryAfter: retryAfter)
+            }
+            elevenLabsError = error.localizedDescription
         } catch {
             elevenLabsError = error.localizedDescription
         }
@@ -452,10 +612,11 @@ final class ConnectedUsageService: ObservableObject {
         defer { isFetchingCursorPlanInfo = false }
 
         do {
-            let request = CursorConnectAPI.request(
+            var request = CursorConnectAPI.request(
                 method: CursorConnectAPI.getPlanInfo,
                 token: token
             )
+            request.timeoutInterval = PollingBackoff.secondaryRequestTimeout
             let data = try await responseData(
                 for: request,
                 serviceName: "Cursor",
@@ -471,9 +632,10 @@ final class ConnectedUsageService: ObservableObject {
         endpoint: URL,
         token: String,
         accountId: String?,
-        unauthorizedMessage: String?
+        unauthorizedMessage: String?,
+        timeout: TimeInterval
     ) async throws -> Data {
-        var request = URLRequest(url: endpoint)
+        var request = URLRequest(url: endpoint, timeoutInterval: timeout)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -499,6 +661,12 @@ final class ConnectedUsageService: ObservableObject {
             throw ConnectedUsageError.invalidResponse(serviceName)
         }
         guard http.statusCode == 200 else {
+            if http.statusCode == 429 {
+                throw ConnectedUsageError.rateLimited(
+                    serviceName,
+                    PollingBackoff.retryAfterSeconds(from: http)
+                )
+            }
             if (http.statusCode == 401 || http.statusCode == 403),
                let unauthorizedMessage {
                 throw ConnectedUsageError.unauthorized(unauthorizedMessage)
@@ -508,13 +676,39 @@ final class ConnectedUsageService: ObservableObject {
         return data
     }
 
+    private enum BackoffProvider {
+        case cursor, openAI, elevenLabs
+    }
+
+    private func applyBackoff(provider: BackoffProvider, retryAfter: TimeInterval?) {
+        let base = PollingBackoff.pollingInterval(
+            minutes: pollingMinutes,
+            isLowPower: lowPowerModeEnabled()
+        )
+        let delay = PollingBackoff.backoffInterval(
+            retryAfter: retryAfter,
+            currentInterval: base
+        )
+        let until = Date().addingTimeInterval(delay)
+        switch provider {
+        case .cursor: cursorBackoffUntil = until
+        case .openAI: openAIBackoffUntil = until
+        case .elevenLabs: elevenLabsBackoffUntil = until
+        }
+    }
+
     private func scheduleTimer() {
         timer?.invalidate()
-        let interval = TimeInterval(pollingMinutes * 60)
+        timer = nil
+        guard !isPollingPaused else { return }
+        let interval = PollingBackoff.pollingInterval(
+            minutes: pollingMinutes,
+            isLowPower: lowPowerModeEnabled()
+        )
         let newTimer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
-                Task { await self.fetchAll() }
+                guard let self, !self.isPollingPaused else { return }
+                Task { await self.fetchAll(force: false) }
             }
         }
         RunLoop.main.add(newTimer, forMode: .common)
@@ -654,6 +848,7 @@ enum ConnectedUsageError: LocalizedError {
     case invalidResponse(String)
     case http(String, Int)
     case unauthorized(String)
+    case rateLimited(String, TimeInterval?)
 
     var errorDescription: String? {
         switch self {
@@ -661,6 +856,8 @@ enum ConnectedUsageError: LocalizedError {
             return "\(service) returned an invalid response"
         case .unauthorized(let message):
             return message
+        case .rateLimited(let service, _):
+            return "\(service) rate limited"
         case .http(let service, let status):
             if status == 401 || status == 403 {
                 if service == "ElevenLabs" {

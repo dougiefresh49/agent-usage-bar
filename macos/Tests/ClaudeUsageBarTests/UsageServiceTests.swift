@@ -945,7 +945,7 @@ final class UsageServiceTests: XCTestCase {
         XCTAssertEqual(tokenRefreshCount, 0)
     }
 
-    func testConcurrentUsageFetchesShareSingleProfileRequest() async throws {
+    func testConcurrentUsageFetchesAreSingleFlight() async throws {
         let store = try makeStore()
         try store.save(
             StoredCredentials(
@@ -958,11 +958,12 @@ final class UsageServiceTests: XCTestCase {
 
         let usageURL = URL(string: "https://example.com/api/oauth/usage")!
         let profileURL = URL(string: "https://example.com/api/oauth/profile")!
-        let gate = ProfileRequestGate(targetUsageCount: 2)
+        let gate = ProfileRequestGate(targetUsageCount: 1)
 
         MockURLProtocol.handler = { request in
             switch (request.httpMethod, request.url?.path) {
             case ("GET", "/api/oauth/usage"):
+                XCTAssertEqual(request.timeoutInterval, PollingBackoff.usageRequestTimeout)
                 gate.noteUsage()
                 return try Self.httpResponse(
                     url: usageURL,
@@ -975,6 +976,7 @@ final class UsageServiceTests: XCTestCase {
                     """
                 )
             case ("GET", "/api/oauth/profile"):
+                XCTAssertEqual(request.timeoutInterval, PollingBackoff.secondaryRequestTimeout)
                 gate.noteProfileStarted()
                 gate.waitForRelease()
                 return try Self.httpResponse(
@@ -997,19 +999,136 @@ final class UsageServiceTests: XCTestCase {
             credentialsStore: store
         )
 
-        async let first: Void = service.fetchUsage()
-        async let second: Void = service.fetchUsage()
+        async let first: Void = service.fetchUsage(force: true)
+        async let second: Void = service.fetchUsage(force: true)
 
         await gate.waitUntilProfileStarted()
         await gate.waitUntilUsagesSeen()
+        XCTAssertEqual(gate.usageRequestCount, 1, "Manual refresh is single-flight")
         XCTAssertEqual(gate.profileRequestCount, 1, "Only one profile request while both callers await it")
 
         gate.release()
         _ = await (first, second)
 
+        XCTAssertEqual(gate.usageRequestCount, 1)
         XCTAssertEqual(gate.profileRequestCount, 1)
         XCTAssertEqual(service.profile?.planLabel, "Max 20x")
         XCTAssertNil(service.lastError)
+    }
+
+    func testScheduledFetchDebouncesWhenLastUpdateIsFresh() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        var usageHits = 0
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                usageHits += 1
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 3, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 4, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: URL(string: "https://example.com/api/oauth/profile")!,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                XCTFail("Unexpected request: \(request)")
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store
+        )
+
+        await service.fetchUsage(force: true)
+        XCTAssertEqual(usageHits, 1)
+
+        await service.fetchUsage(force: false)
+        XCTAssertEqual(usageHits, 1, "Scheduled poll within debounce window must not hit the network")
+
+        await service.fetchUsage(force: true)
+        XCTAssertEqual(usageHits, 2, "Manual refresh always runs")
+    }
+
+    func testLowPowerModeDoublesBaseIntervalAfterSuccess() async throws {
+        let store = try makeStore()
+        try store.save(
+            StoredCredentials(
+                accessToken: "access-1",
+                refreshToken: "refresh-1",
+                expiresAt: Date().addingTimeInterval(3600),
+                scopes: UsageService.defaultOAuthScopes
+            )
+        )
+
+        let usageURL = URL(string: "https://example.com/api/oauth/usage")!
+        MockURLProtocol.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/oauth/usage"):
+                return try Self.httpResponse(
+                    url: usageURL,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "five_hour": { "utilization": 1, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day": { "utilization": 2, "resets_at": "2026-03-15T18:00:00Z" }
+                    }
+                    """
+                )
+            case ("GET", "/api/oauth/profile"):
+                return try Self.httpResponse(
+                    url: URL(string: "https://example.com/api/oauth/profile")!,
+                    statusCode: 200,
+                    body: Self.profileFixtureBody
+                )
+            default:
+                return try Self.httpResponse(url: request.url!, statusCode: 500)
+            }
+        }
+
+        UserDefaults.standard.set(15, forKey: "pollingMinutes")
+        defer { UserDefaults.standard.removeObject(forKey: "pollingMinutes") }
+
+        let service = UsageService(
+            session: makeSession(),
+            usageEndpoint: usageURL,
+            profileEndpoint: URL(string: "https://example.com/api/oauth/profile")!,
+            userinfoEndpoint: URL(string: "https://example.com/api/oauth/userinfo")!,
+            tokenEndpoint: URL(string: "https://example.com/v1/oauth/token")!,
+            credentialsStore: store,
+            lowPowerModeEnabled: { true }
+        )
+
+        await service.fetchUsage(force: true)
+        XCTAssertNil(service.lastError)
+        XCTAssertEqual(
+            PollingBackoff.pollingInterval(minutes: service.pollingMinutes, isLowPower: true),
+            30 * 60
+        )
     }
 
     func testSignOutDuringProfileFetchDiscardsResponse() async throws {
@@ -1191,6 +1310,12 @@ private final class ProfileRequestGate: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return profileCount
+    }
+
+    var usageRequestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return usageCount
     }
 
     func noteUsage() {
