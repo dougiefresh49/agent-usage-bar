@@ -13,6 +13,9 @@ struct PopoverView: View {
     private var usageTextSizeRaw = UsagePresentationDefaults.textSize.rawValue
     @State private var selectedProvider: UsageProvider = .claude
     @State private var detailContentHeight: CGFloat = 0
+    /// Presented from the popover root so an outside click that dismisses the
+    /// MenuBarExtra cannot leave a pending confirm dialog for the next open.
+    @State private var isConfirmingReset = false
 
     private static let maxDetailHeight: CGFloat = 460
 
@@ -58,7 +61,8 @@ struct PopoverView: View {
                                 metrics: presentationMetrics(for: .openAI)
                                     + UsagePresentationMetrics.openAIAdditionalLimitMetrics(
                                         usage: connectedService.openAIUsage
-                                    )
+                                    ),
+                                isConfirmingReset: $isConfirmingReset
                             )
                         case .cursor:
                             CursorUsageView(
@@ -103,6 +107,25 @@ struct PopoverView: View {
             if !isConfigured && selectedProvider == .elevenLabs {
                 selectedProvider = .claude
             }
+        }
+        .confirmationDialog(
+            "Use a reset credit?",
+            isPresented: $isConfirmingReset,
+            titleVisibility: .visible
+        ) {
+            Button("Use credit", role: .destructive) {
+                Task { await connectedService.redeemNextResetCredit() }
+            }
+            .accessibilityLabel("Use credit")
+            Button("Cancel", role: .cancel) {}
+            .accessibilityLabel("Cancel")
+        } message: {
+            Text(
+                "This redeems one credit on your account and clears the current rate-limit windows. It cannot be undone."
+            )
+        }
+        .onDisappear {
+            isConfirmingReset = false
         }
     }
 
@@ -942,7 +965,7 @@ private struct OpenAIUsageView: View {
     @ObservedObject var service: ConnectedUsageService
     let style: DetailVisualizationStyle
     let metrics: [UsagePresentationMetric]
-    @State private var isConfirmingReset = false
+    @Binding var isConfirmingReset: Bool
 
     var body: some View {
         ProviderHeader(provider: .openAI)
@@ -1023,20 +1046,6 @@ private struct OpenAIUsageView: View {
                 .disabled(service.resetCreditRedeemer.isRedeeming)
             }
             .help(creditsTooltip(credits))
-            .confirmationDialog(
-                "Use a reset credit?",
-                isPresented: $isConfirmingReset,
-                titleVisibility: .visible
-            ) {
-                Button("Use credit") {
-                    Task { await service.redeemNextResetCredit() }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text(
-                    "This redeems one credit on your account and clears the current rate-limit windows. It cannot be undone."
-                )
-            }
         }
     }
 
