@@ -4,18 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.agentusagebar.android.data.credentials.AppSettings
-import com.agentusagebar.android.data.credentials.CredentialsStore
 import com.agentusagebar.android.data.model.AppUsageSnapshot
-import com.agentusagebar.android.data.model.OpenAIResetCredit
+import com.agentusagebar.android.data.model.SnapshotCreditItem
 import com.agentusagebar.android.data.model.UsageProvider
-import com.agentusagebar.android.data.network.ResetCreditClient
-import com.agentusagebar.android.data.network.ResetCreditFailure
 import com.agentusagebar.android.data.repository.DeviceSyncCheckResult
 import com.agentusagebar.android.data.repository.UsageRepository
 import com.agentusagebar.android.worker.UsageRefreshScheduler
 import java.time.Instant
 import java.time.temporal.ChronoUnit
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,7 +20,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 data class DevicePairingUiState(
     val isPairing: Boolean = false,
@@ -45,7 +40,6 @@ data class DeviceActionUiState(
     val message: String? = null,
 )
 
-
 sealed class ResetCreditUiState {
     data object Idle : ResetCreditUiState()
     data object Confirming : ResetCreditUiState()
@@ -62,12 +56,6 @@ data class ResetCreditSummary(
 
 class UsageViewModel(
     private val repository: UsageRepository,
-    private val resetCreditClient: ResetCreditClient = ResetCreditClient(
-        ResetCreditClient.encryptedPendingStore(AgentUsageBarAppHolder.context()),
-    ),
-    private val credentialsStore: CredentialsStore = CredentialsStore(
-        AgentUsageBarAppHolder.context(),
-    ),
 ) : ViewModel() {
     val snapshot: StateFlow<AppUsageSnapshot> = repository.snapshot
     val settings: StateFlow<AppSettings> = repository.settings.stateIn(
@@ -76,8 +64,6 @@ class UsageViewModel(
         AppSettings(),
     )
     val isRefreshing = repository.isRefreshing
-    val awaitingClaudeCode = repository.awaitingClaudeCode
-    val claudeEmail = repository.claudeEmail
     val trustedDevices = repository.trustedDevices
     private val _devicePairing = MutableStateFlow(DevicePairingUiState())
     val devicePairing = _devicePairing.asStateFlow()
@@ -92,9 +78,6 @@ class UsageViewModel(
     private val _message = MutableStateFlow<String?>(null)
     val message = _message.asStateFlow()
 
-    private val _claudeCode = MutableStateFlow("")
-    val claudeCode = _claudeCode.asStateFlow()
-
     private val _resetCreditState =
         MutableStateFlow<ResetCreditUiState>(ResetCreditUiState.Idle)
     val resetCreditState = _resetCreditState.asStateFlow()
@@ -102,41 +85,27 @@ class UsageViewModel(
     private val _resetCreditSummary = MutableStateFlow(ResetCreditSummary())
     val resetCreditSummary = _resetCreditSummary.asStateFlow()
 
-    /** True when openAIBearer is set (CLI token first, then pasted session token). */
-    private val _isOpenAIConfigured = MutableStateFlow(false)
-    val isOpenAIConfigured = _isOpenAIConfigured.asStateFlow()
-
     private var outcomeClearJob: Job? = null
 
     init {
-        refreshOpenAIConfiguredFlag()
+        viewModelScope.launch {
+            snapshot.collect { snap ->
+                _resetCreditSummary.value = summaryFrom(snap)
+            }
+        }
         viewModelScope.launch {
             repository.refreshAll()
             UsageRefreshScheduler.ensureScheduled(AgentUsageBarAppHolder.context())
-            refreshResetCreditSummary()
         }
     }
 
     fun selectProvider(provider: UsageProvider) {
         _selectedProvider.value = provider
-        if (provider == UsageProvider.OPENAI) {
-            viewModelScope.launch { refreshResetCreditSummary() }
-        }
-    }
-
-    private fun refreshOpenAIConfiguredFlag() {
-        _isOpenAIConfigured.value =
-            !credentialsStore.loadConnected().openAIBearer.isNullOrBlank()
-    }
-
-    fun setClaudeCode(value: String) {
-        _claudeCode.value = value
     }
 
     fun refresh() {
         viewModelScope.launch {
             repository.refreshAll()
-            refreshResetCreditSummary()
         }
     }
 
@@ -162,34 +131,21 @@ class UsageViewModel(
         outcomeClearJob?.cancel()
         _resetCreditState.value = ResetCreditUiState.InFlight
         viewModelScope.launch {
-            val credentials = credentialsStore.loadConnected()
-            val bearer = credentials.openAIBearer
-            val accountId = credentials.openAIAccountId
-            if (bearer.isNullOrBlank()) {
-                _resetCreditState.value =
-                    ResetCreditUiState.Error("OpenAI session token missing.")
-                scheduleOutcomeClear()
-                return@launch
-            }
-            try {
-                val outcome = withContext(Dispatchers.IO) {
-                    resetCreditClient.redeem(
-                        bearer = bearer,
-                        accountId = accountId,
-                        creditId = creditId,
-                    )
+            repository.redeemResetCredit(creditId)
+                .onSuccess { result ->
+                    val error = result.error
+                    if (!error.isNullOrBlank()) {
+                        _resetCreditState.value = ResetCreditUiState.Error(error)
+                    } else {
+                        _resetCreditState.value = ResetCreditUiState.Outcome(
+                            result.message ?: "Limits reset",
+                        )
+                    }
                 }
-                _resetCreditState.value = ResetCreditUiState.Outcome(outcome.message)
-                repository.refreshAll()
-                refreshResetCreditSummary()
-            } catch (_: ResetCreditFailure.InFlight) {
-                _resetCreditState.value = ResetCreditUiState.InFlight
-            } catch (error: ResetCreditFailure.SendFailed) {
-                _resetCreditState.value = ResetCreditUiState.Error(error.message ?: "Redeem failed")
-            } catch (error: Exception) {
-                _resetCreditState.value =
-                    ResetCreditUiState.Error(error.message ?: "Redeem failed")
-            }
+                .onFailure { error ->
+                    _resetCreditState.value =
+                        ResetCreditUiState.Error(error.message ?: "Redeem failed")
+                }
             scheduleOutcomeClear()
         }
     }
@@ -206,116 +162,6 @@ class UsageViewModel(
         }
     }
 
-    private suspend fun refreshResetCreditSummary() {
-        val summary = withContext(Dispatchers.IO) {
-            runCatching {
-                val credentials = credentialsStore.loadConnected()
-                _isOpenAIConfigured.value = !credentials.openAIBearer.isNullOrBlank()
-                val bearer = credentials.openAIBearer
-                    ?: error("OpenAI not configured")
-                val response = resetCreditClient.fetchCredits(
-                    bearer = bearer,
-                    accountId = credentials.openAIAccountId,
-                )
-                val available = response.credits.filter {
-                    it.isAvailable && it.resetType == CODEX_RATE_LIMITS_RESET_TYPE
-                }
-                val soonest = available.minByOrNull { credit ->
-                    expiresEpochMs(credit) ?: Long.MAX_VALUE
-                }
-                val days = soonest?.let { credit ->
-                    expiresEpochMs(credit)?.let { expiresAt ->
-                        ChronoUnit.DAYS.between(
-                            Instant.now(),
-                            Instant.ofEpochMilli(expiresAt),
-                        ).toInt().coerceAtLeast(0)
-                    }
-                }
-                ResetCreditSummary(
-                    availableCount = available.size,
-                    nextExpiresInDays = days,
-                    soonestCreditId = soonest?.id,
-                )
-            }.getOrElse {
-                refreshOpenAIConfiguredFlag()
-                ResetCreditSummary()
-            }
-        }
-        _resetCreditSummary.value = summary
-    }
-
-    private fun expiresEpochMs(credit: OpenAIResetCredit): Long? {
-        val raw = credit.expiresAt?.takeIf { it.isNotBlank() } ?: return null
-        return runCatching { Instant.parse(raw).toEpochMilli() }.getOrNull()
-            ?: raw.toLongOrNull()?.let { if (it < 1_000_000_000_000L) it * 1_000 else it }
-    }
-
-    fun startClaudeOAuth(): String = repository.startClaudeOAuth()
-
-    fun cancelClaudeOAuth() {
-        repository.cancelClaudeOAuth()
-        _claudeCode.value = ""
-    }
-
-    fun submitClaudeCode() {
-        viewModelScope.launch {
-            repository.submitClaudeCode(_claudeCode.value)
-                .onSuccess {
-                    _claudeCode.value = ""
-                    _message.value = "Claude connected."
-                }
-                .onFailure { _message.value = it.message }
-        }
-    }
-
-    fun signOutClaude() {
-        viewModelScope.launch { repository.signOutClaude() }
-    }
-
-    fun saveOpenAIToken(token: String) {
-        viewModelScope.launch {
-            repository.saveOpenAIToken(token)
-                .onSuccess {
-                    refreshOpenAIConfiguredFlag()
-                    _message.value = "OpenAI session token saved locally."
-                    refreshResetCreditSummary()
-                }
-                .onFailure { _message.value = it.message }
-        }
-    }
-
-    fun saveCursorToken(token: String) {
-        viewModelScope.launch {
-            repository.saveCursorToken(token)
-                .onSuccess { _message.value = "Cursor session token saved locally." }
-                .onFailure { _message.value = it.message }
-        }
-    }
-
-    fun clearOpenAIToken() {
-        viewModelScope.launch {
-            repository.clearOpenAIToken()
-            refreshOpenAIConfiguredFlag()
-            refreshResetCreditSummary()
-        }
-    }
-
-    fun clearCursorToken() {
-        viewModelScope.launch { repository.clearCursorToken() }
-    }
-
-    fun saveElevenLabsAPIKey(key: String) {
-        viewModelScope.launch {
-            repository.saveElevenLabsAPIKey(key)
-                .onSuccess { _message.value = "ElevenLabs API key saved locally." }
-                .onFailure { _message.value = it.message }
-        }
-    }
-
-    fun clearElevenLabsAPIKey() {
-        viewModelScope.launch { repository.clearElevenLabsAPIKey() }
-    }
-
     fun startDevicePairing(rawValue: String) {
         devicePairingJob?.cancel()
         _devicePairing.value = DevicePairingUiState(isPairing = true)
@@ -330,8 +176,6 @@ class UsageViewModel(
                 .onSuccess {
                     _message.value = it
                     _devicePairing.value = DevicePairingUiState()
-                    refreshOpenAIConfiguredFlag()
-                    refreshResetCreditSummary()
                     UsageRefreshScheduler.ensureScheduled(
                         AgentUsageBarAppHolder.context(),
                         forceReschedule = true,
@@ -367,10 +211,8 @@ class UsageViewModel(
                         DeviceSyncCheckResult.SETTINGS_APPLIED ->
                             "Settings synced successfully."
                         DeviceSyncCheckResult.UNLINKED_BY_MAC ->
-                            "$desktopName removed this phone. Imported credentials were removed."
+                            "$desktopName removed this phone. The cached snapshot was cleared."
                     }
-                    refreshOpenAIConfiguredFlag()
-                    refreshResetCreditSummary()
                     _deviceActions.value = _deviceActions.value + (
                         desktopID to DeviceActionUiState(
                             phase = DeviceActionPhase.SUCCESS,
@@ -400,11 +242,7 @@ class UsageViewModel(
         }
     }
 
-    fun unlinkMac(
-        desktopID: String,
-        desktopName: String,
-        removeImportedCredentials: Boolean,
-    ) {
+    fun unlinkMac(desktopID: String, desktopName: String) {
         _deviceActions.value = _deviceActions.value + (
             desktopID to DeviceActionUiState(
                 phase = DeviceActionPhase.UNLINKING,
@@ -412,24 +250,13 @@ class UsageViewModel(
             )
         )
         viewModelScope.launch {
-            repository.unlinkMac(desktopID, removeImportedCredentials)
+            repository.unlinkMac(desktopID)
                 .onSuccess { result ->
                     _deviceActions.value = _deviceActions.value - desktopID
-                    val unlinkMessage = if (result.macWasNotified) {
+                    _message.value = if (result.macWasNotified) {
                         "$desktopName was unlinked on both devices."
                     } else {
                         "$desktopName was unlinked from Android. The Mac didn’t confirm the request, so a stale phone entry may need to be removed there manually."
-                    }
-                    val credentialsMessage = when {
-                        !removeImportedCredentials -> ""
-                        result.credentialsRemoved ->
-                            " Matching imported credentials were removed."
-                        else -> " No matching imported credentials remained."
-                    }
-                    _message.value = unlinkMessage + credentialsMessage
-                    if (removeImportedCredentials) {
-                        refreshOpenAIConfiguredFlag()
-                        refreshResetCreditSummary()
                     }
                 }
                 .onFailure {
@@ -527,7 +354,23 @@ class UsageViewModel(
     }
 
     companion object {
-        private const val CODEX_RATE_LIMITS_RESET_TYPE = "codex_rate_limits"
+        internal fun summaryFrom(snapshot: AppUsageSnapshot): ResetCreditSummary {
+            val items = snapshot.openAICreditItems
+            val soonest = items.minByOrNull { it.expiresAtEpochMs ?: Long.MAX_VALUE }
+            return ResetCreditSummary(
+                availableCount = snapshot.openAICreditsAvailable,
+                nextExpiresInDays = soonest?.let(::daysUntilExpiry),
+                soonestCreditId = soonest?.id,
+            )
+        }
+
+        private fun daysUntilExpiry(item: SnapshotCreditItem): Int? {
+            val expiresAt = item.expiresAtEpochMs ?: return null
+            return ChronoUnit.DAYS.between(
+                Instant.now(),
+                Instant.ofEpochMilli(expiresAt),
+            ).toInt().coerceAtLeast(0)
+        }
     }
 }
 

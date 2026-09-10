@@ -100,7 +100,6 @@ class DevicePairingClient(
                     DeviceSyncCodec.PAIRING_INFO,
                 ),
             )
-            val connections = payload.connections
             return DevicePairingResult(
                 payload = payload,
                 trustedDevice = TrustedDesktopDevice(
@@ -118,15 +117,6 @@ class DevicePairingClient(
                     pairedAtEpochMs = System.currentTimeMillis(),
                     lastCheckedAtEpochMs = System.currentTimeMillis(),
                     lastSettingsSyncAtEpochMs = System.currentTimeMillis(),
-                    openAITokenHash = DeviceSyncCodec.credentialHash(
-                        connections?.openAISessionToken,
-                    ),
-                    cursorTokenHash = DeviceSyncCodec.credentialHash(
-                        connections?.cursorSessionToken,
-                    ),
-                    elevenLabsKeyHash = DeviceSyncCodec.credentialHash(
-                        connections?.elevenLabsAPIKey,
-                    ),
                 ),
             )
         }
@@ -134,10 +124,7 @@ class DevicePairingClient(
     }
 
     fun checkStatus(device: TrustedDesktopDevice): DeviceStatusCommand {
-        val secret = DeviceSyncCrypto.sharedSecret(
-            DeviceSyncCrypto.restorePrivateKey(device.privateKey),
-            DeviceSyncCodec.base64URLDecode(device.desktopPublicKey),
-        )
+        val secret = sharedSecret(device)
         val timestamp = System.currentTimeMillis() / 1_000
         val proof = DeviceSyncCrypto.authenticationProof(
             secret,
@@ -169,11 +156,86 @@ class DevicePairingClient(
         )
     }
 
-    fun acknowledgeWipe(device: TrustedDesktopDevice) {
-        val secret = DeviceSyncCrypto.sharedSecret(
-            DeviceSyncCrypto.restorePrivateKey(device.privateKey),
-            DeviceSyncCodec.base64URLDecode(device.desktopPublicKey),
+    fun fetchSnapshot(device: TrustedDesktopDevice): UsageSnapshotDocument {
+        val secret = sharedSecret(device)
+        val timestamp = System.currentTimeMillis() / 1_000
+        val proof = DeviceSyncCrypto.authenticationProof(
+            secret,
+            device.desktopID,
+            DeviceSyncCodec.STATUS_INFO,
+            "snapshot:${device.desktopID}:${device.deviceID}:$timestamp",
         )
+        val response = LocalPairingHttpClient.request(
+            host = device.host,
+            port = device.port,
+            method = "GET",
+            path = "/v2/snapshot?desktop=${url(device.desktopID)}" +
+                "&device=${url(device.deviceID)}&ts=$timestamp&proof=${url(proof)}",
+            connectTimeoutMs = 1_500,
+            readTimeoutMs = 3_000,
+        )
+        require(response.status in 200..299) { response.errorMessage() }
+        val envelope = DeviceSyncCodec.json.decodeFromString<DeviceEncryptedEnvelope>(
+            response.body.toString(Charsets.UTF_8),
+        )
+        val plaintext = DeviceSyncCrypto.open(
+            envelope,
+            secret,
+            device.desktopID,
+            DeviceSyncCodec.SNAPSHOT_INFO,
+        )
+        return DeviceSyncCodec.json.decodeFromString<UsageSnapshotDocument>(
+            plaintext.toString(Charsets.UTF_8),
+        )
+    }
+
+    fun redeemResetCredit(device: TrustedDesktopDevice, creditId: String): DeviceRedeemResult {
+        val secret = sharedSecret(device)
+        val timestamp = System.currentTimeMillis() / 1_000
+        val proof = DeviceSyncCrypto.authenticationProof(
+            secret,
+            device.desktopID,
+            DeviceSyncCodec.STATUS_INFO,
+            "redeem:${device.desktopID}:${device.deviceID}:$timestamp",
+        )
+        val requestEnvelope = DeviceSyncCrypto.seal(
+            DeviceSyncCodec.json.encodeToString(
+                DeviceRedeemRequest(
+                    creditId = creditId,
+                    requestedAtEpochSeconds = timestamp,
+                ),
+            ).toByteArray(),
+            secret,
+            device.desktopID,
+            DeviceSyncCodec.REDEEM_INFO,
+        )
+        val response = LocalPairingHttpClient.request(
+            host = device.host,
+            port = device.port,
+            method = "POST",
+            path = "/v2/redeem?desktop=${url(device.desktopID)}" +
+                "&device=${url(device.deviceID)}&ts=$timestamp&proof=${url(proof)}",
+            body = DeviceSyncCodec.json.encodeToString(requestEnvelope).toByteArray(),
+            connectTimeoutMs = 1_500,
+            readTimeoutMs = 8_000,
+        )
+        require(response.status in 200..299) { response.errorMessage() }
+        val envelope = DeviceSyncCodec.json.decodeFromString<DeviceEncryptedEnvelope>(
+            response.body.toString(Charsets.UTF_8),
+        )
+        val plaintext = DeviceSyncCrypto.open(
+            envelope,
+            secret,
+            device.desktopID,
+            DeviceSyncCodec.REDEEM_INFO,
+        )
+        return DeviceSyncCodec.json.decodeFromString<DeviceRedeemResult>(
+            plaintext.toString(Charsets.UTF_8),
+        )
+    }
+
+    fun acknowledgeWipe(device: TrustedDesktopDevice) {
+        val secret = sharedSecret(device)
         val timestamp = System.currentTimeMillis() / 1_000
         val acknowledgement = DeviceWipeAcknowledgement(
             desktopID = device.desktopID,
@@ -197,10 +259,7 @@ class DevicePairingClient(
     }
 
     fun acknowledgeSync(device: TrustedDesktopDevice, syncID: String) {
-        val secret = DeviceSyncCrypto.sharedSecret(
-            DeviceSyncCrypto.restorePrivateKey(device.privateKey),
-            DeviceSyncCodec.base64URLDecode(device.desktopPublicKey),
-        )
+        val secret = sharedSecret(device)
         val timestamp = System.currentTimeMillis() / 1_000
         val acknowledgement = DeviceSyncAcknowledgement(
             desktopID = device.desktopID,
@@ -225,10 +284,7 @@ class DevicePairingClient(
     }
 
     fun unlink(device: TrustedDesktopDevice) {
-        val secret = DeviceSyncCrypto.sharedSecret(
-            DeviceSyncCrypto.restorePrivateKey(device.privateKey),
-            DeviceSyncCodec.base64URLDecode(device.desktopPublicKey),
-        )
+        val secret = sharedSecret(device)
         val timestamp = System.currentTimeMillis() / 1_000
         val request = DeviceUnlinkRequest(
             desktopID = device.desktopID,
@@ -258,10 +314,7 @@ class DevicePairingClient(
         syncID: String,
         envelope: DeviceEncryptedEnvelope,
     ): DeviceSyncPayload {
-        val secret = DeviceSyncCrypto.sharedSecret(
-            DeviceSyncCrypto.restorePrivateKey(device.privateKey),
-            DeviceSyncCodec.base64URLDecode(device.desktopPublicKey),
-        )
+        val secret = sharedSecret(device)
         return DeviceSyncCodec.decodeResyncPayload(
             DeviceSyncCrypto.open(
                 envelope,
@@ -271,6 +324,12 @@ class DevicePairingClient(
             ),
         )
     }
+
+    private fun sharedSecret(device: TrustedDesktopDevice): ByteArray =
+        DeviceSyncCrypto.sharedSecret(
+            DeviceSyncCrypto.restorePrivateKey(device.privateKey),
+            DeviceSyncCodec.base64URLDecode(device.desktopPublicKey),
+        )
 
     private fun url(value: String): String =
         URLEncoder.encode(value, Charsets.UTF_8.name())

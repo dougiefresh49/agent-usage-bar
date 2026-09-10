@@ -1,7 +1,5 @@
 package com.agentusagebar.android.data.sync
 
-import com.agentusagebar.android.data.model.ConnectedCredentials
-import com.agentusagebar.android.data.model.CursorAuth
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
@@ -147,7 +145,7 @@ class DeviceSyncCodecTest {
     }
 
     @Test
-    fun decodesV2ConnectionsWithCodexAndCursorCliTokens() {
+    fun v2PayloadWithTokensDecodesAndTokensAreNotStoredOnTrustedDevice() {
         val json = """
             {
               "version": 2,
@@ -167,11 +165,25 @@ class DeviceSyncCodecTest {
         val payload = DeviceSyncCodec.decodePayload(json.toByteArray(), nowSeconds = 200)
         val connections = payload.connections!!
 
-        assertEquals(2, payload.version)
         assertEquals("codex-cli", connections.codexAccessToken)
-        assertEquals("acct-1", connections.codexAccountId)
-        assertEquals("cursor-cli", connections.cursorAccessToken)
+        assertEquals("paste-openai", connections.openAISessionToken)
         assertEquals(6, connections.count)
+
+        val device = TrustedDesktopDevice(
+            desktopID = "desktop-1",
+            desktopName = "Mac",
+            host = "100.64.1.5",
+            port = 48_321,
+            desktopPublicKey = "pk",
+            deviceID = "device-1",
+            deviceName = "Pixel",
+            privateKey = "sk",
+            pairedAtEpochMs = 1L,
+        )
+        assertNull(device.openAITokenHash)
+        assertNull(device.cursorTokenHash)
+        assertNull(device.elevenLabsKeyHash)
+        assertNull(DeviceSyncCodec.credentialHash(null))
     }
 
     @Test
@@ -215,70 +227,20 @@ class DeviceSyncCodecTest {
     }
 
     @Test
-    fun phonePrecedenceHelpersPreferCliTokens() {
-        val both = ConnectedCredentials(
-            openAISessionToken = "paste-openai",
-            cursorSessionToken = "paste-cursor",
-            codexAccessToken = "codex-cli",
-            codexAccountId = "acct-1",
-            cursorAccessToken = "cursor-cli",
+    fun sealThenOpenRoundTripsSnapshotInfo() {
+        val secret = ByteArray(32) { it.toByte() }
+        val envelope = DeviceSyncCrypto.seal(
+            "snapshot-body".toByteArray(),
+            secret,
+            "desktop-1",
+            DeviceSyncCodec.SNAPSHOT_INFO,
         )
-
-        assertEquals("codex-cli", both.openAIBearer)
-        assertEquals("acct-1", both.openAIAccountId)
-        assertEquals(CursorAuth.CliToken("cursor-cli"), both.cursorAuth)
-
-        val pastedOnly = ConnectedCredentials(
-            openAISessionToken = "paste-openai",
-            cursorSessionToken = "paste-cursor",
+        val opened = DeviceSyncCrypto.open(
+            envelope,
+            secret,
+            "desktop-1",
+            DeviceSyncCodec.SNAPSHOT_INFO,
         )
-
-        assertEquals("paste-openai", pastedOnly.openAIBearer)
-        assertNull(pastedOnly.openAIAccountId)
-        assertEquals(CursorAuth.Cookie("paste-cursor"), pastedOnly.cursorAuth)
-    }
-
-    @Test
-    fun mergingImportedV1LeavesExistingV2FieldsUntouched() {
-        val current = ConnectedCredentials(
-            openAISessionToken = "old-paste",
-            codexAccessToken = "keep-cli",
-            codexAccountId = "keep-acct",
-            cursorAccessToken = "keep-cursor-cli",
-        )
-        val imported = DeviceSyncConnections(
-            openAISessionToken = "new-paste",
-            cursorSessionToken = "new-cursor-paste",
-        )
-
-        val merged = current.mergingImported(imported)
-
-        assertEquals("new-paste", merged.openAISessionToken)
-        assertEquals("new-cursor-paste", merged.cursorSessionToken)
-        assertEquals("keep-cli", merged.codexAccessToken)
-        assertEquals("keep-acct", merged.codexAccountId)
-        assertEquals("keep-cursor-cli", merged.cursorAccessToken)
-    }
-
-    @Test
-    fun mergingImportedV2OverwritesOwnKeysOnly() {
-        val current = ConnectedCredentials(
-            openAISessionToken = "old-paste",
-            elevenLabsAPIKey = "keep-el",
-            codexAccessToken = "old-cli",
-        )
-        val imported = DeviceSyncConnections(
-            codexAccessToken = "new-cli",
-            codexAccountId = "new-acct",
-            cursorAccessToken = "new-cursor-cli",
-        )
-
-        val merged = current.mergingImported(imported)
-
-        assertEquals("old-paste", merged.openAISessionToken)
-        assertEquals("keep-el", merged.elevenLabsAPIKey)
-        assertEquals("new-cli", merged.codexAccessToken)
-        assertEquals("new-acct", merged.codexAccountId)
-        assertEquals("new-cursor-cli", merged.cursorAccessToken)
+        assertEquals("snapshot-body", opened.toString(Charsets.UTF_8))
     }
 }

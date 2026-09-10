@@ -40,15 +40,15 @@ fun SetupScreen(
     ) {
         Text("Welcome", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "Connect providers first, then tweak appearance. Notification thresholds appear in Settings after each provider is added.",
+            "Pair this phone with the Agent Usage Bar app on your Mac. The phone shows the Mac’s usage snapshot. Provider logins stay on the Mac.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         HorizontalDivider()
-        Text("1. Providers", style = MaterialTheme.typography.titleMedium)
+        Text("1. Pair with your Mac", style = MaterialTheme.typography.titleMedium)
         Text(
-            "After you continue, use Settings → Providers to sign in with Claude or paste OpenAI / Cursor session tokens. Tokens stay on this phone only.",
+            "After you continue, open Settings → Devices, then scan the QR code from the Mac’s Add Device sheet. Both devices need to be on the tailnet.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -92,7 +92,7 @@ fun SetupScreen(
         HorizontalDivider()
         Text("3. Notifications", style = MaterialTheme.typography.titleMedium)
         Text(
-            "Per-provider alert thresholds show up in Settings → Notifications once that provider is connected.",
+            "Per-provider alert thresholds show up in Settings → Notifications once that provider is configured on the Mac.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

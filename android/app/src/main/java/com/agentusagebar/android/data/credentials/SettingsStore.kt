@@ -14,6 +14,7 @@ import com.agentusagebar.android.data.model.UsageProvider
 import com.agentusagebar.android.data.model.UsageTextSize
 import com.agentusagebar.android.data.sync.DeviceSyncPayload
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(
@@ -72,6 +73,15 @@ class SettingsStore(private val context: Context) {
             cursorAutoThreshold = prefs[KEY_CURSOR_AUTO] ?: 0,
             cursorCreditThreshold = prefs[KEY_CURSOR_CREDIT] ?: 0,
         )
+    }
+
+    suspend fun wipeLegacyCredentialsOnce() {
+        val already = context.settingsDataStore.data.map { prefs ->
+            prefs[KEY_LEGACY_CREDENTIALS_WIPED] == true
+        }.first()
+        if (already) return
+        CredentialsStore(context).wipeLegacyProviderCredentials()
+        context.settingsDataStore.edit { it[KEY_LEGACY_CREDENTIALS_WIPED] = true }
     }
 
     suspend fun setPollingMinutes(minutes: Int) {
@@ -231,5 +241,7 @@ class SettingsStore(private val context: Context) {
         private val KEY_CURSOR_CREDIT = intPreferencesKey("threshold_cursor_credit")
         private val KEY_LEGACY_5H = intPreferencesKey("threshold_5h")
         private val KEY_LEGACY_7D = intPreferencesKey("threshold_7d")
+        private val KEY_LEGACY_CREDENTIALS_WIPED =
+            booleanPreferencesKey("legacy_credentials_wiped_v3")
     }
 }
