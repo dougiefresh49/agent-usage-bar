@@ -6,6 +6,7 @@ import com.agentusagebar.android.data.credentials.SettingsStore
 import com.agentusagebar.android.data.credentials.TokenNormalizer
 import com.agentusagebar.android.data.model.AppUsageSnapshot
 import com.agentusagebar.android.data.model.ClaudeUsageResponse
+import com.agentusagebar.android.data.model.CursorAuth
 import com.agentusagebar.android.data.model.CursorUsageResponse
 import com.agentusagebar.android.data.model.ElevenLabsSubscriptionResponse
 import com.agentusagebar.android.data.model.OpenAIResetCreditsResponse
@@ -55,6 +56,11 @@ class UsageRepository(
 ) {
     private val appContext = context.applicationContext
     private val trustedDeviceMutex = Mutex()
+
+    private var claudeProfileFetchedAtEpochMs: Long = 0L
+    private var cursorPlanInfoFetchedAtEpochMs: Long = 0L
+    private val claudeProfileFetchLock = Any()
+    private val cursorPlanInfoFetchLock = Any()
 
     private val _snapshot = MutableStateFlow(
         AppUsageSnapshot(
@@ -117,6 +123,8 @@ class UsageRepository(
     suspend fun signOutClaude() = withContext(Dispatchers.IO) {
         api.signOutClaude()
         _claudeEmail.value = null
+        claudeProfileFetchedAtEpochMs = 0L
+        _snapshot.update { it.copy(claudeProfile = null) }
         refreshConfiguredFlags()
         publishWidgets()
     }
@@ -150,7 +158,11 @@ class UsageRepository(
 
     suspend fun clearCursorToken() = withContext(Dispatchers.IO) {
         val current = credentialsStore.loadConnected()
-        credentialsStore.saveConnected(current.copy(cursorSessionToken = null))
+        credentialsStore.saveConnected(
+            current.copy(cursorSessionToken = null, cursorAccessToken = null),
+        )
+        cursorPlanInfoFetchedAtEpochMs = 0L
+        _snapshot.update { it.copy(cursorPlanInfo = null) }
         refreshConfiguredFlags()
         publishWidgets()
     }
@@ -198,20 +210,7 @@ class UsageRepository(
 
     private suspend fun applyImportedPayload(payload: DeviceSyncPayload) {
         payload.connections?.let { imported ->
-            val current = credentialsStore.loadConnected()
-            credentialsStore.saveConnected(
-                current.copy(
-                    openAISessionToken = imported.openAISessionToken
-                        ?.takeIf { it.isNotBlank() }
-                        ?: current.openAISessionToken,
-                    cursorSessionToken = imported.cursorSessionToken
-                        ?.takeIf { it.isNotBlank() }
-                        ?: current.cursorSessionToken,
-                    elevenLabsAPIKey = imported.elevenLabsAPIKey
-                        ?.takeIf { it.isNotBlank() }
-                        ?: current.elevenLabsAPIKey,
-                ),
-            )
+            credentialsStore.applyImportedConnections(imported)
         }
         settingsStore.applyDeviceSync(payload)
     }
@@ -418,6 +417,7 @@ class UsageRepository(
                         updatedAtEpochMs = System.currentTimeMillis(),
                     ),
                 )
+                maybeRefreshClaudeProfile()
             }
             .onFailure { error ->
                 updateProvider(
@@ -488,6 +488,7 @@ class UsageRepository(
                         updatedAtEpochMs = System.currentTimeMillis(),
                     ),
                 )
+                maybeRefreshCursorPlanInfo()
             }
             .onFailure { error ->
                 updateProvider(
@@ -536,6 +537,47 @@ class UsageRepository(
             }
     }
 
+    private fun maybeRefreshClaudeProfile() {
+        val now = System.currentTimeMillis()
+        synchronized(claudeProfileFetchLock) {
+            if (claudeProfileFetchedAtEpochMs != 0L &&
+                now - claudeProfileFetchedAtEpochMs < ONE_HOUR_MS
+            ) {
+                return
+            }
+            // Stamp the attempt before the call so failures and in-flight
+            // concurrent refreshes still honor at-most-once-per-hour.
+            claudeProfileFetchedAtEpochMs = now
+        }
+        api.fetchClaudeProfile()
+            .onSuccess { profile ->
+                _snapshot.update { it.copy(claudeProfile = profile) }
+            }
+        // Soft failure: keep prior profile, never surface as provider error.
+    }
+
+    private fun maybeRefreshCursorPlanInfo() {
+        if (credentialsStore.loadConnected().cursorAuth !is CursorAuth.CliToken) {
+            return
+        }
+        val now = System.currentTimeMillis()
+        synchronized(cursorPlanInfoFetchLock) {
+            if (cursorPlanInfoFetchedAtEpochMs != 0L &&
+                now - cursorPlanInfoFetchedAtEpochMs < ONE_HOUR_MS
+            ) {
+                return
+            }
+            // Stamp the attempt before the call so failures and in-flight
+            // concurrent refreshes still honor at-most-once-per-hour.
+            cursorPlanInfoFetchedAtEpochMs = now
+        }
+        api.fetchCursorPlanInfo()
+            .onSuccess { planInfo ->
+                _snapshot.update { it.copy(cursorPlanInfo = planInfo) }
+            }
+        // Soft failure: keep prior plan info.
+    }
+
     private fun refreshConfiguredFlags() {
         _snapshot.update { current ->
             current.copy(
@@ -567,6 +609,7 @@ class UsageRepository(
     }
 
     companion object {
+        private val ONE_HOUR_MS = 60L * 60 * 1000
         private val FIVE_HOURS_MS = 5L * 60 * 60 * 1000
         private val SEVEN_DAYS_MS = 7L * 24 * 60 * 60 * 1000
         private val THIRTY_DAYS_MS = 30L * 24 * 60 * 60 * 1000
