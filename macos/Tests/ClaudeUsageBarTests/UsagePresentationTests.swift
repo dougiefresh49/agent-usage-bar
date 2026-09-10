@@ -308,7 +308,9 @@ final class UsagePresentationTests: XCTestCase {
 
         XCTAssertEqual(fiveHour.geometry?.duration, UsageWindowGeometry.claudeSessionDuration)
         XCTAssertEqual(fiveHour.geometry?.usedPercent, 32.4)
+        XCTAssertEqual(fiveHour.geometry?.resetsAt, fiveHour.resetDate)
         XCTAssertEqual(sevenDay.geometry?.duration, UsageWindowGeometry.claudeWeeklyDuration)
+        XCTAssertEqual(sevenDay.geometry?.resetsAt, sevenDay.resetDate)
         XCTAssertEqual(opus.geometry?.duration, UsageWindowGeometry.claudeWeeklyDuration)
         XCTAssertEqual(weeklyScoped.geometry?.duration, UsageWindowGeometry.claudeWeeklyDuration)
         XCTAssertEqual(sessionScoped.geometry?.duration, UsageWindowGeometry.claudeSessionDuration)
@@ -350,7 +352,9 @@ final class UsagePresentationTests: XCTestCase {
 
         XCTAssertEqual(primary.geometry?.duration, 5 * 60 * 60)
         XCTAssertEqual(primary.geometry?.usedPercent, 32.4)
+        XCTAssertEqual(primary.geometry?.resetsAt, Date(timeIntervalSince1970: resetAt))
         XCTAssertEqual(secondary.geometry?.duration, 7 * 24 * 60 * 60)
+        XCTAssertEqual(secondary.geometry?.resetsAt, Date(timeIntervalSince1970: resetAt))
         XCTAssertNil(credits.geometry)
     }
 

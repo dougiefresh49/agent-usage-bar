@@ -744,6 +744,16 @@ private struct DetailMetricCapsuleCell: View {
                     )
                     .frame(height: 4)
             }
+
+            if let restores = metric?.restoresLine(now: now) {
+                Text(restores)
+                    .usageFont(.supporting)
+                    .foregroundStyle(.secondary)
+            } else if let resetDate = metric?.resetDate {
+                Text("Resets \(resetDate, style: .relative)")
+                    .usageFont(.supporting)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity)
@@ -820,7 +830,7 @@ private struct UsageOrbitView: View {
         }
         .frame(width: 120, height: 120)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(orbitAccessibilityLabel(time: time, countdown: countdown))
+        .accessibilityLabel(orbitAccessibilityLabel(time: time, countdown: countdown, now: now))
     }
 
     private func orbitRing(
@@ -883,11 +893,27 @@ private struct UsageOrbitView: View {
 
     private func orbitAccessibilityLabel(
         time: String,
-        countdown: Double
+        countdown: Double,
+        now: Date
     ) -> String {
-        let values = metrics
-            .map { "\($0.label) \($0.accessibilityValue)" }
-            .joined(separator: ", ")
+        let values = metrics.map { metric -> String in
+            if let remaining = metric.remainingHeadlineText {
+                var parts = [remaining]
+                if let paceImage = metric.paceSystemImage(now: now) {
+                    switch paceImage {
+                    case "arrow.up.right": parts.append("ahead of pace")
+                    case "arrow.down.right": parts.append("under pace")
+                    default: parts.append("on pace")
+                    }
+                }
+                if let restores = metric.restoresLine(now: now) {
+                    parts.append(restores)
+                }
+                return "\(metric.label) \(parts.joined(separator: ", "))"
+            }
+            return "\(metric.label) \(metric.accessibilityValue)"
+        }
+        .joined(separator: ", ")
         return "\(values), \(Int(round(countdown * 100))) percent of reset time remaining, \(time)"
     }
 }

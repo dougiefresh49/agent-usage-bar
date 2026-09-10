@@ -605,9 +605,9 @@ enum UsagePresentationMetrics {
         geometryDuration: TimeInterval?
     ) -> UsagePresentationMetric {
         let geometry: UsageWindowGeometry?
-        if let geometryDuration, geometryDuration > 0 {
+        if let percent, let geometryDuration, geometryDuration > 0 {
             geometry = UsageWindowGeometry(
-                usedPercent: percent ?? 0,
+                usedPercent: percent,
                 resetsAt: resetDate,
                 duration: geometryDuration
             )
