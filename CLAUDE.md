@@ -1,4 +1,4 @@
-<!-- fleet corefile: CLAUDE-base.md @ 8826d401d6bdc0a30e01303c403395b4dde72ce3
+<!-- fleet corefile: CLAUDE-base.md @ 4d6434180db4a996ec74c0d6604b1917b914de83
      Copy to a new repo's root as CLAUDE.md next to the instantiated
      AGENTS.md. This layer is main-session/orchestrator concerns only.
      Everything shared lives in AGENTS.md so delegated prompts can shrink

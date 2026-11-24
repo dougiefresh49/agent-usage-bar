@@ -1,4 +1,4 @@
-<!-- fleet corefile: AGENTS-base.md @ 8826d401d6bdc0a30e01303c403395b4dde72ce3
+<!-- fleet corefile: AGENTS-base.md @ 4d6434180db4a996ec74c0d6604b1917b914de83
      Copy to a new repo's root as AGENTS.md and fill every [FILL-IN] slot;
      delete slots that don't apply. The shared sections ship as-is,
      except the glossary's repo entries and the gate's standing sign-offs,
@@ -421,8 +421,8 @@ none yet.
 ## Keep going once a run is approved
 
 Seven threads had me telling an agent not to stop and ask, five of them
-in my own words, all after CLAUDE.md's "Briefing opus-5.5" landed (fleet
-`docs/steer-audit-2026-11.md`; `docs/decisions.md` row 45).
+in my own words, all after the roster's "Briefing opus-5.5" landed (fleet
+`docs/steer-audit-2026-11.md` and fleet `docs/decisions.md` row 45).
 
 - An approved run stops to ask only at the config-mutation gate or at an
   irreversible step the task doesn't name. Stop points the task names
@@ -614,9 +614,9 @@ GOOD (room-of-devs #83, 2026-08-31, the claim comment as written):
   re-running or cancelling a Release run are all live mutations. Report
   the option; the push is Doug's. Workflow files are code: they change
   through a PR like anything else.
-- GitHub issues are the spec when the task names one. The
-  `free-rein`/`blocked` labels from the glossary apply once an issue
-  carries them; this repo has no other label scheme.
+- GitHub issues are the spec when the task names one. The `state/*`
+  labels from the glossary apply once an issue carries them; this repo
+  has no other label scheme.
 - Research and plans live in `docs/plans/`, one markdown file per topic,
   dated in its first lines.
 - Durable knowledge lives in AGENTS.md/CLAUDE.md and decisions in
